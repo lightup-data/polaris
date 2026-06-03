@@ -6,6 +6,21 @@ We're building the first feature for the Lightup project — a system that **cap
 
 The system is backed by a **cloud service** that acts as the central broker and system of record. All state is persisted there. Multiple clients (Claude Code sessions, Slack, dashboards) connect to the cloud service to collaborate.
 
+## Participants: Humans and Agents
+
+Every participant in collab — whether human or AI agent — has an **identity** with a type prefix:
+
+- `user:manu`, `user:krishna`, `user:priya` — humans
+- `agent:test-writer`, `agent:security-reviewer`, `agent:docs-writer` — agents
+
+Agents are **first-class participants**. They can be drivers or advisors, same as humans. Collab treats them identically — the cloud service doesn't distinguish between human and agent clients. The difference is purely in how they're labeled in the log and how they connect.
+
+**Spawning**: humans create sessions and start agents out of band (not managed by collab in v1).
+
+**Privileges & HITL**: agent permissions, approval flows, and escalation paths are configured outside collab. Collab's job is context pooling, capture, injection, and broadcast — not authorization.
+
+**Addressed messaging**: every injection specifies a **target** — a specific session within the project. No blind broadcast into all sessions. An advisor (human or agent) must address their input to the session that needs it.
+
 ## Data Model: Projects, Sessions, Drivers, Advisors
 
 ### Projects
@@ -18,11 +33,11 @@ A project contains one or more **sessions**, each representing a concurrent work
 
 ### Drivers
 
-Each session has **one driver** — the person actively building in Claude Code. Multiple sessions in a project can have concurrent drivers (one per session). A driver's activity (prompts, Claude responses, tool calls) is captured and broadcast.
+Each session has **one driver** — a human or agent actively building in Claude Code. Multiple sessions in a project can have concurrent drivers (one per session). A driver's activity (prompts, Claude responses, tool calls) is captured and broadcast.
 
 ### Advisors
 
-**Advisors** contribute context via Slack (or another client). Advisory messages are injected into the relevant driver's Claude Code session. Multiple advisors can participate simultaneously. An advisor posts in the project's Slack channel, tagging which session they're advising (or advising the project generally).
+**Advisors** (human or agent) contribute context via Slack or another client. Advisory messages are injected into a **specific target session's** driver. Multiple advisors can participate simultaneously. Every injection must specify its target session.
 
 ### Context Pooling
 
@@ -42,25 +57,41 @@ The driver role on a session can transfer from one person to another:
 4. New driver's session is seeded with context from project history
 5. Slack channel shows the transition
 
-## Example: Project `pj` with Concurrent Drivers
-
-1. **Manu** creates project `pj` with session `fxm`, connects as driver of `fxm`
-2. **Krishna** creates session `fxk` under project `pj`, connects as driver of `fxk`
-3. Both work concurrently — Slack `#pj` shows an interleaved, attributed log:
+## Example: Project `pj` with Humans + Agents
 
 ```
-[manu/fxm → cc]       "Let's implement the auth middleware"
-[cc → manu/fxm]       "I'll create src/middleware/auth.ts..."
-[krishna/fxk → cc]    "Set up the database schema for users"
-[cc → krishna/fxk]    "Creating migrations/001_users.sql..."
-[advisor/priya → pj]  "Remember we need GDPR compliance on the users table"
-[cc → krishna/fxk]    "Good point from Priya. Adding data retention fields..."
-[manu/fxm → cc]       "What has Krishna done on fxk so far?"
-[cc → manu/fxm]       "Krishna has set up the users schema with GDPR fields..."
+Project pj
+├── session fxm      driver: user:manu              auth middleware
+├── session fxk      driver: user:krishna            database schema
+├── session tests    driver: agent:test-writer       tests for fxm + fxk
+│
+├── advisor: agent:security-reviewer   (watches project, advises sessions)
+└── advisor: user:priya                (via Slack)
 ```
 
-4. Manu finishes `fxm`, hands off `fxk` to himself to continue Krishna's work
-5. The Slack log is continuous and complete across all of it
+1. **Manu** creates project `pj` with session `fxm`, connects as driver
+2. **Krishna** creates session `fxk`, connects as driver
+3. `agent:test-writer` is started out of band, drives session `tests`
+4. `agent:security-reviewer` connects as an advisor, watching project events
+5. Slack `#pj` shows an interleaved, attributed log:
+
+```
+[user:manu/fxm → cc]                "Let's implement the auth middleware"
+[cc → user:manu/fxm]                "I'll create src/middleware/auth.ts..."
+[user:krishna/fxk → cc]             "Set up the database schema for users"
+[cc → user:krishna/fxk]             "Creating migrations/001_users.sql..."
+[user:priya → fxk]                  "Remember we need GDPR compliance on the users table"
+[cc → user:krishna/fxk]             "Good point from Priya. Adding data retention fields..."
+[agent:security-reviewer → fxm]     "This auth endpoint needs rate limiting"
+[cc → user:manu/fxm]                "Adding rate limiting middleware..."
+[agent:test-writer/tests → cc]      "Writing integration tests for auth middleware"
+[cc → agent:test-writer/tests]      "Created tests/auth.test.ts..."
+[user:manu/fxm → cc]                "What has Krishna done on fxk so far?"
+[cc → user:manu/fxm]                "Krishna has set up the users schema with GDPR fields..."
+```
+
+6. Manu finishes `fxm`, hands off `fxk` to himself to continue Krishna's work
+7. The Slack log is continuous and complete — humans, agents, handoffs, all in one stream
 
 ## Architecture: Cloud-Backed with Local Clients + Slack Bridge
 
@@ -79,7 +110,7 @@ The driver role on a session can transfer from one person to another:
 │    GET  /projects/:proj/sessions/:sess  metadata      │
 │    POST /projects/:proj/sessions/:sess/events   push  │
 │    GET  /projects/:proj/sessions/:sess/events   SSE   │
-│    POST /projects/:proj/sessions/:sess/inject   inject│
+│    POST /projects/:proj/sessions/:sess/inject   inject │
 │    GET  /projects/:proj/sessions/:sess/messages hist. │
 │    POST /projects/:proj/sessions/:sess/handoff  rel.  │
 │    POST /projects/:proj/sessions/:sess/driver   claim │
@@ -159,7 +190,7 @@ Bridges one project to one Slack channel. Shows all sessions' activity.
 ```
 
 - **Project → Slack**: receives events from all sessions via project-level WS. Posts attributed, formatted messages (`[manu/fxm → cc]`, `[cc → krishna/fxk]`). `UserPromptSubmit` and `Stop` events posted; tool calls skipped or collapsed.
-- **Slack → Project**: advisor posts in `#pj`. Messages can target a specific session (e.g., `@fxk remember GDPR`) or go to all sessions. Injected into the target driver's Claude Code session.
+- **Slack → Session**: advisor posts in `#pj` targeting a specific session (e.g., `@fxk remember GDPR`). The message is injected into that session's driver only. Every injection requires a target.
 
 ### Data Flow
 
@@ -205,7 +236,7 @@ tsconfig.json
 ## Implementation Phases
 
 ### Phase 1: Types + Persistence
-- `src/types.ts` — shared types, zod schemas: hook payloads, inject/reply messages, `CollabEvent` envelope, project model, session model (project, name, driver, created_at)
+- `src/types.ts` — shared types, zod schemas: participant identity (`user:name` / `agent:name`), hook payloads, inject/reply messages (with required `target` session), `CollabEvent` envelope, project model, session model (project, name, driver, created_at)
 - `src/service/db.ts` — SQLite layer:
   - Projects table: `name` PK, `created_at`
   - Sessions table: `name`, `project` FK, `driver`, `created_at`
@@ -236,23 +267,25 @@ tsconfig.json
 ### Phase 4: Slack Bridge
 - `src/slack/bridge.ts` — connects to cloud via project-level WS and to Slack via Socket Mode:
   - All session events → attributed, formatted Slack posts in `#project`
-  - Slack messages → injected into target session (or all sessions)
+  - Slack messages → injected into target session (must specify target)
   - Handoff events → Slack notification
 - `src/slack/format.ts` — markdown → Slack mrkdwn, event → attributed message
 - `tests/slack.test.ts`, `tests/format.test.ts`
 
 ## Key Design Decisions
 
-1. **Project-level context pooling** — all events persisted under the project. Shared context across sessions. Sibling session activity available on-demand, not auto-injected.
-2. **One driver per session, multiple sessions per project** — concurrent drivers working on different workstreams under one project
-3. **Advisors inject in real-time** — advisory Slack messages are pushed into the target driver's session immediately
-4. **One Slack channel per project** — `#pj` shows interleaved, attributed log from all sessions. Advisors post here.
-5. **Cloud service is the source of truth** — all events persisted, all clients are thin relays
-6. **Slack Socket Mode** — no public URL needed for v1
-7. **WebSocket at two levels** — project-level (aggregated, for Slack bridge) and session-level (for local clients)
-8. **On-demand cross-session context** — `collab_context` tool lets a driver ask "what happened in session X?" without noise from auto-injection
-9. **SQLite via bun:sqlite** — zero-dep persistence for v1
-10. **Flat names** — project names globally unique, session names unique within a project
+1. **Agents are first-class** — same identity model as humans (`agent:name` vs `user:name`), can be drivers or advisors. Spawned out of band. Privileges/HITL managed externally.
+2. **Addressed messaging** — every injection targets a specific session. No blind broadcasts.
+3. **Project-level context pooling** — all events persisted under the project. Shared context across sessions. Sibling activity available on-demand, not auto-injected.
+4. **One driver per session, multiple sessions per project** — concurrent human and agent drivers on different workstreams
+5. **Advisors inject in real-time** — advisory messages pushed into the target session immediately
+6. **One Slack channel per project** — `#pj` shows interleaved, attributed log from all sessions (human and agent)
+7. **Cloud service is the source of truth** — all events persisted, all clients are thin relays
+8. **Slack Socket Mode** — no public URL needed for v1
+9. **WebSocket at two levels** — project-level (aggregated, for Slack bridge) and session-level (for local clients)
+10. **On-demand cross-session context** — `collab_context` tool lets a driver ask "what happened in session X?" without noise from auto-injection
+11. **SQLite via bun:sqlite** — zero-dep persistence for v1
+12. **Flat names** — project names globally unique, session names unique within a project
 
 ## Verification
 
