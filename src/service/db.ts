@@ -111,7 +111,7 @@ export async function clearDriver(sql: Sql, project: string, session: string): P
 export async function pushEvent(sql: Sql, event: CollabEvent): Promise<void> {
   await sql`
     INSERT INTO events (id, project, session, timestamp, source, sender, payload)
-    VALUES (${event.id}, ${event.project}, ${event.session}, ${event.timestamp}, ${event.source}, ${event.sender}, ${JSON.stringify(event.payload)})
+    VALUES (${event.id}, ${event.project}, ${event.session}, ${event.timestamp}, ${event.source}, ${event.sender}, ${sql.json(event.payload)})
   `;
 }
 
