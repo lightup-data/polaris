@@ -1,163 +1,157 @@
-import { Database } from "bun:sqlite";
+import postgres from "postgres";
 import type { CollabEvent, Project, Session, ParticipantId } from "../types";
 
-export function createDb(path?: string): Database {
-  const db = new Database(path ?? ":memory:");
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
+export type Sql = postgres.Sql;
 
-  db.exec(`
+export async function createDb(connectionString?: string): Promise<Sql> {
+  const sql = postgres(connectionString ?? process.env.DATABASE_URL ?? "postgres://collab:collab@localhost:5432/collab");
+
+  await sql`
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
-  `);
+  `;
 
-  db.exec(`
+  await sql`
     CREATE TABLE IF NOT EXISTS sessions (
       name TEXT NOT NULL,
       project TEXT NOT NULL REFERENCES projects(name),
       driver TEXT,
-      created_at TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (project, name)
     )
-  `);
+  `;
 
-  db.exec(`
+  await sql`
     CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY,
       project TEXT NOT NULL,
       session TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
+      timestamp TIMESTAMPTZ NOT NULL,
       source TEXT NOT NULL,
       sender TEXT NOT NULL,
-      payload TEXT NOT NULL
+      payload JSONB NOT NULL
     )
-  `);
+  `;
 
-  db.exec(`
+  await sql`
     CREATE INDEX IF NOT EXISTS idx_events_project ON events(project, timestamp)
-  `);
+  `;
 
-  db.exec(`
+  await sql`
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(project, session, timestamp)
-  `);
+  `;
 
-  return db;
+  return sql;
 }
 
-export function createProject(db: Database, name: string): Project {
-  const created_at = new Date().toISOString();
-  db.run("INSERT INTO projects (name, created_at) VALUES (?, ?)", [name, created_at]);
-  return { name, created_at };
+export async function createProject(sql: Sql, name: string): Promise<Project> {
+  const [row] = await sql`
+    INSERT INTO projects (name) VALUES (${name}) RETURNING name, created_at
+  `;
+  return { name: row.name, created_at: row.created_at.toISOString() };
 }
 
-export function getProject(db: Database, name: string): Project | null {
-  const row = db.query("SELECT name, created_at FROM projects WHERE name = ?").get(name) as
-    | { name: string; created_at: string }
-    | null;
-  return row;
+export async function getProject(sql: Sql, name: string): Promise<Project | null> {
+  const [row] = await sql`
+    SELECT name, created_at FROM projects WHERE name = ${name}
+  `;
+  if (!row) return null;
+  return { name: row.name, created_at: row.created_at.toISOString() };
 }
 
-export function createSession(
-  db: Database,
+export async function createSession(
+  sql: Sql,
   project: string,
   name: string,
   driver: ParticipantId | null
-): Session {
-  const created_at = new Date().toISOString();
-  db.run("INSERT INTO sessions (name, project, driver, created_at) VALUES (?, ?, ?, ?)", [
-    name,
-    project,
-    driver,
-    created_at,
-  ]);
-  return { name, project, driver, created_at };
+): Promise<Session> {
+  const [row] = await sql`
+    INSERT INTO sessions (name, project, driver)
+    VALUES (${name}, ${project}, ${driver})
+    RETURNING name, project, driver, created_at
+  `;
+  return {
+    name: row.name,
+    project: row.project,
+    driver: row.driver,
+    created_at: row.created_at.toISOString(),
+  };
 }
 
-export function getSession(db: Database, project: string, name: string): Session | null {
-  const row = db
-    .query("SELECT name, project, driver, created_at FROM sessions WHERE project = ? AND name = ?")
-    .get(project, name) as { name: string; project: string; driver: string | null; created_at: string } | null;
-  return row;
+export async function getSession(sql: Sql, project: string, name: string): Promise<Session | null> {
+  const [row] = await sql`
+    SELECT name, project, driver, created_at FROM sessions
+    WHERE project = ${project} AND name = ${name}
+  `;
+  if (!row) return null;
+  return {
+    name: row.name,
+    project: row.project,
+    driver: row.driver,
+    created_at: row.created_at.toISOString(),
+  };
 }
 
-export function setDriver(db: Database, project: string, session: string, driver: ParticipantId): void {
-  db.run("UPDATE sessions SET driver = ? WHERE project = ? AND name = ?", [driver, project, session]);
+export async function setDriver(sql: Sql, project: string, session: string, driver: ParticipantId): Promise<void> {
+  await sql`
+    UPDATE sessions SET driver = ${driver}
+    WHERE project = ${project} AND name = ${session}
+  `;
 }
 
-export function clearDriver(db: Database, project: string, session: string): void {
-  db.run("UPDATE sessions SET driver = NULL WHERE project = ? AND name = ?", [project, session]);
+export async function clearDriver(sql: Sql, project: string, session: string): Promise<void> {
+  await sql`
+    UPDATE sessions SET driver = NULL
+    WHERE project = ${project} AND name = ${session}
+  `;
 }
 
-export function pushEvent(db: Database, event: CollabEvent): void {
-  db.run(
-    "INSERT INTO events (id, project, session, timestamp, source, sender, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [event.id, event.project, event.session, event.timestamp, event.source, event.sender, JSON.stringify(event.payload)]
-  );
+export async function pushEvent(sql: Sql, event: CollabEvent): Promise<void> {
+  await sql`
+    INSERT INTO events (id, project, session, timestamp, source, sender, payload)
+    VALUES (${event.id}, ${event.project}, ${event.session}, ${event.timestamp}, ${event.source}, ${event.sender}, ${JSON.stringify(event.payload)})
+  `;
 }
 
 function rowToEvent(row: {
   id: string;
   project: string;
   session: string;
-  timestamp: string;
+  timestamp: Date;
   source: string;
   sender: string;
-  payload: string;
+  payload: unknown;
 }): CollabEvent {
   return {
     id: row.id,
     project: row.project,
     session: row.session,
-    timestamp: row.timestamp,
+    timestamp: row.timestamp.toISOString(),
     source: row.source as CollabEvent["source"],
     sender: row.sender as ParticipantId,
-    payload: JSON.parse(row.payload),
+    payload: row.payload as CollabEvent["payload"],
   };
 }
 
-export function getProjectEvents(db: Database, project: string): CollabEvent[] {
-  const rows = db
-    .query("SELECT * FROM events WHERE project = ? ORDER BY timestamp ASC")
-    .all(project) as Array<{
-    id: string;
-    project: string;
-    session: string;
-    timestamp: string;
-    source: string;
-    sender: string;
-    payload: string;
-  }>;
+export async function getProjectEvents(sql: Sql, project: string): Promise<CollabEvent[]> {
+  const rows = await sql`
+    SELECT * FROM events WHERE project = ${project} ORDER BY timestamp ASC
+  `;
   return rows.map(rowToEvent);
 }
 
-export function getSessionEvents(db: Database, project: string, session: string): CollabEvent[] {
-  const rows = db
-    .query("SELECT * FROM events WHERE project = ? AND session = ? ORDER BY timestamp ASC")
-    .all(project, session) as Array<{
-    id: string;
-    project: string;
-    session: string;
-    timestamp: string;
-    source: string;
-    sender: string;
-    payload: string;
-  }>;
+export async function getSessionEvents(sql: Sql, project: string, session: string): Promise<CollabEvent[]> {
+  const rows = await sql`
+    SELECT * FROM events WHERE project = ${project} AND session = ${session} ORDER BY timestamp ASC
+  `;
   return rows.map(rowToEvent);
 }
 
-export function getEventsSince(db: Database, project: string, since: string): CollabEvent[] {
-  const rows = db
-    .query("SELECT * FROM events WHERE project = ? AND timestamp > ? ORDER BY timestamp ASC")
-    .all(project, since) as Array<{
-    id: string;
-    project: string;
-    session: string;
-    timestamp: string;
-    source: string;
-    sender: string;
-    payload: string;
-  }>;
+export async function getEventsSince(sql: Sql, project: string, since: string): Promise<CollabEvent[]> {
+  const rows = await sql`
+    SELECT * FROM events WHERE project = ${project} AND timestamp > ${since} ORDER BY timestamp ASC
+  `;
   return rows.map(rowToEvent);
 }
