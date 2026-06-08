@@ -36,6 +36,18 @@ function getGoogle(): Google {
 }
 
 const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number }>();
+const cliCallbackPorts = new Map<string, number>(); // state → CLI local server port
+
+// If this auth flow was initiated by the CLI, redirect the token to the CLI's local server.
+// Otherwise redirect to the dashboard.
+function authRedirect(c: { redirect: (url: string) => Response }, state: string, token: string): Response {
+  const cliPort = cliCallbackPorts.get(state);
+  if (cliPort) {
+    cliCallbackPorts.delete(state);
+    return c.redirect(`http://127.0.0.1:${cliPort}/callback?token=${token}`);
+  }
+  return c.redirect(`/dashboard?token=${token}`);
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -103,7 +115,7 @@ export function createApp(sql: Sql) {
         org_id: existingUser.org_id,
         participant_id: existingUser.participant_id,
       });
-      return c.redirect(`/dashboard?token=${token}`);
+      return authRedirect(c, state, token);
     }
 
     // 2. Existing org for this domain → auto-join
@@ -113,7 +125,7 @@ export function createApp(sql: Sql) {
       const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
       await createUser(sql, userId, email, name, existingOrg.id, participantId);
       const token = await createToken({ sub: userId, email, name, org_id: existingOrg.id, participant_id: participantId });
-      return c.redirect(`/dashboard?token=${token}`);
+      return authRedirect(c, state, token);
     }
 
     // 3. No org → auto-create from email domain
@@ -128,7 +140,7 @@ export function createApp(sql: Sql) {
     const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
     await createUser(sql, userId, email, name, orgId, participantId);
     const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
-    return c.redirect(`/dashboard?token=${token}`);
+    return authRedirect(c, state, token);
   });
 
   // --- Dashboard ---
@@ -350,7 +362,28 @@ export function createApp(sql: Sql) {
     return c.redirect(`/dashboard?token=${state}`);
   });
 
-  // --- CLI token endpoint ---
+  // --- CLI auth flow ---
+
+  // CLI calls this with a local callback port. We redirect to Google SSO
+  // with state that encodes the CLI callback URL.
+  app.get("/auth/cli", async (c) => {
+    const port = c.req.query("port");
+    if (!port) return c.json({ error: "port is required" }, 400);
+
+    const google = getGoogle();
+    const state = crypto.randomUUID();
+    const codeVerifier = crypto.randomUUID();
+    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now() });
+    // Store CLI callback port in a separate map
+    cliCallbackPorts.set(state, Number(port));
+    const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email", "profile"]);
+    return c.redirect(url.toString());
+  });
+
+  // After Google SSO, if state has a CLI callback port, redirect token there
+  // (This is handled in the main /auth/google/callback by checking cliCallbackPorts)
+
+  // --- Token validation endpoint ---
 
   app.get("/auth/token", async (c) => {
     const token = c.req.query("token");
