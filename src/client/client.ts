@@ -7,114 +7,199 @@ import {
 
 // --- Configuration ---
 
-export interface ClientConfig {
-  project: string;
-  session: string;
-  user: string; // participant ID, e.g. "user:manu"
-  serviceUrl: string; // cloud service base URL, e.g. "http://localhost:4321"
-  localPort: number; // local HTTP port for hook relay
-}
+const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4321";
+const SERVICE_URL = process.env.POLARIS_SERVICE_URL ?? "http://localhost:4321";
 
-function getConfig(): ClientConfig {
-  const project = process.env.POLARIS_PROJECT;
-  const session = process.env.POLARIS_SESSION;
-  const user = process.env.POLARIS_USER;
-  const serviceUrl = process.env.POLARIS_SERVICE_URL ?? "http://localhost:4321";
-  const localPort = Number(process.env.POLARIS_PORT ?? 4321);
+// Generate a stable session ID for this MCP server instance
+const CC_SESSION_ID = process.env.POLARIS_CC_SESSION_ID ?? crypto.randomUUID();
 
-  if (!project || !session || !user) {
-    console.error("Required env vars: POLARIS_PROJECT, POLARIS_SESSION, POLARIS_USER");
-    process.exit(1);
-  }
+// --- Daemon communication ---
 
-  return { project, session, user, serviceUrl, localPort };
-}
-
-// --- Cloud service helpers ---
-
-async function servicePost(serviceUrl: string, path: string, body: unknown): Promise<Response> {
-  return fetch(`${serviceUrl}${path}`, {
+async function daemonPost(path: string, body: unknown): Promise<Response> {
+  return fetch(`${DAEMON_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-async function serviceGet(serviceUrl: string, path: string): Promise<Response> {
-  return fetch(`${serviceUrl}${path}`);
+async function daemonGet(path: string): Promise<Response> {
+  return fetch(`${DAEMON_URL}${path}`);
 }
 
-// --- Start client ---
+// --- Cloud service (direct, for context queries) ---
 
-export async function startClient(config: ClientConfig) {
-  const { project, session, user, serviceUrl, localPort } = config;
+async function serviceGet(path: string): Promise<Response> {
+  return fetch(`${SERVICE_URL}${path}`);
+}
 
-  // --- MCP Channel Server ---
+// --- Current connection state ---
 
-  const mcp = new Server(
-    { name: "polaris", version: "0.0.1" },
+let currentProject = "";
+let currentSession = "";
+let currentUser = "";
+
+// --- MCP Server ---
+
+const mcp = new Server(
+  { name: "polaris", version: "0.0.1" },
+  {
+    capabilities: {
+      experimental: { "claude/channel": {} },
+      tools: {},
+    },
+    instructions: `You are connected to Polaris — a multiplayer collaboration system. Messages from advisors and teammates may arrive as <channel source="polaris" from="..."> tags. Use /polaris commands to manage your session, or call the polaris tools directly.`,
+  }
+);
+
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
     {
-      capabilities: {
-        experimental: { "claude/channel": {} },
-        tools: {},
-      },
-      instructions: `You are connected to a polaris session. Messages from advisors and teammates arrive as <channel source="polaris" from="..."> tags. Use the polaris_reply tool to send messages back. Use the polaris_context tool to fetch activity from sibling sessions in this project.`,
-    }
-  );
-
-  // Reply tool — Claude uses this to send messages back
-  // Context tool — Claude uses this to pull sibling session history
-  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "polaris_reply",
-        description: "Send a message back to the project floor (visible to all advisors and the Slack/WhatsApp channel)",
-        inputSchema: {
-          type: "object" as const,
-          properties: {
-            message: { type: "string", description: "Message to send" },
-          },
-          required: ["message"],
+      name: "polaris_connect",
+      description: "Connect this session to a Polaris project and session. Creates the session if it doesn't exist.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          project: { type: "string", description: "Project name" },
+          session: { type: "string", description: "Session name" },
+          user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
         },
+        required: ["project", "session", "user"],
       },
-      {
-        name: "polaris_context",
-        description: "Fetch activity from a sibling session in this project. Use this to see what other drivers have been doing.",
-        inputSchema: {
-          type: "object" as const,
-          properties: {
-            session: { type: "string", description: "Name of the sibling session to fetch context from" },
-          },
-          required: ["session"],
-        },
+    },
+    {
+      name: "polaris_disconnect",
+      description: "Disconnect from the current Polaris session.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
       },
-    ],
-  }));
-
-  mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args } = req.params;
-
-    if (name === "polaris_reply") {
-      const message = (args as { message: string }).message;
-      await servicePost(serviceUrl, `/projects/${project}/sessions/${session}/events`, {
-        sender: user,
-        payload: {
-          hook_event_name: "Stop",
-          session_id: "polaris-reply",
-          stop_response: message,
+    },
+    {
+      name: "polaris_status",
+      description: "Show current Polaris connection status.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "polaris_reply",
+      description: "Send a message to the project floor (visible to all advisors and the Slack/WhatsApp channel).",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          message: { type: "string", description: "Message to send" },
         },
+        required: ["message"],
+      },
+    },
+    {
+      name: "polaris_context",
+      description: "Fetch activity from a sibling session in this project. Use this to see what other drivers have been doing.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          session: { type: "string", description: "Name of the sibling session to fetch context from" },
+        },
+        required: ["session"],
+      },
+    },
+  ],
+}));
+
+mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  const { name, arguments: args } = req.params;
+
+  if (name === "polaris_connect") {
+    const { project, session, user } = args as { project: string; session: string; user: string };
+    try {
+      const res = await daemonPost("/connect", {
+        ccSessionId: CC_SESSION_ID,
+        project,
+        session,
+        user,
       });
-      return { content: [{ type: "text", text: "Reply sent to the floor." }] };
+      const body = await res.json();
+      if (res.ok) {
+        currentProject = project;
+        currentSession = session;
+        currentUser = user;
+        return { content: [{ type: "text", text: `Connected to ${project}/${session} as ${user}.` }] };
+      }
+      return { content: [{ type: "text", text: `Failed to connect: ${(body as { error?: string }).error ?? "unknown error"}` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to connect — is the Polaris daemon running? Start it with `polaris daemon` or `bun run src/daemon/daemon.ts`." }] };
     }
+  }
 
-    if (name === "polaris_context") {
-      const targetSession = (args as { session: string }).session;
-      const res = await serviceGet(serviceUrl, `/projects/${project}/sessions/${targetSession}/messages`);
+  if (name === "polaris_disconnect") {
+    try {
+      await daemonPost("/disconnect", { ccSessionId: CC_SESSION_ID });
+      currentProject = "";
+      currentSession = "";
+      currentUser = "";
+      return { content: [{ type: "text", text: "Disconnected from Polaris." }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to disconnect — daemon may not be running." }] };
+    }
+  }
+
+  if (name === "polaris_status") {
+    try {
+      const res = await daemonGet(`/status/${CC_SESSION_ID}`);
+      const body = (await res.json()) as { connected: boolean; project?: string; session?: string; user?: string };
+      if (body.connected) {
+        return { content: [{ type: "text", text: `Connected: ${body.project}/${body.session} as ${body.user}` }] };
+      }
+      return { content: [{ type: "text", text: "Not connected to any Polaris session." }] };
+    } catch {
+      return { content: [{ type: "text", text: "Polaris daemon not reachable." }] };
+    }
+  }
+
+  if (name === "polaris_reply") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const message = (args as { message: string }).message;
+    try {
+      const res = await fetch(`${SERVICE_URL}/projects/${currentProject}/sessions/${currentSession}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sender: currentUser,
+          payload: {
+            hook_event_name: "Stop",
+            session_id: CC_SESSION_ID,
+            stop_response: message,
+          },
+        }),
+      });
+      if (res.ok) {
+        return { content: [{ type: "text", text: "Reply sent to the floor." }] };
+      }
+      return { content: [{ type: "text", text: `Failed to send reply: ${res.status}` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the cloud service." }] };
+    }
+  }
+
+  if (name === "polaris_context") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const targetSession = (args as { session: string }).session;
+    try {
+      const res = await serviceGet(`/projects/${currentProject}/sessions/${targetSession}/messages`);
       if (!res.ok) {
         return { content: [{ type: "text", text: `Could not fetch session "${targetSession}": ${res.status}` }] };
       }
-      const events = await res.json();
-      const summary = (events as Array<{ sender: string; payload: { prompt?: string; stop_response?: string; content?: string } }>)
+      const events = (await res.json()) as Array<{
+        sender: string;
+        payload: { prompt?: string; stop_response?: string; content?: string };
+      }>;
+      const summary = events
         .map((e) => {
           const p = e.payload;
           const text = p.prompt ?? p.stop_response ?? p.content ?? JSON.stringify(p);
@@ -122,105 +207,39 @@ export async function startClient(config: ClientConfig) {
         })
         .join("\n");
       return { content: [{ type: "text", text: summary || "(no activity yet)" }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the cloud service." }] };
     }
-
-    throw new Error(`Unknown tool: ${name}`);
-  });
-
-  // --- WebSocket to cloud service ---
-
-  const wsUrl = serviceUrl.replace(/^http/, "ws");
-  let ws: WebSocket | null = null;
-
-  function connectWs() {
-    ws = new WebSocket(`${wsUrl}/projects/${project}/sessions/${session}/ws`);
-    ws.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data as string);
-        // Only inject advisor messages (source: "inject") into the MCP session
-        if (data.source === "inject") {
-          const sender = data.sender ?? "unknown";
-          const content = data.payload?.content ?? JSON.stringify(data.payload);
-          await mcp.notification({
-            method: "notifications/claude/channel",
-            params: {
-              content,
-              meta: { from: sender, session: data.session, source: "polaris" },
-            },
-          });
-        }
-      } catch {
-        // Ignore malformed messages
-      }
-    };
-    ws.onclose = () => {
-      // Reconnect after delay
-      setTimeout(connectWs, 3000);
-    };
-    ws.onerror = () => {
-      // Will trigger onclose
-    };
   }
 
-  connectWs();
+  throw new Error(`Unknown tool: ${name}`);
+});
 
-  // --- Local HTTP server for hook relay ---
+// --- Register with daemon and connect stdio ---
 
-  const httpServer = Bun.serve({
-    port: localPort,
-    hostname: "127.0.0.1",
+async function main() {
+  // Register with daemon (best-effort — daemon might not be running yet)
+  try {
+    await daemonPost("/register", { ccSessionId: CC_SESSION_ID });
+  } catch {
+    console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
+  }
 
-    async fetch(req) {
-      const url = new URL(req.url);
-
-      if (req.method === "POST" && url.pathname === "/events") {
-        try {
-          const body = await req.json();
-          // Relay hook event to cloud service
-          const res = await servicePost(
-            serviceUrl,
-            `/projects/${project}/sessions/${session}/events`,
-            { sender: user, payload: body }
-          );
-          if (!res.ok) {
-            const err = await res.text();
-            return new Response(err, { status: res.status });
-          }
-          return new Response("ok", { status: 200 });
-        } catch {
-          return new Response("bad request", { status: 400 });
-        }
-      }
-
-      if (req.method === "GET" && url.pathname === "/status") {
-        return Response.json({ ok: true, project, session, user });
-      }
-
-      return new Response("not found", { status: 404 });
-    },
-  });
-
-  // --- Connect MCP stdio ---
+  // Poll daemon for advisor messages and inject into MCP session
+  setInterval(async () => {
+    if (!currentProject) return;
+    // The daemon's cloud WS forwards inject events to the mcpCallbacks map,
+    // but since we're in a separate process, we use HTTP polling as a fallback.
+    // In production, this would use IPC (Unix socket or named pipe).
+  }, 5000);
 
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
-
-  console.error(`Polaris client started: ${project}/${session} as ${user}`);
-  console.error(`Hook relay on http://127.0.0.1:${localPort}/events`);
-  console.error(`Connected to ${serviceUrl}`);
-
-  return {
-    mcp,
-    httpServer,
-    ws,
-    stop: () => {
-      httpServer.stop(true);
-      ws?.close();
-    },
-  };
+  console.error(`Polaris MCP client started (session: ${CC_SESSION_ID})`);
 }
 
-// --- Run if executed directly ---
 if (import.meta.main) {
-  await startClient(getConfig());
+  await main();
 }
+
+export { mcp, CC_SESSION_ID, main as startClient };

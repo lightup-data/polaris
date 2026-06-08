@@ -4,11 +4,8 @@
       "command": "bun",
       "args": ["src/client/client.ts"],
       "env": {
-        "POLARIS_PROJECT": "",
-        "POLARIS_SESSION": "",
-        "POLARIS_USER": "",
-        "POLARIS_SERVICE_URL": "http://localhost:4321",
-        "POLARIS_PORT": "4321"
+        "POLARIS_DAEMON_URL": "http://127.0.0.1:4321",
+        "POLARIS_SERVICE_URL": "http://localhost:4321"
       }
     }
   }
