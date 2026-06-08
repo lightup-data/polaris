@@ -324,7 +324,12 @@ export function createApp(sql: Sql) {
     const slackData = (await slackRes.json()) as { ok: boolean; team?: { id: string }; access_token?: string; error?: string };
 
     if (!slackData.ok) {
-      return layout(renderErrorView(`Slack connection failed: ${slackData.error}`, "Back to dashboard", `/dashboard?token=${state}`));
+      // Check if Slack is already connected (e.g., stale callback reload)
+      const org = await getOrg(sql, payload.org_id);
+      if (org?.slack_team_id) {
+        return c.redirect(`/dashboard?token=${state}`);
+      }
+      return layout(renderErrorView(`Slack connection failed: ${slackData.error}`, "Try again", `/slack/install?token=${state}`));
     }
 
     // Create the #polaris system channel
