@@ -10,10 +10,21 @@ import {
   upsertUser,
   setOrgSlack,
   type Sql,
-  type Org,
 } from "../service/db";
+import { layout, nav } from "./layout";
+import { renderSetupView, renderActiveView, renderProfileView, renderErrorView } from "./views";
+import { renderLandingPage } from "./pages";
+import {
+  mockUser,
+  mockOrg,
+  mockOrgNoSlack,
+  mockProjects,
+  mockActiveSessions,
+  mockEmptySessions,
+  mockDevices,
+} from "./fixtures";
 
-// --- Google OAuth setup ---
+// --- Google OAuth ---
 
 function getGoogle(): Google {
   return new Google(
@@ -23,11 +34,8 @@ function getGoogle(): Google {
   );
 }
 
-// --- State store for OAuth CSRF (in-memory, fine for single instance) ---
+const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number }>();
 
-const oauthStates = new Map<string, { type: "login" | "signup"; orgName?: string; timestamp: number }>();
-
-// Clean up stale states every 10 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of oauthStates) {
@@ -35,34 +43,7 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
-// --- HTML helpers ---
-
-function html(body: string, title = "Polaris"): Response {
-  return new Response(
-    `<!DOCTYPE html>
-<html>
-<head><title>${title}</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
-  h1 { font-size: 1.5em; }
-  a { color: #0066cc; }
-  .btn { display: inline-block; padding: 10px 24px; background: #0066cc; color: white; text-decoration: none; border-radius: 6px; margin: 8px 0; }
-  .btn:hover { background: #0052a3; }
-  .btn-secondary { background: #4A154B; }
-  .btn-secondary:hover { background: #3a1039; }
-  .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin: 12px 0; }
-  .success { color: #16a34a; }
-  .error { color: #dc2626; }
-  code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-  pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; }
-</style>
-</head>
-<body>${body}</body></html>`,
-    { headers: { "Content-Type": "text/html" } }
-  );
-}
-
-// --- App factory ---
+// --- App ---
 
 export function createApp(sql: Sql) {
   const app = new Hono();
@@ -70,205 +51,251 @@ export function createApp(sql: Sql) {
   // --- Landing page ---
 
   app.get("/", (c) => {
-    return html(`
-      <h1>Polaris</h1>
-      <p>Multiplayer collaboration for AI agents and humans.</p>
-      <a class="btn" href="/signup">Sign up your organization</a>
-      <a class="btn" href="/login" style="background: #374151;">Log in</a>
-    `);
+    return layout(renderLandingPage());
   });
 
-  // --- Signup flow (create org + first user) ---
+  // --- Auth: single Google SSO flow for both signup and login ---
 
-  app.get("/signup", async (c) => {
-    return html(`
-      <h1>Sign up your organization</h1>
-      <form action="/signup/start" method="POST">
-        <label>Organization name:<br>
-          <input type="text" name="orgName" required style="padding: 8px; width: 300px; margin: 4px 0;">
-        </label><br><br>
-        <button type="submit" class="btn">Continue with Google</button>
-      </form>
-    `, "Polaris - Sign Up");
-  });
-
-  app.post("/signup/start", async (c) => {
-    const body = await c.req.parseBody();
-    const orgName = body.orgName as string;
-    if (!orgName) return html(`<p class="error">Organization name required.</p>`);
-
+  function startGoogleAuth(c: { redirect: (url: string) => Response }) {
     const google = getGoogle();
     const state = crypto.randomUUID();
-    oauthStates.set(state, { type: "signup", orgName, timestamp: Date.now() });
     const codeVerifier = crypto.randomUUID();
-    const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email", "profile"]);
-    // Store code verifier alongside state
-    oauthStates.set(`cv:${state}`, { type: "signup", orgName: codeVerifier, timestamp: Date.now() });
-    return c.redirect(url.toString());
-  });
-
-  // --- Login flow (existing user) ---
-
-  app.get("/login", async (c) => {
-    const google = getGoogle();
-    const state = crypto.randomUUID();
-    oauthStates.set(state, { type: "login", timestamp: Date.now() });
-    const codeVerifier = crypto.randomUUID();
-    oauthStates.set(`cv:${state}`, { type: "login", orgName: codeVerifier, timestamp: Date.now() });
+    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now() });
     const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email", "profile"]);
     return c.redirect(url.toString());
-  });
+  }
 
-  // --- Google OAuth callback ---
+  app.get("/signup", async (c) => startGoogleAuth(c));
+  app.get("/login", async (c) => startGoogleAuth(c));
 
   app.get("/auth/google/callback", async (c) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
-    if (!code || !state) return html(`<p class="error">Missing code or state.</p>`);
+    if (!code || !state) return layout(renderErrorView("Missing code or state.", "Try again", "/login"));
 
     const stateData = oauthStates.get(state);
-    const cvData = oauthStates.get(`cv:${state}`);
-    if (!stateData || !cvData) return html(`<p class="error">Invalid or expired OAuth state.</p>`);
+    if (!stateData) return layout(renderErrorView("Invalid or expired OAuth state.", "Try again", "/login"));
     oauthStates.delete(state);
-    oauthStates.delete(`cv:${state}`);
 
     const google = getGoogle();
-    const codeVerifier = cvData.orgName!;
-
     let tokens;
     try {
-      tokens = await google.validateAuthorizationCode(code, codeVerifier);
+      tokens = await google.validateAuthorizationCode(code, stateData.codeVerifier);
     } catch {
-      return html(`<p class="error">Failed to validate authorization code.</p>`);
+      return layout(renderErrorView("Authentication failed.", "Try again", "/login"));
     }
 
-    // Fetch user info from Google
     const userInfoRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${tokens.accessToken()}` },
     });
     const userInfo = (await userInfoRes.json()) as { sub: string; email: string; name: string };
-    const email = userInfo.email;
-    const name = userInfo.name;
+    const { email, name } = userInfo;
     const domain = email.split("@")[1];
 
-    if (stateData.type === "signup") {
-      // Create org
-      const orgId = crypto.randomUUID();
-      const orgName = stateData.orgName!;
-      try {
-        await createOrg(sql, orgId, orgName, domain);
-      } catch {
-        return html(`<p class="error">Failed to create organization. It may already exist.</p>`);
-      }
+    // 1. Existing user → log in
+    const existingUser = await getUserByEmail(sql, email);
+    if (existingUser) {
+      const token = await createToken({
+        sub: existingUser.id,
+        email: existingUser.email,
+        name: existingUser.name,
+        org_id: existingUser.org_id,
+        participant_id: existingUser.participant_id,
+      });
+      return c.redirect(`/dashboard?token=${token}`);
+    }
 
-      // Create first user
+    // 2. Existing org for this domain → auto-join
+    const existingOrg = await getOrgByDomain(sql, domain);
+    if (existingOrg) {
       const userId = crypto.randomUUID();
       const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
-      await createUser(sql, userId, email, name, orgId, participantId);
-
-      const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
-
-      return html(`
-        <h1 class="success">Organization created!</h1>
-        <div class="card">
-          <p><strong>Organization:</strong> ${orgName}</p>
-          <p><strong>You:</strong> ${name} (${participantId})</p>
-        </div>
-        <h2>Next steps</h2>
-        <ol>
-          <li><a href="/dashboard?token=${token}">Go to dashboard</a> to connect Slack</li>
-          <li>Share this with your team: <code>npx @lightup/polaris login</code></li>
-        </ol>
-        <h2>Your API token</h2>
-        <p>Save this — you'll need it for the CLI:</p>
-        <pre>${token}</pre>
-      `, "Polaris - Welcome!");
+      await createUser(sql, userId, email, name, existingOrg.id, participantId);
+      const token = await createToken({ sub: userId, email, name, org_id: existingOrg.id, participant_id: participantId });
+      return c.redirect(`/dashboard?token=${token}`);
     }
 
-    // Login flow
-    const existingUser = await getUserByEmail(sql, email);
-    if (!existingUser) {
-      // Check if org exists for this domain (auto-join)
-      const org = await getOrgByDomain(sql, domain);
-      if (org) {
-        const userId = crypto.randomUUID();
-        const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
-        await createUser(sql, userId, email, name, org.id, participantId);
-        const token = await createToken({ sub: userId, email, name, org_id: org.id, participant_id: participantId });
-        return html(`
-          <h1 class="success">Welcome to ${org.name}!</h1>
-          <p>Auto-joined via your email domain.</p>
-          <p><a class="btn" href="/dashboard?token=${token}">Go to dashboard</a></p>
-          <h2>Your API token</h2>
-          <pre>${token}</pre>
-        `, "Polaris - Welcome!");
-      }
-      return html(`<p class="error">No account found for ${email}. Ask your admin to invite you, or <a href="/signup">sign up a new organization</a>.</p>`);
+    // 3. No org → auto-create from email domain
+    const orgName = domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1);
+    const orgId = crypto.randomUUID();
+    try {
+      await createOrg(sql, orgId, orgName, domain);
+    } catch {
+      return layout(renderErrorView("Failed to create team. Please try again.", "Try again", "/login"));
     }
-
-    const token = await createToken({
-      sub: existingUser.id,
-      email: existingUser.email,
-      name: existingUser.name,
-      org_id: existingUser.org_id,
-      participant_id: existingUser.participant_id,
-    });
-
-    return html(`
-      <h1>Welcome back, ${existingUser.name}!</h1>
-      <p><a class="btn" href="/dashboard?token=${token}">Go to dashboard</a></p>
-      <h2>Your API token</h2>
-      <p>Use this for the CLI (<code>polaris login</code>):</p>
-      <pre>${token}</pre>
-    `, "Polaris - Logged In");
+    const userId = crypto.randomUUID();
+    const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
+    await createUser(sql, userId, email, name, orgId, participantId);
+    const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
+    return c.redirect(`/dashboard?token=${token}`);
   });
 
   // --- Dashboard ---
 
   app.get("/dashboard", async (c) => {
     const token = c.req.query("token");
-    if (!token) return html(`<p class="error">No token provided. <a href="/login">Log in</a></p>`);
+    if (!token) return c.redirect("/login");
 
     const payload = await verifyToken(token);
-    if (!payload) return html(`<p class="error">Invalid or expired token. <a href="/login">Log in again</a></p>`);
+    if (!payload) return c.redirect("/login");
 
     const org = await getOrg(sql, payload.org_id);
-    if (!org) return html(`<p class="error">Organization not found.</p>`);
+    if (!org) return c.redirect("/login");
 
-    const slackConnected = !!org.slack_team_id;
-    const slackSection = slackConnected
-      ? `<div class="card"><p class="success">Slack connected (team: ${org.slack_team_id})</p></div>`
-      : `<div class="card">
-           <p>Connect Slack to enable the floor for your projects.</p>
-           <a class="btn btn-secondary" href="/slack/install?token=${token}">Connect Slack</a>
-         </div>`;
+    // TODO: detect cliInstalled (check if user has ever hit /auth/token from CLI)
+    // TODO: detect hasConnectedSession (check if user has any sessions as driver in DB)
+    const ctx = {
+      token,
+      userName: payload.name,
+      orgName: org.name,
+      email: payload.email,
+      slackConnected: !!org.slack_team_id,
+      cliInstalled: false,
+      hasConnectedSession: false,
+    };
 
-    return html(`
-      <h1>${org.name} Dashboard</h1>
-      <div class="card">
-        <p><strong>User:</strong> ${payload.name} (${payload.participant_id})</p>
-        <p><strong>Email:</strong> ${payload.email}</p>
-        <p><strong>Org:</strong> ${org.name}</p>
-      </div>
-      <h2>Slack Integration</h2>
-      ${slackSection}
-      <h2>Setup for your team</h2>
-      <p>Share this with your team members:</p>
-      <pre>npx @lightup/polaris login</pre>
-      <h2>API Token</h2>
-      <pre>${token}</pre>
-    `, "Polaris - Dashboard");
+    // TODO: query cloud service for active sessions for this user
+    const activeSessions: unknown[] = [];
+
+    if (activeSessions.length > 0) {
+      return layout(renderActiveView(ctx, [], []), "Polaris");
+    }
+    return layout(renderSetupView(ctx), "Polaris");
   });
 
-  // --- Slack OAuth (placeholder — needs real Slack app credentials) ---
+  // --- Profile ---
+
+  app.get("/profile", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.redirect("/login");
+
+    const payload = await verifyToken(token);
+    if (!payload) return c.redirect("/login");
+
+    const org = await getOrg(sql, payload.org_id);
+    if (!org) return c.redirect("/login");
+
+    const ctx = {
+      token,
+      userName: payload.name,
+      orgName: org.name,
+      email: payload.email,
+      slackConnected: !!org.slack_team_id,
+      cliInstalled: false,
+      hasConnectedSession: false,
+    };
+
+    return layout(renderProfileView(ctx, payload.participant_id), "Polaris - Profile");
+  });
+
+  // --- Preview (dev only — all view states on one page) ---
+
+  app.get("/preview", (c) => {
+    const mockToken = "preview-token";
+    const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, email: mockUser.email };
+
+    const fresh       = { ...base, slackConnected: false, cliInstalled: false, hasConnectedSession: false };
+    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false };
+    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false };
+    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true };
+
+    return layout(`
+      <div class="max-w-5xl mx-auto px-6 py-12">
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">View Preview</h1>
+        <p class="text-gray-500 mb-12">All dashboard states rendered on one page for visual testing.</p>
+
+        <div class="space-y-16">
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Setup: fresh (nothing done)</h2>
+            <p class="text-sm text-gray-400 mb-4">Brand new user, no steps completed.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(fresh)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Setup: Slack connected</h2>
+            <p class="text-sm text-gray-400 mb-4">Floor is live, CLI not installed yet.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(slackDone)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Setup: Slack + CLI done</h2>
+            <p class="text-sm text-gray-400 mb-4">Waiting for first session connection.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(cliDone, mockDevices)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Active view (multiple sessions)</h2>
+            <p class="text-sm text-gray-400 mb-4">User is driver in one session, advisor in others.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Profile view</h2>
+            <p class="text-sm text-gray-400 mb-4">User identity, participant ID, API token.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderProfileView(allDone, mockUser.participant_id)}
+            </div>
+          </section>
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Error: auth failed</h2>
+            <p class="text-sm text-gray-400 mb-4">Google OAuth rejected or expired.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderErrorView("Authentication failed.", "Try again", "/login")}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Error: expired OAuth state</h2>
+            <p class="text-sm text-gray-400 mb-4">Stale or replayed OAuth callback.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderErrorView("Invalid or expired OAuth state.", "Try again", "/login")}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Error: team creation failed</h2>
+            <p class="text-sm text-gray-400 mb-4">Database error during org creation.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderErrorView("Failed to create team. Please try again.", "Try again", "/login")}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Error: Slack not configured</h2>
+            <p class="text-sm text-gray-400 mb-4">Missing SLACK_CLIENT_ID env var.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderErrorView("Slack integration not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.", "Back to dashboard", "/dashboard")}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Error: Slack OAuth failed</h2>
+            <p class="text-sm text-gray-400 mb-4">Slack rejected the OAuth flow.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderErrorView("Slack connection failed: invalid_code", "Back to dashboard", "/dashboard")}
+            </div>
+          </section>
+        </div>
+      </div>
+    `, "Polaris - Preview");
+  });
+
+  // --- Slack OAuth ---
 
   app.get("/slack/install", async (c) => {
     const token = c.req.query("token");
     const slackClientId = process.env.SLACK_CLIENT_ID;
     if (!slackClientId) {
-      return html(`<p class="error">Slack integration not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.</p>`);
+      return layout(renderErrorView("Slack integration not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET.", "Back to dashboard", `/dashboard?token=${token}`));
     }
-
     const state = `${token}`;
     const scopes = "channels:manage,channels:join,chat:write,channels:read,users:read,users:read.email";
     const url = `https://slack.com/oauth/v2/authorize?client_id=${slackClientId}&scope=${scopes}&state=${state}&redirect_uri=${encodeURIComponent(process.env.SLACK_REDIRECT_URI ?? "http://localhost:3000/slack/callback")}`;
@@ -277,13 +304,12 @@ export function createApp(sql: Sql) {
 
   app.get("/slack/callback", async (c) => {
     const code = c.req.query("code");
-    const state = c.req.query("state"); // contains the JWT token
-    if (!code || !state) return html(`<p class="error">Missing code or state.</p>`);
+    const state = c.req.query("state");
+    if (!code || !state) return layout(renderErrorView("Missing code or state.", "Back to dashboard", "/login"));
 
     const payload = await verifyToken(state);
-    if (!payload) return html(`<p class="error">Invalid token.</p>`);
+    if (!payload) return c.redirect("/login");
 
-    // Exchange code for Slack bot token
     const slackRes = await fetch("https://slack.com/api/oauth.v2.access", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -297,19 +323,14 @@ export function createApp(sql: Sql) {
     const slackData = (await slackRes.json()) as { ok: boolean; team?: { id: string }; access_token?: string; error?: string };
 
     if (!slackData.ok) {
-      return html(`<p class="error">Slack OAuth failed: ${slackData.error}</p>`);
+      return layout(renderErrorView(`Slack connection failed: ${slackData.error}`, "Back to dashboard", `/dashboard?token=${state}`));
     }
 
     await setOrgSlack(sql, payload.org_id, slackData.team!.id, slackData.access_token!);
-
-    return html(`
-      <h1 class="success">Slack connected!</h1>
-      <p>Your workspace is now linked to Polaris. Channels will be auto-created for your projects.</p>
-      <p><a class="btn" href="/dashboard?token=${state}">Back to dashboard</a></p>
-    `, "Polaris - Slack Connected");
+    return c.redirect(`/dashboard?token=${state}`);
   });
 
-  // --- CLI token endpoint (for polaris login) ---
+  // --- CLI token endpoint ---
 
   app.get("/auth/token", async (c) => {
     const token = c.req.query("token");

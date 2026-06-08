@@ -18,7 +18,7 @@ api:
 # Web app (port 3000)
 web:
 	@echo "Starting web app on http://localhost:3000"
-	@npx bun run src/web/serve.ts &
+	@npx bun --hot run src/web/serve.ts &
 
 # Local daemon (port 4322)
 daemon:
