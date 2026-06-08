@@ -18,6 +18,20 @@ function navOpts(ctx: ViewContext): NavOpts {
   return { userName: ctx.userName, orgName: ctx.orgName, email: ctx.email };
 }
 
+// --- Copyable code block ---
+
+function copyBlock(text: string): string {
+  const id = `copy-${Math.random().toString(36).slice(2, 8)}`;
+  return `
+    <div class="mt-3 relative">
+      <code id="${id}" class="block bg-gray-50 border border-gray-200 rounded px-3 py-2 pr-10 text-xs font-mono select-all">${text}</code>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('${id}').textContent);this.innerHTML='<svg class=\\'w-3.5 h-3.5 text-green-500\\' fill=\\'none\\' stroke=\\'currentColor\\' viewBox=\\'0 0 24 24\\'><path stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\' stroke-width=\\'2\\' d=\\'M5 13l4 4L19 7\\'/></svg>';setTimeout(()=>this.innerHTML='<svg class=\\'w-3.5 h-3.5\\' fill=\\'none\\' stroke=\\'currentColor\\' viewBox=\\'0 0 24 24\\'><path stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\' stroke-width=\\'2\\' d=\\'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\\'/></svg>',1500)"
+        class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition rounded" title="Copy">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      </button>
+    </div>`;
+}
+
 // --- Shared section renderers ---
 
 function sectionHeader(title: string): string {
@@ -134,7 +148,7 @@ function renderDevicesSection(ctx: ViewContext, devices: DeviceFixture[], state:
           : "Run this in your terminal. Repeat on each machine you work from."}</p>
         ${ctx.cliInstalled
           ? ""
-          : `<code class="block mt-3 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono select-all">npx @lightup/polaris login</code>`}
+          : copyBlock("npx @lightup/polaris login")}
       </div>
     </div>`);
 }
@@ -197,7 +211,7 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
           : "Inside your AI agent (Claude Code, Cursor, etc.), run:"}</p>
         ${ctx.hasConnectedSession
           ? ""
-          : `<code class="block mt-3 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono select-all">/polaris join my-project my-session</code>`}
+          : copyBlock("/polaris join my-project my-session")}
       </div>
     </div>`);
 }
@@ -335,7 +349,7 @@ export function renderProfileView(ctx: ViewContext, participantId: string): stri
         ${sectionHeader("API token")}
         <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-sm text-gray-500 mb-3">Use this for scripts and direct API access. The <code class="bg-gray-100 px-1 rounded text-xs">polaris login</code> CLI handles this automatically.</p>
-          <div class="bg-gray-50 border border-gray-200 rounded px-3 py-2 font-mono text-xs text-gray-700 break-all select-all">${ctx.token}</div>
+          ${copyBlock(ctx.token)}
         </div>
       </div>
     </div>`;
