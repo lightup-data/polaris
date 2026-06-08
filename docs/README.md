@@ -6,16 +6,48 @@ Multiplayer collaboration for AI agents and humans. Capture, share, and coordina
 
 Polaris connects AI agent sessions to a shared cloud service, enabling teams to collaborate in real time on any kind of work — software development, data analysis, event planning, and more.
 
-- **Capture** every interaction in a agent session — user prompts, agent responses, tool calls — and broadcast it to your team
+- **Capture** every interaction in an agent session — user prompts, agent responses, tool calls — and broadcast it to your team
 - **Inject** context from teammates or agents into a live agent session so the agent can incorporate it immediately
 - **Pool context** across multiple concurrent workstreams so everyone benefits from the full picture
 - **Hand off** work from one person to another with full context preserved
+
+## Getting Started
+
+### 1. Admin signs up the org (once)
+
+Visit [polaris.dev](https://polaris.dev) and sign up with Google SSO. This creates your organization. From the dashboard:
+
+- **Connect your Slack workspace** — one-click OAuth, enables the floor for all projects
+- **Invite your team** — by email, or allow auto-join by email domain
+
+### 2. Each team member sets up their machine (once)
+
+```sh
+npx @lightup/polaris login
+```
+
+This opens your browser for Google SSO, then automatically installs everything:
+- Local daemon for session routing
+- AI agent integration (MCP server, hooks, status line)
+- The `/polaris` command
+
+One command. Done.
+
+### 3. Connect to a session (each time)
+
+Inside any AI agent (Claude Code, Cursor, etc.):
+
+```
+/polaris join my-project feature-1
+```
+
+Your agent session is now connected. Everything you do is captured and broadcast to the project's floor. Advisors can inject context into your session in real time.
 
 ## Core Concepts
 
 ### Projects
 
-A project is the top-level workspace for collaboration. It groups related sessions together and pools context across them. Each project has a **floor** — a shared space where all activity is broadcast and anyone can participate. The floor is backed by a messaging platform (Slack, WhatsApp, Discord, or any supported bridge).
+A project is the top-level workspace for collaboration, scoped to your organization. It groups related sessions together and pools context across them. Each project has a **floor** — a shared space where all activity is broadcast and anyone can participate. The floor is backed by a messaging platform (Slack, WhatsApp, Discord, or any supported bridge).
 
 Create a project for any coordinated effort — a feature build, a sprint, an incident response, a trip with friends.
 
@@ -35,28 +67,75 @@ Advisors contribute context to a session without being the driver. They post on 
 
 Anyone can advise any session at any time. Multiple advisors can contribute simultaneously.
 
+### The Floor
+
+Each project has a floor — a shared space backed by a messaging platform (Slack, WhatsApp, Discord, or any platform with a Polaris bridge). The floor shows:
+
+- An interleaved, attributed log of all sessions' activity
+- Who said what, in which session (human and agent)
+- Handoff transitions
+- Advisory messages and their targets
+
+Advisors participate directly on the floor. The floor is the complete, living record of the project.
+
 ### Participants
 
-Every participant has an identity with a type prefix:
+Every participant has an identity, derived automatically from SSO:
 
 | Type | Examples | Description |
 |------|----------|-------------|
-| `user:` | `user:manu`, `user:krishna` | Human participants |
+| `user:` | `user:manu`, `user:krishna` | Human participants (identity from Google SSO) |
 | `agent:` | `agent:test-writer`, `agent:security-reviewer` | AI agent participants |
+| `slack:` | `slack:someone` | Slack-only participants without a Polaris account |
 
 Agents are first-class. They can be drivers or advisors, same as humans. The system treats them identically — the only difference is how they're labeled in the log.
+
+**Slack identity mapping is automatic** — Polaris matches your Google SSO email to your Slack profile. When your work appears on the floor, it shows your Slack avatar and display name.
+
+### Handoff
+
+The driver role on a session can transfer from one person to another:
+
+1. The current driver releases the session
+2. The new driver claims it and connects their agent
+3. The new driver's session is seeded with context from the project history
+4. The floor shows the transition
+
+The log is continuous across handoffs — one unbroken narrative of how the work was done.
+
+### Cross-Session Context
+
+Drivers can query what's happening in other sessions within the same project. This is pull-based (on demand), not push-based, so drivers aren't interrupted by sibling activity.
+
+Use this to coordinate — check what a teammate has built before building something that depends on it.
+
+## The `/polaris` Command
+
+Everything happens through one slash command inside your AI agent:
+
+| Command | What it does |
+|---------|-------------|
+| `/polaris join <project> <session>` | Connect to a session (creates it if new) |
+| `/polaris` | Show connection status |
+| `/polaris disconnect` | Disconnect from current session |
+
+The status line at the bottom of your agent always shows your connection state:
+
+```
+polaris: my-project/feature-1 (user:manu) ● connected
+```
 
 ## Features
 
 ### Session Capture and Broadcast
 
-Everything that happens in a agent session is captured and broadcast:
+Everything that happens in an agent session is captured and broadcast:
 
 - User prompts
 - Agent responses
 - Tool calls and results (collapsed on the floor to reduce noise)
 
-The broadcast goes to the project's floor and is persisted in the cloud service as the permanent record.
+The broadcast goes to the project's floor and is persisted as the permanent record.
 
 ### Context Injection
 
@@ -73,34 +152,6 @@ All events across all sessions in a project are stored together. This shared con
 - When someone takes over a session or starts a new one, they can be seeded with the full project history
 
 Sibling session activity is available on-demand, not auto-injected, to avoid noise.
-
-### Handoff
-
-The driver role on a session can transfer from one person to another:
-
-1. The current driver releases the session
-2. The new driver claims it and connects their agent CLI
-3. The new driver's session is seeded with context from the project history
-4. The floor shows the transition
-
-The log is continuous across handoffs — one unbroken narrative of how the work was done.
-
-### The Floor
-
-Each project has a floor — a shared space backed by a messaging platform (Slack, WhatsApp, Discord, or any platform with a polaris bridge). The floor shows:
-
-- An interleaved, attributed log of all sessions' activity
-- Who said what, in which session (human and agent)
-- Handoff transitions
-- Advisory messages and their targets
-
-Advisors participate directly on the floor. The floor is the complete, living record of the project.
-
-### Cross-Session Context
-
-Drivers can query what's happening in other sessions within the same project. This is pull-based (on demand), not push-based, so drivers aren't interrupted by sibling activity.
-
-Use this to coordinate — check what a teammate has built before building something that depends on it.
 
 ## Examples
 
@@ -121,16 +172,16 @@ Project: webapp
 The floor (Slack `#webapp`) shows:
 
 ```
-[user:manu/auth → cc]                "Let's implement the auth middleware"
-[cc → user:manu/auth]                "I'll create src/middleware/auth.ts..."
-[user:krishna/db-schema → cc]        "Set up the database schema for users"
-[cc → user:krishna/db-schema]        "Creating migrations/001_users.sql..."
+[user:manu/auth → agent]             "Let's implement the auth middleware"
+[agent → user:manu/auth]             "I'll create src/middleware/auth.ts..."
+[user:krishna/db-schema → agent]     "Set up the database schema for users"
+[agent → user:krishna/db-schema]     "Creating migrations/001_users.sql..."
 [user:priya → db-schema]             "Remember we need GDPR compliance on the users table"
-[cc → user:krishna/db-schema]        "Good point from Priya. Adding data retention fields..."
+[agent → user:krishna/db-schema]     "Good point from Priya. Adding data retention fields..."
 [agent:security-reviewer → auth]     "This auth endpoint needs rate limiting"
-[cc → user:manu/auth]                "Adding rate limiting middleware..."
-[agent:test-writer/tests → cc]       "Writing integration tests for auth middleware"
-[cc → agent:test-writer/tests]       "Created tests/auth.test.ts..."
+[agent → user:manu/auth]             "Adding rate limiting middleware..."
+[agent:test-writer/tests → agent]    "Writing integration tests for auth middleware"
+[agent → agent:test-writer/tests]    "Created tests/auth.test.ts..."
 ```
 
 Manu finishes auth, hands off db-schema to himself to continue Krishna's work. The log continues seamlessly.
@@ -152,19 +203,18 @@ Project: pipeline-migration
 The floor (Slack `#pipeline-migration`) shows:
 
 ```
-[user:sara/ingestion → cc]                "Rewrite the S3-to-Snowflake ingestion DAG for the new orchestrator"
-[cc → user:sara/ingestion]                "I'll create pipelines/ingest_s3_snowflake.py using the new SDK..."
-[user:raj/transforms → cc]                "Port the customer_ltv dbt model and its upstream dependencies"
-[cc → user:raj/transforms]                "Mapping the dependency graph: customer_ltv depends on orders, payments..."
+[user:sara/ingestion → agent]             "Rewrite the S3-to-Snowflake ingestion DAG for the new orchestrator"
+[agent → user:sara/ingestion]             "I'll create pipelines/ingest_s3_snowflake.py using the new SDK..."
+[user:raj/transforms → agent]             "Port the customer_ltv dbt model and its upstream dependencies"
+[agent → user:raj/transforms]             "Mapping the dependency graph: customer_ltv depends on orders, payments..."
 [agent:schema-drift-monitor → transforms] "Column 'payment_method' was renamed to 'pay_type' in source system as of last night's sync"
-[cc → user:raj/transforms]                "Updating the dbt model to reference 'pay_type' instead..."
+[agent → user:raj/transforms]             "Updating the dbt model to reference 'pay_type' instead..."
 [user:lee → ingestion]                    "Use the v2 Snowflake connector — v1 doesn't support the new auth"
-[cc → user:sara/ingestion]                "Switching to v2 connector and updating credentials config..."
-[agent:dq-checker/validation → cc]        "Running row count and null checks on migrated tables"
-[cc → agent:dq-checker/validation]        "3 tables passed. orders_raw has 2.3% null rate on customer_id, up from 0.1%"
-[agent:dq-checker/validation → cc]        "Flagging orders_raw anomaly to ingestion session"
+[agent → user:sara/ingestion]             "Switching to v2 connector and updating credentials config..."
+[agent:dq-checker/validation → agent]     "Running row count and null checks on migrated tables"
+[agent → agent:dq-checker/validation]     "3 tables passed. orders_raw has 2.3% null rate on customer_id, up from 0.1%"
 [agent:dq-checker → ingestion]            "orders_raw customer_id null rate jumped to 2.3% — likely a source schema change"
-[cc → user:sara/ingestion]                "Investigating — adding null handling for customer_id in the ingestion pipeline..."
+[agent → user:sara/ingestion]             "Investigating — adding null handling for customer_id in the ingestion pipeline..."
 ```
 
 Sara finishes ingestion, Raj finishes transforms. The dq-checker agent continues running validation against production data. Lee reviews the full log on the floor to verify the migration is complete.
@@ -186,29 +236,29 @@ Project: spring-campaign
 The floor (Slack `#spring-campaign`) shows:
 
 ```
-[user:jess/segments → cc]                  "Build segments for the spring campaign: churned-30d, active-high-ltv, new-trial"
-[cc → user:jess/segments]                  "Creating SQL queries for each segment against the warehouse..."
-[user:marco/templates → cc]                "Create the base email template with our new brand guidelines"
-[cc → user:marco/templates]                "Building responsive HTML template with the updated color palette..."
+[user:jess/segments → agent]               "Build segments for the spring campaign: churned-30d, active-high-ltv, new-trial"
+[agent → user:jess/segments]               "Creating SQL queries for each segment against the warehouse..."
+[user:marco/templates → agent]             "Create the base email template with our new brand guidelines"
+[agent → user:marco/templates]             "Building responsive HTML template with the updated color palette..."
 [user:dana → templates]                    "Use the shorter subject line format we tested last quarter — under 40 chars"
-[cc → user:marco/templates]                "Constraining subject lines to under 40 characters..."
+[agent → user:marco/templates]             "Constraining subject lines to under 40 characters..."
 [agent:compliance-checker → templates]     "CAN-SPAM: unsubscribe link must be in the first scroll. Also add physical mailing address."
-[cc → user:marco/templates]                "Moving unsubscribe link above the fold and adding mailing address to footer..."
-[user:jess/segments → cc]                  "What does the template look like so far?"
-[cc → user:jess/segments]                  "Marco's template has responsive layout, short subject lines, CAN-SPAM compliant footer..."
-[agent:content-writer/personalize → cc]    "Generate 3 subject line variants per segment based on the template and segment profiles"
-[cc → agent:content-writer/personalize]    "Churned-30d: 'We miss you — 20% off this week'... Active-high-ltv: 'Early access: spring collection'..."
+[agent → user:marco/templates]             "Moving unsubscribe link above the fold and adding mailing address to footer..."
+[user:jess/segments → agent]               "What does the template look like so far?"
+[agent → user:jess/segments]               "Marco's template has responsive layout, short subject lines, CAN-SPAM compliant footer..."
+[agent:content-writer/personalize → agent] "Generate 3 subject line variants per segment based on the template and segment profiles"
+[agent → agent:content-writer/personalize] "Churned-30d: 'We miss you — 20% off this week'... Active-high-ltv: 'Early access: spring collection'..."
 [agent:compliance-checker → personalize]   "Variant 2 for new-trial uses 'FREE' in all caps — likely to trigger spam filters"
-[cc → agent:content-writer/personalize]    "Revising variant 2 to avoid spam trigger words..."
-[user:marco/templates → cc]                "Pull in the final variants from the personalize session"
-[cc → user:marco/templates]                "Integrating 9 approved variants into the template with merge tags..."
+[agent → agent:content-writer/personalize] "Revising variant 2 to avoid spam trigger words..."
+[user:marco/templates → agent]             "Pull in the final variants from the personalize session"
+[agent → user:marco/templates]             "Integrating 9 approved variants into the template with merge tags..."
 ```
 
 Jess hands off segments to the deployment team. Marco finalizes templates with the personalized variants. Dana reviews the full log in `#spring-campaign` to approve before send.
 
 ### Data Analytics: Quarterly Business Review
 
-A VP of Sales asks a question that kicks off an analysis workflow across a human analyst, a data agent, and domain experts — all collaborating through Slack:
+A VP of Sales asks a question that kicks off an analysis workflow across a human analyst, a data agent, and domain experts — all collaborating on the floor:
 
 ```
 Project: q2-revenue-deep-dive
@@ -223,25 +273,25 @@ Project: q2-revenue-deep-dive
 The floor (Slack `#q2-revenue-deep-dive`) shows:
 
 ```
-[user:tom → exploration]                     "Why did APAC revenue drop 15% in Q2? Break it down by segment and product line"
-[agent:data-analyst/exploration → cc]        "Pulling Q2 APAC revenue by segment and product line from the warehouse..."
-[cc → agent:data-analyst/exploration]        "Query complete. Enterprise segment is flat. The drop is concentrated in mid-market, specifically the Pro tier — down 34%"
-[agent:data-analyst/exploration → cc]        "Drill into mid-market Pro: break down by new vs renewal, and pull churn timing"
-[cc → agent:data-analyst/exploration]        "Renewal revenue is stable. The drop is entirely new bookings — pipeline gen fell off in April"
-[user:tom → exploration]                     "Was that the month we restructured the APAC SDR team?"
-[cc → agent:data-analyst/exploration]        "Checking timeline — yes, APAC SDR restructure was April 3rd. New opp creation dropped 40% in April, partially recovered in May"
-[user:finance-alex → exploration]            "Pull the SDR headcount and ramp data — we had 3 reps in ramp during April, that's probably the gap"
-[cc → agent:data-analyst/exploration]        "Confirmed: 3 of 8 APAC SDRs were in ramp (< 60 days). Fully ramped rep pipeline was actually up 5%"
-[agent:data-analyst/exploration → cc]        "Root cause identified. Summarize findings for the modeling session"
-[cc → agent:data-analyst/exploration]        "Summary ready: Q2 APAC revenue drop driven by new bookings shortfall in mid-market Pro, caused by SDR ramp gap from April restructure"
-[user:nina/modeling → cc]                    "Pull the exploration findings and build a forecast — when does APAC recover if ramp completes on schedule?"
-[cc → user:nina/modeling]                    "Fetching exploration context... Based on current ramp curves, full SDR productivity by late July. Modeling recovery..."
-[agent:chart-builder → modeling]             "Here's the revenue recovery projection chart with confidence intervals for Tom's deck"
-[cc → user:nina/modeling]                    "Incorporating chart. Adding scenario analysis: on-track ramp vs accelerated hiring..."
-[user:tom → modeling]                        "Add a scenario where we backfill one more rep in July"
-[cc → user:nina/modeling]                    "Adding backfill scenario — projects recovery 3 weeks earlier, +$180K in Q3 net new"
-[user:finance-alex → modeling]               "That $180K assumes the same win rate. APAC mid-market win rate has been declining — use the trailing 3-month rate"
-[cc → user:nina/modeling]                    "Adjusting win rate to trailing 3-month (18% vs 23%). Revised impact: +$140K in Q3"
+[user:tom → exploration]                      "Why did APAC revenue drop 15% in Q2? Break it down by segment and product line"
+[agent:data-analyst/exploration → agent]      "Pulling Q2 APAC revenue by segment and product line from the warehouse..."
+[agent → agent:data-analyst/exploration]      "Query complete. Enterprise segment is flat. The drop is concentrated in mid-market, specifically the Pro tier — down 34%"
+[agent:data-analyst/exploration → agent]      "Drill into mid-market Pro: break down by new vs renewal, and pull churn timing"
+[agent → agent:data-analyst/exploration]      "Renewal revenue is stable. The drop is entirely new bookings — pipeline gen fell off in April"
+[user:tom → exploration]                      "Was that the month we restructured the APAC SDR team?"
+[agent → agent:data-analyst/exploration]      "Checking timeline — yes, APAC SDR restructure was April 3rd. New opp creation dropped 40% in April, partially recovered in May"
+[user:finance-alex → exploration]             "Pull the SDR headcount and ramp data — we had 3 reps in ramp during April, that's probably the gap"
+[agent → agent:data-analyst/exploration]      "Confirmed: 3 of 8 APAC SDRs were in ramp (< 60 days). Fully ramped rep pipeline was actually up 5%"
+[agent:data-analyst/exploration → agent]      "Root cause identified. Summarize findings for the modeling session"
+[agent → agent:data-analyst/exploration]      "Summary ready: Q2 APAC revenue drop driven by new bookings shortfall in mid-market Pro, caused by SDR ramp gap from April restructure"
+[user:nina/modeling → agent]                  "Pull the exploration findings and build a forecast — when does APAC recover if ramp completes on schedule?"
+[agent → user:nina/modeling]                  "Fetching exploration context... Based on current ramp curves, full SDR productivity by late July. Modeling recovery..."
+[agent:chart-builder → modeling]              "Here's the revenue recovery projection chart with confidence intervals for Tom's deck"
+[agent → user:nina/modeling]                  "Incorporating chart. Adding scenario analysis: on-track ramp vs accelerated hiring..."
+[user:tom → modeling]                         "Add a scenario where we backfill one more rep in July"
+[agent → user:nina/modeling]                  "Adding backfill scenario — projects recovery 3 weeks earlier, +$180K in Q3 net new"
+[user:finance-alex → modeling]                "That $180K assumes the same win rate. APAC mid-market win rate has been declining — use the trailing 3-month rate"
+[agent → user:nina/modeling]                  "Adjusting win rate to trailing 3-month (18% vs 23%). Revised impact: +$140K in Q3"
 ```
 
 Tom gets his answer — and a data-backed recommendation — without writing a query or opening a notebook. Nina produces the final model. The entire analytical thread is preserved in `#q2-revenue-deep-dive` for the QBR deck, audit trail, and future reference.
