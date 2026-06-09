@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
 # Polaris CLI wrapper
-DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec npx bun "$DIR/src/cli/cli.ts" "$@"
+SCRIPT="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
+DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+
+if command -v bun &>/dev/null; then
+  exec bun "$DIR/src/cli/cli.ts" "$@"
+elif command -v bunx &>/dev/null; then
+  exec bunx bun "$DIR/src/cli/cli.ts" "$@"
+else
+  exec npx --yes bun "$DIR/src/cli/cli.ts" "$@"
+fi

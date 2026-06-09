@@ -27,8 +27,22 @@ tailwind.config = {
 }
 </script>
 </head>
-<body class="bg-gray-50 text-gray-900 antialiased">${body}</body></html>`,
-    { headers: { "Content-Type": "text/html" } }
+<body class="bg-gray-50 text-gray-900 antialiased">${body}
+<script>
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.polaris-copy');
+  if (!btn) return;
+  const id = btn.dataset.copy;
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent);
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+  setTimeout(function() { btn.innerHTML = orig; }, 1500);
+});
+</script>
+</body></html>`,
+    { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } }
   );
 }
 

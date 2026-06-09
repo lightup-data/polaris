@@ -233,11 +233,7 @@ Based on the arguments provided, do ONE of the following:
         },
       }),
     });
-    // Notify web app dashboard to refresh
-    await fetch(`${SERVICE_URL}/api/notify-dashboard`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    });
+    // Dashboard notification is handled by the cloud API after committing the event
   } catch { /* non-fatal */ }
 
   console.log("\n✓ Polaris is set up on this machine!");
