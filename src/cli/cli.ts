@@ -114,8 +114,8 @@ async function login() {
   const mcpConfig = {
     mcpServers: {
       polaris: {
-        command: "bun",
-        args: [clientPath],
+        command: "npx",
+        args: ["bun", clientPath],
         env: {
           POLARIS_DAEMON_URL: "http://127.0.0.1:4322",
           POLARIS_SERVICE_URL: SERVICE_URL.replace(":3000", ":4321"), // API port
