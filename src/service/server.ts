@@ -353,7 +353,7 @@ export async function startServer(opts: {
         // Notify web dashboard on all events (best-effort, different process)
         const authHeader = req.headers.get("Authorization");
         if (authHeader) {
-          fetch(`http://localhost:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
+          fetch(`http://${process.env.WEB_HOST ?? "localhost"}:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: authHeader },
           }).catch(() => {});

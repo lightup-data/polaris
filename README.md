@@ -100,6 +100,8 @@ tests/         Test suite (bun test)
 - [ ] `capture-stop.ts` reads the full transcript file on every Stop event — expensive for long sessions
 - [ ] Tool call rejection breaks logging — when the user rejects a tool call, no Stop event fires so the agent's response up to that point is never logged to Slack
 - [ ] Schema migration drops all data — the auto-migration detects old schema and recreates tables, losing all events including device connections. Need a proper migration strategy for production.
+- [ ] Capture all user input — currently only UserPromptSubmit is captured. Need to also capture tool call approvals, tool use rejections, ask-question responses, and any other user interaction that constitutes a prompt
+- [ ] Postgres backup cron job — scheduled `pg_dump` to Hetzner object storage for production disaster recovery
 
 ## Development
 

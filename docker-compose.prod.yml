@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: polaris
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: polaris
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polaris"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    command: ["bun", "run", "src/service/server.ts"]
+    environment:
+      DATABASE_URL: postgres://polaris:${POSTGRES_PASSWORD}@postgres:5432/polaris
+      POLARIS_JWT_SECRET: ${POLARIS_JWT_SECRET}
+      WEB_HOST: web
+      WEB_PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    command: ["bun", "run", "src/web/serve.ts"]
+    environment:
+      DATABASE_URL: postgres://polaris:${POSTGRES_PASSWORD}@postgres:5432/polaris
+      POLARIS_JWT_SECRET: ${POLARIS_JWT_SECRET}
+      WEB_PORT: 3000
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: https://app.polaris.lightup.ai/auth/google/callback
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET}
+      SLACK_REDIRECT_URI: https://app.polaris.lightup.ai/slack/callback
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/app/docker/bridge-entrypoint.sh"]
+    environment:
+      DATABASE_URL: postgres://polaris:${POSTGRES_PASSWORD}@postgres:5432/polaris
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      POLARIS_API_URL: http://api:4321
+      POLARIS_LONG_MSG: ${POLARIS_LONG_MSG:-snippet}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

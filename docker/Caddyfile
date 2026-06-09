@@ -1,0 +1,7 @@
+app.polaris.lightup.ai {
+    reverse_proxy web:3000
+}
+
+api.polaris.lightup.ai {
+    reverse_proxy api:4321
+}
