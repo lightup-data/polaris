@@ -84,6 +84,21 @@ skills/        /polaris slash command skill
 tests/         Test suite (bun test)
 ```
 
+## TODOs / Known Issues
+
+- [ ] Multiple bridge processes can spawn if `make dev` is run without `make clean` first — causes duplicate Slack posts
+- [ ] Daemon token is cached for the process lifetime — if credentials change, daemon must be restarted
+- [ ] `raw_turn` in Stop events can contain Unicode escape sequences that Postgres JSONB rejects — fallback retries without `raw_turn`
+- [ ] `POLARIS_PROMPT_STYLE` env var exists but only `color-header` mode remains — clean up dead references
+- [ ] No pagination on event queries — will be slow for projects with thousands of events
+- [ ] Bridge polls DB every 5 seconds for new events — switch to Postgres LISTEN/NOTIFY for lower latency
+- [ ] No auth on daemon HTTP endpoints — any local process can connect/disconnect sessions
+- [ ] Slack channel creation uses sanitized project name — names with special characters may collide
+- [ ] Dashboard SSE connection has no reconnect logic on the client side
+- [ ] No way to delete a project or archive old sessions
+- [ ] MCP server needs restart to pick up new tools (e.g., `polaris_rename` added mid-session)
+- [ ] `capture-stop.ts` reads the full transcript file on every Stop event — expensive for long sessions
+
 ## Development
 
 Services run as background processes. Logs go to `/tmp/polaris-*.log`. The Makefile's `clean` target kills all processes and stops Postgres.
