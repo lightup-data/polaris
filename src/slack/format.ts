@@ -53,7 +53,8 @@ export function formatEventForSlack(event: PolarisEvent): { text: string; blocks
   return null;
 }
 
-function slackMessage(header: string, body: string): { text: string; blocks: Array<Record<string, unknown>> } {
+function slackMessage(header: string, body: string): { text: string; blocks: Array<Record<string, unknown>> } | null {
+  if (!body) return null;
   // Truncate long messages
   const maxLen = 2000;
   const truncated = body.length > maxLen ? body.slice(0, maxLen) + "..." : body;
