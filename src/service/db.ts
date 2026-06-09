@@ -288,6 +288,30 @@ export async function getSession(sql: Sql, orgId: string, project: string, name:
   };
 }
 
+export async function listSessions(sql: Sql, orgId: string, project?: string): Promise<Session[]> {
+  const rows = project
+    ? await sql`
+        SELECT s.name, p.name as project, s.driver, s.created_at
+        FROM sessions s
+        JOIN projects p ON s.project_id = p.id
+        WHERE s.org_id = ${orgId} AND p.name = ${project}
+        ORDER BY s.created_at ASC
+      `
+    : await sql`
+        SELECT s.name, p.name as project, s.driver, s.created_at
+        FROM sessions s
+        JOIN projects p ON s.project_id = p.id
+        WHERE s.org_id = ${orgId}
+        ORDER BY s.created_at ASC
+      `;
+  return rows.map((row) => ({
+    name: row.name,
+    project: row.project,
+    driver: row.driver,
+    created_at: row.created_at.toISOString(),
+  }));
+}
+
 export async function setDriver(sql: Sql, orgId: string, project: string, session: string, driver: ParticipantId): Promise<void> {
   await sql`
     UPDATE sessions SET driver = ${driver}

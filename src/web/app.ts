@@ -10,6 +10,9 @@ import {
   upsertUser,
   setOrgSlack,
   getSessionEvents,
+  listProjects,
+  listSessions,
+  getProjectEvents,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -175,6 +178,40 @@ export function createApp(sql: Sql) {
       }
     } catch { /* _system project may not exist yet */ }
 
+    // Query real projects and sessions
+    const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
+    const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
+
+    // Build session fixtures from real data
+    const sessionFixtures: import("./fixtures").SessionFixture[] = allSessions.map((s) => ({
+      name: s.name,
+      project: s.project,
+      driver: s.driver ?? "",
+      role: (s.driver === payload.participant_id ? "driver" : "advisor") as "driver" | "advisor",
+      description: "",
+      participants: s.driver ? [{ id: s.driver, role: "driver" as const }] : [],
+      eventCount: 0,
+      connectedSince: s.created_at,
+    }));
+
+    // Build project fixtures
+    const projectFixtures: import("./fixtures").ProjectFixture[] = projects.map((p) => ({
+      name: p.name,
+      slackChannel: p.slack_channel_name ? `#${p.slack_channel_name}` : "",
+      sessions: allSessions.filter((s) => s.project === p.name).map((s) => ({
+        name: s.name,
+        project: s.project,
+        driver: s.driver ?? "",
+        role: (s.driver === payload.participant_id ? "driver" : "advisor") as "driver" | "advisor",
+        description: "",
+        participants: s.driver ? [{ id: s.driver, role: "driver" as const }] : [],
+        eventCount: 0,
+        connectedSince: s.created_at,
+      })),
+    }));
+
+    const hasConnectedSession = allSessions.length > 0;
+
     const ctx = {
       token,
       userName: payload.name,
@@ -183,14 +220,11 @@ export function createApp(sql: Sql) {
       email: payload.email,
       slackConnected: !!org.slack_team_id,
       cliInstalled,
-      hasConnectedSession: false,
+      hasConnectedSession,
     };
 
-    // TODO: query cloud service for active sessions for this user
-    const activeSessions: unknown[] = [];
-
-    if (activeSessions.length > 0) {
-      return layout(renderActiveView(ctx, [], [], devices), "Polaris");
+    if (hasConnectedSession) {
+      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Polaris");
     }
     return layout(renderSetupView(ctx, devices), "Polaris");
   });
