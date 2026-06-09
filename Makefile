@@ -50,5 +50,6 @@ clean:
 	@lsof -ti :4321 | xargs kill -9 2>/dev/null || true
 	@lsof -ti :4322 | xargs kill -9 2>/dev/null || true
 	@lsof -ti :3000 | xargs kill -9 2>/dev/null || true
+	@pgrep -f "bridge.ts" | xargs kill -9 2>/dev/null || true
 	docker compose down
 	@echo "Cleaned up"

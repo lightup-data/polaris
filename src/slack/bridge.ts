@@ -8,7 +8,7 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { createDb, getOrg, listProjects, getProjectEvents, getOrgEventsSince, getSession, createSession, pushEvent, type Sql, type Org } from "../service/db";
-import { formatEventForSlack, setPromptStyle, type PromptStyle } from "./format";
+import { formatEventForSlack } from "./format";
 import type { PolarisEvent } from "../types";
 
 // --- Channel management ---
@@ -77,7 +77,8 @@ async function postEventToSlack(web: WebClient, event: PolarisEvent): Promise<vo
       channel: channelId,
       text: msg.text,
       ...(msg.blocks ? { blocks: msg.blocks } : {}),
-      ...(msg.attachments ? { attachments: msg.attachments } : {}),
+      ...(msg.username ? { username: msg.username } : {}),
+      ...(msg.icon_emoji ? { icon_emoji: msg.icon_emoji } : {}),
     });
   } catch (e) {
     console.error(`[bridge] Failed to post to Slack for project ${event.project}:`, e);
@@ -202,12 +203,6 @@ export async function startBridge(opts: {
   orgId: string;
   apiBaseUrl?: string;
 }): Promise<{ stop: () => void }> {
-  // Set prompt formatting style from env
-  const style = process.env.POLARIS_PROMPT_STYLE as PromptStyle | undefined;
-  if (style && ["emoji", "color", "header"].includes(style)) {
-    setPromptStyle(style);
-  }
-
   const sql = await createDb(opts.databaseUrl);
   const org = await getOrg(sql, opts.orgId);
   if (!org) throw new Error(`Org not found: ${opts.orgId}`);

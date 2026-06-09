@@ -2,37 +2,42 @@
 
 import type { PolarisEvent } from "../types";
 
-// Formatting mode for user prompts
-export type PromptStyle = "emoji" | "color" | "header";
+export interface SlackMessage {
+  text: string;
+  blocks?: Array<Record<string, unknown>>;
+  attachments?: Array<Record<string, unknown>>;
+  username?: string;
+  icon_emoji?: string;
+}
 
-let promptStyle: PromptStyle = "color";
+// Derive a display name from a participant ID
+function displayName(participantId: string): string {
+  const [type, name] = participantId.split(":", 2);
+  if (!name) return participantId;
+  const pretty = name.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  if (type === "agent") return `Agent: ${pretty}`;
+  return pretty;
+}
 
-export function setPromptStyle(style: PromptStyle) {
-  promptStyle = style;
+function personaIcon(participantId: string): string {
+  if (participantId.startsWith("agent:")) return ":robot_face:";
+  if (participantId.startsWith("slack:")) return ":speech_balloon:";
+  return ":bust_in_silhouette:";
 }
 
 // Format a PolarisEvent into a Slack message.
 // Returns null if the event should be skipped (e.g., tool calls).
-export function formatEventForSlack(event: PolarisEvent): {
-  text: string;
-  blocks?: Array<Record<string, unknown>>;
-  attachments?: Array<Record<string, unknown>>;
-} | null {
+export function formatEventForSlack(event: PolarisEvent): SlackMessage | null {
   const payload = event.payload;
 
-  // Hook events
   if ("hook_event_name" in payload) {
     switch (payload.hook_event_name) {
-      case "UserPromptSubmit": {
-        const sender = event.sender;
-        const session = event.session;
-        return formatUserPrompt(sender, session, payload.prompt);
-      }
+      case "UserPromptSubmit":
+        return formatUserPrompt(event.sender, event.session, payload.prompt);
       case "Stop": {
-        const session = event.session;
         const response = payload.stop_response || payload.last_assistant_message;
         if (!response) return null;
-        return formatAgentResponse(event.sender, session, response);
+        return formatAgentResponse(event.session, response);
       }
       case "PreToolUse":
       case "PostToolUse":
@@ -40,7 +45,6 @@ export function formatEventForSlack(event: PolarisEvent): {
     }
   }
 
-  // Inject events (advisor messages)
   if ("type" in payload && payload.type === "inject") {
     return formatAdvisorMessage(
       event.sender,
@@ -49,113 +53,54 @@ export function formatEventForSlack(event: PolarisEvent): {
     );
   }
 
-  // Reply events
   if ("type" in payload && payload.type === "reply") {
     const body = (payload as { content: string }).content;
     if (!body) return null;
     return {
-      text: `*${event.sender}* replied: ${body}`,
-      blocks: [
-        { type: "context", elements: [{ type: "mrkdwn", text: `*${event.sender}* replied` }] },
-        { type: "section", text: { type: "mrkdwn", text: toMrkdwn(body) } },
-      ],
+      text: toMrkdwn(body),
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: toMrkdwn(body) } }],
+      username: displayName(event.sender),
+      icon_emoji: personaIcon(event.sender),
     };
   }
 
   return null;
 }
 
-// --- User prompt formatting (three modes) ---
+// --- User prompt ---
 
-function formatUserPrompt(sender: string, session: string, prompt: string): {
-  text: string;
-  blocks?: Array<Record<string, unknown>>;
-  attachments?: Array<Record<string, unknown>>;
-} | null {
+function formatUserPrompt(sender: string, session: string, prompt: string): SlackMessage | null {
   if (!prompt) return null;
-  const body = toMrkdwn(prompt);
-  const header = `*${sender}* → _${session}_`;
-
-  switch (promptStyle) {
-    case "emoji":
-      return {
-        text: `💬 ${header}\n${body}`,
-        blocks: [
-          { type: "context", elements: [{ type: "mrkdwn", text: `💬 ${header}` }] },
-          {
-            type: "section",
-            text: { type: "mrkdwn", text: `> ${body.split("\n").join("\n> ")}` },
-          },
-        ],
-      };
-
-    case "color":
-      return {
-        text: `${header}\n${body}`,
-        attachments: [
-          {
-            color: "#4263eb", // polaris blue
-            blocks: [
-              { type: "context", elements: [{ type: "mrkdwn", text: header }] },
-              { type: "section", text: { type: "mrkdwn", text: body } },
-            ],
-          },
-        ],
-      };
-
-    case "header":
-      return {
-        text: `${header}\n${body}`,
-        blocks: [
-          { type: "header", text: { type: "plain_text", text: `${sender} → ${session}` } },
-          { type: "section", text: { type: "mrkdwn", text: body } },
-        ],
-      };
-  }
-}
-
-// --- Agent response formatting (always plain) ---
-
-function formatAgentResponse(sender: string, session: string, response: string): {
-  text: string;
-  blocks?: Array<Record<string, unknown>>;
-} | null {
-  if (!response) return null;
-  const body = toMrkdwn(response);
-  const header = `_agent_ → *${sender}/${session}*`;
-
   return {
-    text: `${header}\n${body}`,
-    blocks: [
-      { type: "context", elements: [{ type: "mrkdwn", text: header }] },
-      { type: "section", text: { type: "mrkdwn", text: body } },
-    ],
+    text: toMrkdwn(prompt),
+    blocks: [{ type: "section", text: { type: "mrkdwn", text: toMrkdwn(prompt) } }],
+    username: `${displayName(sender)} (${session})`,
+    icon_emoji: personaIcon(sender),
   };
 }
 
-// --- Advisor message formatting ---
+// --- Agent response ---
 
-function formatAdvisorMessage(sender: string, target: string, content: string): {
-  text: string;
-  blocks?: Array<Record<string, unknown>>;
-  attachments?: Array<Record<string, unknown>>;
-} | null {
+function formatAgentResponse(session: string, response: string): SlackMessage | null {
+  if (!response) return null;
+  return {
+    text: toMrkdwn(response),
+    blocks: [{ type: "section", text: { type: "mrkdwn", text: toMrkdwn(response) } }],
+    username: `Agent (${session})`,
+    icon_emoji: ":robot_face:",
+  };
+}
+
+// --- Advisor message ---
+
+function formatAdvisorMessage(sender: string, target: string, content: string): SlackMessage | null {
   if (!content) return null;
   const body = toMrkdwn(content);
-  const header = `*${sender}* → _${target}_`;
-
-  // Advisors also get a color bar (green)
   return {
-    text: `${header}\n${body}`,
-    attachments: [
-      {
-        color: "#16a34a", // green
-        blocks: [
-          { type: "context", elements: [{ type: "mrkdwn", text: header }] },
-          { type: "section", text: { type: "mrkdwn", text: body } },
-        ],
-      },
-    ],
+    text: body,
+    blocks: [{ type: "section", text: { type: "mrkdwn", text: `→ _${target}_:  ${body}` } }],
+    username: displayName(sender),
+    icon_emoji: personaIcon(sender),
   };
 }
 

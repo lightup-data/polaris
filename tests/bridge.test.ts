@@ -136,8 +136,8 @@ describe("bridge: DB → Slack formatting", () => {
 
     const result = formatEventForSlack(event);
     expect(result).not.toBeNull();
-    expect(result!.text).toContain("user:manu");
-    expect(result!.text).toContain("fxm");
+    expect(result!.username).toContain("Manu");
+    expect(result!.username).toContain("fxm");
     expect(result!.text).toContain("build auth middleware");
   });
 

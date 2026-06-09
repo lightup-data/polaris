@@ -82,7 +82,11 @@ try {
 
       // Attach raw turn data to the payload for zero-loss storage
       if (rawTurn.length > 0) {
-        (input as Record<string, unknown>).raw_turn = rawTurn;
+        // Sanitize: strip null bytes and invalid Unicode surrogates
+        const sanitized = JSON.parse(
+          JSON.stringify(rawTurn).replace(/\\u0000/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+        );
+        (input as Record<string, unknown>).raw_turn = sanitized;
       }
     } catch {
       // Fall back to last_assistant_message
@@ -96,11 +100,21 @@ try {
     last_assistant_message: fullResponse,
   };
 
-  await fetch(POLARIS_URL, {
+  const res = await fetch(POLARIS_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).catch(() => {});
+  }).catch(() => null);
+
+  // If the POST failed (e.g., Unicode issue in raw_turn), retry without it
+  if (!res || !res.ok) {
+    delete (payload as Record<string, unknown>).raw_turn;
+    await fetch(POLARIS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
 } catch {
   // Always exit 0 to avoid blocking the coding agent
 }
