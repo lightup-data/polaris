@@ -312,6 +312,21 @@ export async function listSessions(sql: Sql, orgId: string, project?: string): P
   }));
 }
 
+export async function getSessionPromptCounts(sql: Sql, orgId: string): Promise<Map<string, number>> {
+  const rows = await sql`
+    SELECT p.name as project, e.session, count(*)::int as count
+    FROM events e
+    JOIN projects p ON e.project_id = p.id
+    WHERE e.org_id = ${orgId} AND e.payload->>'hook_event_name' = 'UserPromptSubmit'
+    GROUP BY p.name, e.session
+  `;
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    counts.set(`${row.project}/${row.session}`, row.count);
+  }
+  return counts;
+}
+
 export async function setDriver(sql: Sql, orgId: string, project: string, session: string, driver: ParticipantId): Promise<void> {
   await sql`
     UPDATE sessions SET driver = ${driver}

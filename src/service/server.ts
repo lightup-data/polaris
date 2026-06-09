@@ -350,20 +350,21 @@ export async function startServer(opts: {
         broadcastEvent(event);
         broadcastSse(event);
 
-        // Forward _system events to Slack + notify web dashboard
+        // Notify web dashboard on all events (best-effort, different process)
+        const authHeader = req.headers.get("Authorization");
+        if (authHeader) {
+          fetch(`http://localhost:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+          }).catch(() => {});
+        }
+
+        // Forward _system events to Slack
         if (params.proj === "_system") {
           const text = (parsed.data.payload as { stop_response?: string; prompt?: string }).stop_response
             ?? (parsed.data.payload as { prompt?: string }).prompt
             ?? "System event";
           await postToSlackSystemChannel(sql, orgId, `:computer: *${parsed.data.sender}*: ${text}`);
-          // Notify the web app dashboard (best-effort, different process)
-          const authHeader = req.headers.get("Authorization");
-          if (authHeader) {
-            fetch(`http://localhost:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: authHeader },
-            }).catch(() => {});
-          }
         }
 
         return json(event, 201);
