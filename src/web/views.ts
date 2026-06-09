@@ -197,9 +197,13 @@ function renderDeviceRow(device: DeviceFixture): string {
 
 function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixture[], projects: ProjectFixture[], state: StepState = "done"): string {
   if (projects.length > 0) {
+    const totalSessions = projects.reduce((n, p) => n + p.sessions.length, 0);
     return `
       <div>
-        ${sectionHeader("Projects & Sessions")}
+        <div class="flex items-baseline gap-2 mb-3">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Projects & Sessions</h2>
+          ${statusBadge(`${totalSessions} active`, true)}
+        </div>
         <details class="mb-3">
           <summary class="text-xs text-polaris-700 hover:text-polaris-800 font-medium cursor-pointer select-none">+ Join another session</summary>
           <div class="mt-2 bg-white border border-gray-200 rounded-lg p-4">
