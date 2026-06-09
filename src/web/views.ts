@@ -85,21 +85,9 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
   }
 
   if (ctx.slackConnected) {
-    const slugRow = ctx.orgSlug
-      ? `<div class="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-           <div>
-             <p class="text-xs text-gray-400">Org identifier</p>
-             <p class="text-sm font-mono text-gray-700">${ctx.orgSlug}</p>
-           </div>
-           <form action="/settings/slug" method="POST" class="flex items-center gap-2">
-             <input type="hidden" name="token" value="${ctx.token}">
-             <input type="text" name="slug" value="${ctx.orgSlug}" class="px-2 py-1 border border-gray-200 rounded text-xs font-mono w-40 focus:ring-polaris-500 focus:border-polaris-500 outline-none hidden" id="slug-edit-${ctx.token.slice(-6)}">
-             <button type="button" onclick="const i=this.previousElementSibling;i.classList.toggle('hidden');if(!i.classList.contains('hidden'))i.focus()" class="text-xs text-gray-400 hover:text-gray-600">Edit</button>
-           </form>
-         </div>`
-      : `<div class="mt-3 pt-3 border-t border-gray-100">
-           <p class="text-xs text-gray-400">Org identifier: <span class="text-gray-500">not set (will be set from first floor connection)</span></p>
-         </div>`;
+    const slugLabel = ctx.orgSlug
+      ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>`
+      : '';
 
     return `
       <div>
@@ -107,17 +95,12 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
           ${statusBadge("Connected", true)}
         </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
-              ${slackIcon.replace('class="w-4 h-4"', 'class="w-5 h-5 text-white"')}
-            </div>
-            <div>
-              <p class="text-sm font-semibold text-gray-900">Slack</p>
-              <p class="text-sm text-gray-500 mt-0.5">Workspace linked. Channels are auto-created for your projects.</p>
-            </div>
+        <div class="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
+            ${slackIcon.replace('class="w-4 h-4"', 'class="w-4 h-4 text-white"')}
           </div>
-          ${slugRow}
+          <p class="text-sm font-medium text-gray-900">Slack</p>
+          ${slugLabel}
         </div>
       </div>`;
   }
