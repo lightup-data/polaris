@@ -27,7 +27,9 @@ export const UserPromptSubmitPayload = HookCommon.extend({
 
 export const StopPayload = HookCommon.extend({
   hook_event_name: z.literal("Stop"),
-  stop_response: z.string(),
+  stop_response: z.string().optional(),
+  last_assistant_message: z.string().optional(),
+  stop_hook_active: z.boolean().optional(),
 });
 
 export const PreToolUsePayload = HookCommon.extend({

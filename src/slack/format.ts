@@ -20,9 +20,11 @@ export function formatEventForSlack(event: PolarisEvent): { text: string; blocks
       }
       case "Stop": {
         const session = event.session;
+        const response = payload.stop_response || payload.last_assistant_message;
+        if (!response) return null;
         return slackMessage(
           `_agent_ → *${event.sender}/${session}*`,
-          payload.stop_response,
+          response,
         );
       }
       case "PreToolUse":
