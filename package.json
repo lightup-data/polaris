@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@slack/socket-mode": "^2.0.0",
+    "@slack/web-api": "^7.0.0",
     "arctic": "^3.5.0",
     "hono": "^4.7.0",
     "jose": "^6.0.0",
