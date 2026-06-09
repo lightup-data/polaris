@@ -12,6 +12,7 @@ import {
   getSessionEvents,
   listProjects,
   listSessions,
+  getSessionPromptCounts,
   getProjectEvents,
   type Sql,
 } from "../service/db";
@@ -178,36 +179,30 @@ export function createApp(sql: Sql) {
       }
     } catch { /* _system project may not exist yet */ }
 
-    // Query real projects and sessions
+    // Query real projects, sessions, and prompt counts
     const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
     const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
+    const promptCounts = await getSessionPromptCounts(sql, payload.org_id);
 
-    // Build session fixtures from real data
-    const sessionFixtures: import("./fixtures").SessionFixture[] = allSessions.map((s) => ({
-      name: s.name,
-      project: s.project,
-      driver: s.driver ?? "",
-      role: (s.driver === payload.participant_id ? "driver" : "advisor") as "driver" | "advisor",
-      description: "",
-      participants: s.driver ? [{ id: s.driver, role: "driver" as const }] : [],
-      eventCount: 0,
-      connectedSince: s.created_at,
-    }));
-
-    // Build project fixtures
-    const projectFixtures: import("./fixtures").ProjectFixture[] = projects.map((p) => ({
-      name: p.name,
-      slackChannel: p.slack_channel_name ? `#${p.slack_channel_name}` : "",
-      sessions: allSessions.filter((s) => s.project === p.name).map((s) => ({
+    function buildSessionFixture(s: typeof allSessions[0]): import("./fixtures").SessionFixture {
+      return {
         name: s.name,
         project: s.project,
         driver: s.driver ?? "",
         role: (s.driver === payload.participant_id ? "driver" : "advisor") as "driver" | "advisor",
         description: "",
         participants: s.driver ? [{ id: s.driver, role: "driver" as const }] : [],
-        eventCount: 0,
+        eventCount: promptCounts.get(`${s.project}/${s.name}`) ?? 0,
         connectedSince: s.created_at,
-      })),
+      };
+    }
+
+    const sessionFixtures = allSessions.map(buildSessionFixture);
+
+    const projectFixtures: import("./fixtures").ProjectFixture[] = projects.map((p) => ({
+      name: p.name,
+      slackChannel: p.slack_channel_name ? `#${p.slack_channel_name}` : "",
+      sessions: allSessions.filter((s) => s.project === p.name).map(buildSessionFixture),
     }));
 
     const hasConnectedSession = allSessions.length > 0;
@@ -221,6 +216,7 @@ export function createApp(sql: Sql) {
       slackConnected: !!org.slack_team_id,
       cliInstalled,
       hasConnectedSession,
+      totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
     };
 
     if (hasConnectedSession) {
@@ -261,10 +257,10 @@ export function createApp(sql: Sql) {
     const mockToken = "preview-token";
     const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email };
 
-    const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false };
-    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false };
-    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false };
-    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true };
+    const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0 };
+    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127 };
 
     return layout(`
       <div class="max-w-5xl mx-auto px-6 py-12">

@@ -13,6 +13,7 @@ interface ViewContext {
   slackConnected: boolean;
   cliInstalled: boolean;
   hasConnectedSession: boolean;
+  totalPrompts: number;
 }
 
 function navOpts(ctx: ViewContext): NavOpts {
@@ -63,35 +64,30 @@ function sectionWrap(state: StepState, content: string): string {
 
 function renderFloorSection(ctx: ViewContext, compact = false, state: StepState = "done"): string {
   if (compact && ctx.slackConnected) {
+    const promptStat = ctx.totalPrompts > 0
+      ? `<span class="text-xs text-gray-400 ml-auto">${ctx.totalPrompts} prompt${ctx.totalPrompts !== 1 ? "s" : ""}</span>`
+      : '';
     return `
       <div>
-        ${sectionHeader("Floor")}
+        <div class="flex items-baseline gap-2 mb-3">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
+          ${statusBadge("Connected", true)}
+        </div>
         <div class="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
             ${slackIcon.replace('class="w-4 h-4"', 'class="w-4 h-4 text-white"')}
           </div>
           <p class="text-sm font-medium text-gray-900">Slack</p>
-          ${statusBadge("Live", true)}
+          ${ctx.orgSlug ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>` : ''}
+          ${promptStat}
         </div>
       </div>`;
   }
 
   if (ctx.slackConnected) {
-    const slugRow = ctx.orgSlug
-      ? `<div class="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-           <div>
-             <p class="text-xs text-gray-400">Org identifier</p>
-             <p class="text-sm font-mono text-gray-700">${ctx.orgSlug}</p>
-           </div>
-           <form action="/settings/slug" method="POST" class="flex items-center gap-2">
-             <input type="hidden" name="token" value="${ctx.token}">
-             <input type="text" name="slug" value="${ctx.orgSlug}" class="px-2 py-1 border border-gray-200 rounded text-xs font-mono w-40 focus:ring-polaris-500 focus:border-polaris-500 outline-none hidden" id="slug-edit-${ctx.token.slice(-6)}">
-             <button type="button" onclick="const i=this.previousElementSibling;i.classList.toggle('hidden');if(!i.classList.contains('hidden'))i.focus()" class="text-xs text-gray-400 hover:text-gray-600">Edit</button>
-           </form>
-         </div>`
-      : `<div class="mt-3 pt-3 border-t border-gray-100">
-           <p class="text-xs text-gray-400">Org identifier: <span class="text-gray-500">not set (will be set from first floor connection)</span></p>
-         </div>`;
+    const slugLabel = ctx.orgSlug
+      ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>`
+      : '';
 
     return `
       <div>
@@ -99,17 +95,12 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
           ${statusBadge("Connected", true)}
         </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
-              ${slackIcon.replace('class="w-4 h-4"', 'class="w-5 h-5 text-white"')}
-            </div>
-            <div>
-              <p class="text-sm font-semibold text-gray-900">Slack</p>
-              <p class="text-sm text-gray-500 mt-0.5">Workspace linked. Channels are auto-created for your projects.</p>
-            </div>
+        <div class="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
+            ${slackIcon.replace('class="w-4 h-4"', 'class="w-4 h-4 text-white"')}
           </div>
-          ${slugRow}
+          <p class="text-sm font-medium text-gray-900">Slack</p>
+          ${slugLabel}
         </div>
       </div>`;
   }
@@ -205,7 +196,7 @@ function renderDeviceRow(device: DeviceFixture): string {
 // --- Projects & Sessions section ---
 
 function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixture[], projects: ProjectFixture[], state: StepState = "done"): string {
-  if (sessions.length > 0) {
+  if (projects.length > 0) {
     return `
       <div>
         ${sectionHeader("Projects & Sessions")}
@@ -216,13 +207,9 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
             ${copyBlock("/polaris join &lt;project&gt; &lt;session&gt;")}
           </div>
         </details>
-        <div class="space-y-3">
-          ${sessions.map((s) => renderSessionCard(s, ctx.userName)).join("")}
+        <div class="space-y-4">
+          ${projects.map((p) => renderProjectCard(p, ctx.userName)).join("")}
         </div>
-        ${projects.length > 0 ? `
-        <div class="mt-4 space-y-3">
-          ${projects.map((p) => renderProjectCard(p)).join("")}
-        </div>` : ""}
       </div>`;
   }
 
@@ -245,50 +232,46 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
     </div>`);
 }
 
-function renderSessionCard(session: SessionFixture, userName: string): string {
-  const isDriver = session.participants.some((p) => p.id === `user:${userName.toLowerCase().replace(/\s+/g, ".")}` && p.role === "driver");
-  const roleBadge = isDriver
-    ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-polaris-100 text-polaris-800">Driver</span>'
-    : '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Advisor</span>';
-
-  const otherParticipants = session.participants
-    .filter((p) => p.id !== `user:${userName.toLowerCase().replace(/\s+/g, ".")}`)
-    .map((p) => `<span class="text-xs text-gray-500">${p.id}</span>`)
-    .join(", ");
+function renderProjectCard(project: ProjectFixture, userName: string): string {
+  const sessionCount = project.sessions.length;
+  const participantId = `user:${userName.toLowerCase().replace(/\s+/g, ".")}`;
 
   return `
-    <div class="bg-white border border-gray-200 rounded-lg p-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full bg-green-500"></div>
-          <p class="text-sm font-semibold text-gray-900">${session.project}/${session.name}</p>
-          ${roleBadge}
-        </div>
-        <span class="text-xs text-gray-400">${session.eventCount} events</span>
-      </div>
-      <p class="text-sm text-gray-500 mt-1">${session.description}</p>
-      <div class="mt-2 flex items-center gap-1">
-        <span class="text-xs text-gray-400">with</span>
-        ${otherParticipants}
-      </div>
-    </div>`;
-}
-
-function renderProjectCard(project: ProjectFixture): string {
-  const activeSessions = project.sessions.length;
-  const drivers = project.sessions.map((s) => s.driver).filter((d, i, a) => a.indexOf(d) === i);
-
-  return `
-    <div class="bg-white border border-gray-200 rounded-lg p-4">
-      <div class="flex items-center justify-between">
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div class="px-4 py-3 flex items-center justify-between border-b border-gray-100">
         <div class="flex items-center gap-2">
           <p class="text-sm font-semibold text-gray-900">${project.name}</p>
-          <span class="text-xs text-gray-400">${project.slackChannel}</span>
+          ${project.slackChannel ? `<span class="text-xs text-gray-400">${project.slackChannel}</span>` : ""}
         </div>
-        <span class="text-xs text-gray-400">${activeSessions} session${activeSessions !== 1 ? "s" : ""}</span>
+        <span class="text-xs text-gray-400">${sessionCount} session${sessionCount !== 1 ? "s" : ""}</span>
       </div>
-      <div class="mt-2 flex items-center gap-2 flex-wrap">
-        ${drivers.map((d) => `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-50 text-gray-600">${d}</span>`).join("")}
+      <div class="divide-y divide-gray-50">
+        ${project.sessions.map((s) => {
+          const isDriver = s.driver === participantId;
+          const roleBadge = isDriver
+            ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-polaris-100 text-polaris-800">Driver</span>'
+            : s.driver
+              ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Advisor</span>'
+              : '';
+          const driverLabel = s.driver && !isDriver
+            ? `<span class="text-xs text-gray-400">${s.driver}</span>`
+            : '';
+          const promptLabel = s.eventCount > 0
+            ? `<span class="text-xs text-gray-400">${s.eventCount} prompt${s.eventCount !== 1 ? "s" : ""}</span>`
+            : '';
+          return `
+            <div class="px-4 py-3 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                <p class="text-sm text-gray-700">${s.name}</p>
+                ${roleBadge}
+              </div>
+              <div class="flex items-center gap-3">
+                ${driverLabel}
+                ${promptLabel}
+              </div>
+            </div>`;
+        }).join("")}
       </div>
     </div>`;
 }

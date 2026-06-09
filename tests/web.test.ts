@@ -19,10 +19,10 @@ const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://polaris:polaris@loc
 // --- View context helpers ---
 
 const base = { token: "test-token", userName: "Manu Bansal", orgName: "Lightup", orgSlug: "lightup-data" as string | null, email: "manu@lightup.ai" };
-const fresh = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false };
-const slackDone = { ...base, slackConnected: true, cliInstalled: false, hasConnectedSession: false };
-const cliDone = { ...base, slackConnected: true, cliInstalled: true, hasConnectedSession: false };
-const allDone = { ...base, slackConnected: true, cliInstalled: true, hasConnectedSession: true };
+const fresh = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+const slackDone = { ...base, slackConnected: true, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+const cliDone = { ...base, slackConnected: true, cliInstalled: true, hasConnectedSession: false, totalPrompts: 0 };
+const allDone = { ...base, slackConnected: true, cliInstalled: true, hasConnectedSession: true, totalPrompts: 42 };
 
 // --- Setup view ---
 
@@ -81,29 +81,23 @@ describe("renderSetupView", () => {
 describe("renderActiveView", () => {
   test("shows compact floor bar", () => {
     const html = renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices);
-    expect(html).toContain("Live");
+    expect(html).toContain("Connected");
     // No Connect Slack button
     expect(html).not.toContain("Connect Slack");
   });
 
-  test("shows session cards with roles", () => {
+  test("shows sessions nested under projects", () => {
     const html = renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices);
-    expect(html).toContain("polaris/auth");
-    expect(html).toContain("polaris/slack-bridge");
-    // Role badges are rendered (Advisor shown when participant ID derivation
-    // from display name doesn't match fixture — expected for mock data)
-    expect(html).toContain("Advisor");
+    // Session names shown within project cards
+    expect(html).toContain("auth");
+    expect(html).toContain("slack-bridge");
+    // Project names as card headers
+    expect(html).toContain("polaris");
+    expect(html).toContain("data-pipeline");
   });
 
-  test("shows session descriptions and event counts", () => {
+  test("shows driver info in session rows", () => {
     const html = renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices);
-    expect(html).toContain("Google SSO + JWT auth");
-    expect(html).toContain("42 events");
-  });
-
-  test("shows other participants in sessions", () => {
-    const html = renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices);
-    expect(html).toContain("agent:security-reviewer");
     expect(html).toContain("user:krishna");
   });
 
