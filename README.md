@@ -99,6 +99,7 @@ tests/         Test suite (bun test)
 - [ ] MCP server needs restart to pick up new tools (e.g., `polaris_rename` added mid-session)
 - [ ] `capture-stop.ts` reads the full transcript file on every Stop event — expensive for long sessions
 - [ ] Tool call rejection breaks logging — when the user rejects a tool call, no Stop event fires so the agent's response up to that point is never logged to Slack
+- [ ] Schema migration drops all data — the auto-migration detects old schema and recreates tables, losing all events including device connections. Need a proper migration strategy for production.
 
 ## Development
 
