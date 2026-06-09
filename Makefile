@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down api web daemon test clean
+.PHONY: dev dev-up dev-down api web daemon bridge test clean
 
 # Start everything for local development
 dev: dev-up api web daemon
@@ -24,6 +24,11 @@ web:
 daemon:
 	@echo "Starting daemon on http://127.0.0.1:4322"
 	@POLARIS_DAEMON_PORT=4322 POLARIS_SERVICE_URL=http://localhost:4321 npx bun run src/daemon/daemon.ts &
+
+# Slack bridge (requires ORG_ID)
+bridge:
+	@echo "Starting Slack bridge"
+	@npx bun run src/slack/bridge.ts $(ORG_ID) &
 
 # Run tests
 test:
