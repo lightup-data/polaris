@@ -117,7 +117,7 @@ async function login() {
         command: "bun",
         args: [clientPath],
         env: {
-          POLARIS_DAEMON_URL: "http://127.0.0.1:4321",
+          POLARIS_DAEMON_URL: "http://127.0.0.1:4322",
           POLARIS_SERVICE_URL: SERVICE_URL.replace(":3000", ":4321"), // API port
         },
       },
