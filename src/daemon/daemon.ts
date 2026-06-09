@@ -227,6 +227,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // POST /disconnect-all — disconnect all sessions (for testing)
+      if (method === "POST" && pathname === "/disconnect-all") {
+        for (const [id, mapping] of sessions) {
+          disconnectCloudWs(id);
+          mapping.project = "";
+          mapping.session = "";
+          mapping.user = "";
+        }
+        sessions.clear();
+        return json({ status: "all_disconnected" });
+      }
+
       // POST /events — hook events arrive here, routed by session_id in the payload
       if (method === "POST" && pathname === "/events") {
         try {
@@ -234,10 +246,22 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const ccSessionId = body.session_id;
           if (!ccSessionId) return error("session_id required in hook payload", 400);
 
-          const mapping = sessions.get(ccSessionId);
+          let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
-            // Session not connected to polaris — silently discard
-            return json({ status: "not_connected" });
+            // CC session_id doesn't match any registered MCP client.
+            // Try to find a connected session to route to (the MCP client
+            // generates its own UUID, which differs from CC's session_id).
+            const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
+            if (connectedSessions.length === 1) {
+              // Only one active session — route to it and remember the mapping
+              mapping = connectedSessions[0];
+              sessions.set(ccSessionId, { ...mapping, ccSessionId });
+            } else if (connectedSessions.length > 1) {
+              // Multiple sessions — can't determine which one. Discard.
+              return json({ status: "ambiguous" });
+            } else {
+              return json({ status: "not_connected" });
+            }
           }
 
           // Relay to cloud service

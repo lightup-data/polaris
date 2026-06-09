@@ -164,7 +164,8 @@ describe("daemon /events (hook relay)", () => {
     expect(body[0].payload.prompt).toBe("build auth middleware");
   });
 
-  test("discards events for unconnected sessions", async () => {
+  test("discards events when no sessions are connected", async () => {
+    await post(daemonUrl, "/disconnect-all", {});
     const res = await post(daemonUrl, "/events", {
       session_id: "cc-unknown",
       hook_event_name: "UserPromptSubmit",

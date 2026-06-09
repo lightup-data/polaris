@@ -239,7 +239,7 @@ export async function startBridge(opts: {
   });
 
   // Poll for new events directly from DB (bridge runs server-side)
-  let lastTimestamp = new Date().toISOString();
+  const postedEventIds = new Set<string>();
 
   async function pollEvents() {
     try {
@@ -249,12 +249,10 @@ export async function startBridge(opts: {
         if (proj.name === "_system") continue;
 
         const events = await getProjectEvents(sql, opts.orgId, proj.name);
-        const newEvents = events.filter((e) => e.timestamp > lastTimestamp);
-        for (const event of newEvents) {
+        for (const event of events) {
+          if (postedEventIds.has(event.id)) continue;
+          postedEventIds.add(event.id);
           await postEventToSlack(web, event);
-        }
-        if (newEvents.length > 0) {
-          lastTimestamp = newEvents[newEvents.length - 1].timestamp;
         }
       }
     } catch (e) {

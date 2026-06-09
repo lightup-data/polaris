@@ -356,6 +356,7 @@ describe("e2e: capture.sh through daemon", () => {
   });
 
   test("hook events for unconnected sessions are silently discarded", async () => {
+    await post(daemonUrl, "/disconnect-all", {});
     const res = await post(daemonUrl, "/events", {
       session_id: "cc-nobody",
       hook_event_name: "UserPromptSubmit",
