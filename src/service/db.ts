@@ -175,6 +175,11 @@ export async function createProject(sql: Sql, orgId: string, name: string): Prom
   return { name: row.name, created_at: row.created_at.toISOString() };
 }
 
+export async function listProjects(sql: Sql, orgId: string): Promise<Project[]> {
+  const rows = await sql`SELECT name, created_at FROM projects WHERE org_id = ${orgId} ORDER BY created_at ASC`;
+  return rows.map((r) => ({ name: r.name, created_at: r.created_at.toISOString() }));
+}
+
 export async function getProject(sql: Sql, orgId: string, name: string): Promise<Project | null> {
   const [row] = await sql`
     SELECT name, created_at FROM projects WHERE org_id = ${orgId} AND name = ${name}

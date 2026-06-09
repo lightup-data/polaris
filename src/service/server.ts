@@ -6,6 +6,7 @@ import {
   createOrg,
   getOrg,
   createProject,
+  listProjects,
   getProject,
   createSession,
   getSession,
@@ -212,6 +213,11 @@ export async function startServer(opts: {
       }
 
       // --- Project endpoints ---
+
+      if (method === "GET" && pathname === "/projects") {
+        const projects = await listProjects(sql, orgId);
+        return json(projects);
+      }
 
       params = matchRoute(method, pathname, "/projects", "POST");
       if (params) {

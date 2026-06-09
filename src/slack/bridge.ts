@@ -7,7 +7,7 @@
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { createDb, getOrg, type Sql, type Org } from "../service/db";
+import { createDb, getOrg, listProjects, getProjectEvents, type Sql, type Org } from "../service/db";
 import { formatEventForSlack } from "./format";
 import type { PolarisEvent } from "../types";
 
@@ -203,31 +203,27 @@ export async function startBridge(opts: {
     await handleSlackMessage(web, apiBaseUrl, opts.orgId, botUserId, event);
   });
 
-  // Connect to cloud service via project-level WebSocket for all events
-  // For now, use a simple polling approach to watch for new events
-  // TODO: Replace with proper WebSocket connection to cloud API
+  // Poll for new events directly from DB (bridge runs server-side)
   let lastTimestamp = new Date().toISOString();
 
   async function pollEvents() {
     try {
-      const res = await fetch(`${apiBaseUrl}/projects?org_id=${opts.orgId}`);
-      // The API doesn't have a list-projects endpoint yet, so we poll _system
-      // and individual project events. For v1, just watch _system for new sessions
-      // and known projects.
-      const knownProjects = Array.from(projectChannels.keys());
-      for (const proj of knownProjects) {
-        const eventsRes = await fetch(`${apiBaseUrl}/projects/${proj}/messages?since=${lastTimestamp}`);
-        if (!eventsRes.ok) continue;
-        const events = (await eventsRes.json()) as PolarisEvent[];
-        for (const event of events) {
+      const projects = await listProjects(sql, opts.orgId);
+
+      for (const proj of projects) {
+        if (proj.name === "_system") continue;
+
+        const events = await getProjectEvents(sql, opts.orgId, proj.name);
+        const newEvents = events.filter((e) => e.timestamp > lastTimestamp);
+        for (const event of newEvents) {
           await postEventToSlack(web, event);
         }
-        if (events.length > 0) {
-          lastTimestamp = events[events.length - 1].timestamp;
+        if (newEvents.length > 0) {
+          lastTimestamp = newEvents[newEvents.length - 1].timestamp;
         }
       }
-    } catch {
-      // Non-fatal
+    } catch (e) {
+      console.error("[bridge] Poll error:", e);
     }
   }
 
