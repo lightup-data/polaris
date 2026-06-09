@@ -58,6 +58,8 @@ export async function createDb(connectionString?: string): Promise<Sql> {
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT NOT NULL,
       org_id TEXT NOT NULL REFERENCES orgs(id),
+      slack_channel_id TEXT,
+      slack_channel_name TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (org_id, name)
     )
@@ -175,17 +177,25 @@ export async function createProject(sql: Sql, orgId: string, name: string): Prom
   return { name: row.name, created_at: row.created_at.toISOString() };
 }
 
+export async function setProjectSlackChannel(sql: Sql, orgId: string, projectName: string, channelId: string, channelName?: string): Promise<void> {
+  if (channelName) {
+    await sql`UPDATE projects SET slack_channel_id = ${channelId}, slack_channel_name = ${channelName} WHERE org_id = ${orgId} AND name = ${projectName}`;
+  } else {
+    await sql`UPDATE projects SET slack_channel_id = ${channelId} WHERE org_id = ${orgId} AND name = ${projectName}`;
+  }
+}
+
 export async function listProjects(sql: Sql, orgId: string): Promise<Project[]> {
-  const rows = await sql`SELECT name, created_at FROM projects WHERE org_id = ${orgId} ORDER BY created_at ASC`;
-  return rows.map((r) => ({ name: r.name, created_at: r.created_at.toISOString() }));
+  const rows = await sql`SELECT name, slack_channel_id, slack_channel_name, created_at FROM projects WHERE org_id = ${orgId} ORDER BY created_at ASC`;
+  return rows.map((r) => ({ name: r.name, slack_channel_id: r.slack_channel_id ?? null, slack_channel_name: r.slack_channel_name ?? null, created_at: r.created_at.toISOString() }));
 }
 
 export async function getProject(sql: Sql, orgId: string, name: string): Promise<Project | null> {
   const [row] = await sql`
-    SELECT name, created_at FROM projects WHERE org_id = ${orgId} AND name = ${name}
+    SELECT name, slack_channel_id, slack_channel_name, created_at FROM projects WHERE org_id = ${orgId} AND name = ${name}
   `;
   if (!row) return null;
-  return { name: row.name, created_at: row.created_at.toISOString() };
+  return { name: row.name, slack_channel_id: row.slack_channel_id ?? null, slack_channel_name: row.slack_channel_name ?? null, created_at: row.created_at.toISOString() };
 }
 
 // --- Sessions (org-scoped) ---

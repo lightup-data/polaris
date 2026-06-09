@@ -96,6 +96,8 @@ export type PolarisEvent = z.infer<typeof PolarisEvent>;
 
 export const Project = z.object({
   name: z.string().min(1),
+  slack_channel_id: z.string().nullable().optional(),
+  slack_channel_name: z.string().nullable().optional(),
   created_at: z.string().datetime(),
 });
 

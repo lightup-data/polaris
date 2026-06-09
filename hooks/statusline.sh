@@ -30,7 +30,12 @@ if [ "$CONNECTED" = "true" ]; then
   PROJECT=$(echo "$STATUS" | jq -r '.project' 2>/dev/null)
   SESSION=$(echo "$STATUS" | jq -r '.session' 2>/dev/null)
   USER=$(echo "$STATUS" | jq -r '.user' 2>/dev/null)
-  echo "polaris: ${PROJECT}/${SESSION} (${USER})"
+  SLACK=$(echo "$STATUS" | jq -r '.slackChannel // empty' 2>/dev/null)
+  if [ -n "$SLACK" ]; then
+    echo "polaris: ${PROJECT}/${SESSION} (${USER}) #${SLACK}"
+  else
+    echo "polaris: ${PROJECT}/${SESSION} (${USER})"
+  fi
 else
   echo "polaris: not connected"
 fi

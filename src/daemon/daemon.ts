@@ -10,6 +10,7 @@ interface SessionMapping {
   project: string;
   session: string;
   user: string;
+  slackChannel?: string;
   ws: WebSocket | null;
 }
 
@@ -195,6 +196,17 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             }); // Ignore errors (might already be driver)
           }
 
+          // Fetch Slack channel name for status display
+          try {
+            const projRes = await fetch(`${serviceUrl}/projects/${body.project}`, {
+              headers: await authHeaders(),
+            });
+            if (projRes.ok) {
+              const projData = await projRes.json() as { slack_channel_name?: string };
+              mapping.slackChannel = projData.slack_channel_name ?? undefined;
+            }
+          } catch {}
+
           // Connect to cloud WebSocket
           connectCloudWs(mapping);
 
@@ -297,6 +309,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           project: mapping.project,
           session: mapping.session,
           user: mapping.user,
+          slackChannel: mapping.slackChannel ?? null,
         });
       }
 
