@@ -66,7 +66,7 @@ Copy `.env.example` to `.env` and fill in your credentials. All settings are loa
 | `DATABASE_URL` | `postgres://polaris:polaris@localhost:5432/polaris` | Postgres connection string |
 | `POLARIS_SERVICE_URL` | `http://localhost:4321` | API URL (used by daemon) |
 | `POLARIS_DAEMON_PORT` | `4322` | Local daemon port |
-| `POLARIS_LONG_MSG` | `thread` | How long Slack messages are posted: `thread` (summary in channel, full content in thread reply) or `inline` (full message in channel) |
+| `POLARIS_LONG_MSG` | `snippet` | How long Slack messages are posted: `snippet` (preview + expandable file attachment), `thread` (preview + thread reply), or `inline` (full message in channel) |
 | `POLARIS_PROMPT_STYLE` | — | Slack formatting style for prompts |
 
 ## Project Structure
