@@ -133,6 +133,7 @@ async function postEventToSlack(web: WebClient, sql: Sql, orgId: string, event: 
       }
     } else {
       // snippet mode — preview + expandable file attachment
+      // Requires files:write scope on the Slack bot token
       const preview = msg.text.slice(0, 500).trimEnd();
       const summaryText = `${preview}...`;
       await web.chat.postMessage({
@@ -142,11 +143,13 @@ async function postEventToSlack(web: WebClient, sql: Sql, orgId: string, event: 
         ...(msg.username ? { username: msg.username } : {}),
         ...(msg.icon_emoji ? { icon_emoji: msg.icon_emoji } : {}),
       });
+      const sender = msg.username ?? "agent";
       await web.filesUploadV2({
         channel_id: channelId,
         content: msg.text,
-        filename: `response-${event.session}-${Date.now()}.md`,
-        title: `Full response (${msg.username ?? "agent"})`,
+        filename: `${sender.toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${event.session}-${Date.now()}.md`,
+        title: `${sender} — full response`,
+        initial_comment: `_Expand to read the full response from ${sender}_`,
       });
     }
   } catch (e) {
