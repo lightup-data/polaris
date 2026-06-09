@@ -13,6 +13,7 @@ interface ViewContext {
   slackConnected: boolean;
   cliInstalled: boolean;
   hasConnectedSession: boolean;
+  totalPrompts: number;
 }
 
 function navOpts(ctx: ViewContext): NavOpts {
@@ -63,6 +64,9 @@ function sectionWrap(state: StepState, content: string): string {
 
 function renderFloorSection(ctx: ViewContext, compact = false, state: StepState = "done"): string {
   if (compact && ctx.slackConnected) {
+    const promptStat = ctx.totalPrompts > 0
+      ? `<span class="text-xs text-gray-400 ml-auto">${ctx.totalPrompts} prompt${ctx.totalPrompts !== 1 ? "s" : ""} logged</span>`
+      : '';
     return `
       <div>
         ${sectionHeader("Floor")}
@@ -72,6 +76,7 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           </div>
           <p class="text-sm font-medium text-gray-900">Slack</p>
           ${statusBadge("Live", true)}
+          ${promptStat}
         </div>
       </div>`;
   }

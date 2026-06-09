@@ -216,6 +216,7 @@ export function createApp(sql: Sql) {
       slackConnected: !!org.slack_team_id,
       cliInstalled,
       hasConnectedSession,
+      totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
     };
 
     if (hasConnectedSession) {
