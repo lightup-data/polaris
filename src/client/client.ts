@@ -8,7 +8,7 @@ import {
 // --- Configuration ---
 
 const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4321";
-const SERVICE_URL = process.env.POLARIS_SERVICE_URL ?? "http://localhost:4321";
+const SERVICE_URL = process.env.POLARIS_SERVICE_URL ?? "https://api.polaris.lightup.ai";
 
 // Generate a stable session ID for this MCP server instance
 const CC_SESSION_ID = process.env.POLARIS_CC_SESSION_ID ?? crypto.randomUUID();

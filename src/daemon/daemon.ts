@@ -20,7 +20,7 @@ const sessions = new Map<string, SessionMapping>(); // keyed by ccSessionId
 const mcpCallbacks = new Map<string, (event: unknown) => void>(); // keyed by ccSessionId
 
 function getServiceUrl(): string {
-  return process.env.POLARIS_SERVICE_URL ?? "http://localhost:4321";
+  return process.env.POLARIS_SERVICE_URL ?? "https://api.polaris.lightup.ai";
 }
 
 let cachedToken: string | null | undefined = undefined;

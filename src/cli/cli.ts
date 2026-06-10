@@ -15,7 +15,7 @@ const CREDENTIALS_FILE = join(POLARIS_DIR, "credentials.json");
 const CLAUDE_DIR = join(homedir(), ".claude");
 const CLAUDE_SETTINGS_DIR = join(CLAUDE_DIR);
 
-const SERVICE_URL = process.env.POLARIS_SERVICE_URL ?? "http://localhost:3000";
+const SERVICE_URL = process.env.POLARIS_SERVICE_URL ?? "https://app.polaris.lightup.ai";
 
 // --- Login ---
 
@@ -118,7 +118,7 @@ async function login() {
         args: ["bun", clientPath],
         env: {
           POLARIS_DAEMON_URL: "http://127.0.0.1:4322",
-          POLARIS_SERVICE_URL: SERVICE_URL.replace(":3000", ":4321"), // API port
+          POLARIS_SERVICE_URL: SERVICE_URL.includes("localhost") ? SERVICE_URL.replace(":3000", ":4321") : SERVICE_URL.replace("app.", "api."),
         },
       },
     },
@@ -252,7 +252,7 @@ async function daemon() {
     stderr: "inherit",
     env: {
       ...process.env,
-      POLARIS_SERVICE_URL: SERVICE_URL.replace(":3000", ":4321"),
+      POLARIS_SERVICE_URL: SERVICE_URL.includes("localhost") ? SERVICE_URL.replace(":3000", ":4321") : SERVICE_URL.replace("app.", "api."),
     },
   });
   await proc.exited;
