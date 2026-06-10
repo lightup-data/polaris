@@ -10,8 +10,13 @@ interface SessionMapping {
   project: string;
   session: string;
   user: string;
+  agent: string;
   slackChannel?: string;
   ws: WebSocket | null;
+}
+
+function generateSessionName(): string {
+  return `s-${crypto.randomUUID().slice(0, 4)}`;
 }
 
 const sessions = new Map<string, SessionMapping>(); // keyed by ccSessionId
@@ -188,6 +193,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               project: "",
               session: "",
               user: "",
+              agent: "",
               ws: null,
             });
           }
@@ -203,13 +209,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const body = (await req.json()) as {
             ccSessionId: string;
             project: string;
-            session: string;
+            session?: string;
             user: string;
+            agent?: string;
           };
           await logEvent("/connect", body);
-          if (!body.ccSessionId || !body.project || !body.session || !body.user) {
-            return error("ccSessionId, project, session, and user are required", 400);
+          if (!body.ccSessionId || !body.project || !body.user) {
+            return error("ccSessionId, project, and user are required", 400);
           }
+
+          // Generate session name if not provided
+          const sessionName = body.session || generateSessionName();
+          const agentId = body.agent || "agent:claude";
 
           // Disconnect existing cloud WS if switching sessions
           disconnectCloudWs(body.ccSessionId);
@@ -217,8 +228,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const mapping: SessionMapping = {
             ccSessionId: body.ccSessionId,
             project: body.project,
-            session: body.session,
+            session: sessionName,
             user: body.user,
+            agent: agentId,
             ws: null,
           };
           sessions.set(body.ccSessionId, mapping);
@@ -232,24 +244,39 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           }); // Ignore 409 (already exists)
 
           // Ensure the session exists (create if not, claim driver)
-          const sessionRes = await fetch(`${serviceUrl}/projects/${body.project}/sessions`, {
-            method: "POST",
-            headers: await authHeaders(),
-            body: JSON.stringify({ name: body.session, driver: body.user }),
-          });
-          if (!sessionRes.ok && sessionRes.status !== 409) {
-            const err = await sessionRes.text();
-            await logEvent("/connect", body, { status: sessionRes.status, body: err });
-            return error(`Failed to create session: ${err}`, 500);
-          }
-
-          // If session already existed, try to claim driver
-          if (sessionRes.status === 409) {
-            await fetch(`${serviceUrl}/projects/${body.project}/sessions/${body.session}/driver`, {
+          // Retry with new name on 409 (collision with generated name)
+          let attempts = 0;
+          let created = false;
+          while (!created && attempts < 3) {
+            const sessionRes = await fetch(`${serviceUrl}/projects/${body.project}/sessions`, {
               method: "POST",
               headers: await authHeaders(),
-              body: JSON.stringify({ driver: body.user }),
-            }); // Ignore errors (might already be driver)
+              body: JSON.stringify({ name: mapping.session, driver: body.user }),
+            });
+            if (sessionRes.ok) {
+              created = true;
+            } else if (sessionRes.status === 409) {
+              if (body.session) {
+                // Explicit session name — claim driver instead of retrying
+                await fetch(`${serviceUrl}/projects/${body.project}/sessions/${mapping.session}/driver`, {
+                  method: "POST",
+                  headers: await authHeaders(),
+                  body: JSON.stringify({ driver: body.user }),
+                });
+                created = true;
+              } else {
+                // Generated name collision — retry with new name
+                mapping.session = generateSessionName();
+                attempts++;
+              }
+            } else {
+              const err = await sessionRes.text();
+              await logEvent("/connect", body, { status: sessionRes.status, body: err });
+              return error(`Failed to create session: ${err}`, 500);
+            }
+          }
+          if (!created) {
+            return error("Failed to generate unique session name", 500);
           }
 
           // Fetch Slack channel name for status display
@@ -268,9 +295,10 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           return json({
             status: "connected",
-            project: body.project,
-            session: body.session,
-            user: body.user,
+            project: mapping.project,
+            session: mapping.session,
+            user: mapping.user,
+            agent: mapping.agent,
           });
         } catch {
           return error("Invalid JSON", 400);
@@ -333,6 +361,10 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             }
           }
 
+          // Determine sender: human for prompts, agent for everything else
+          const hookEvent = body.hook_event_name as string | undefined;
+          const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
+
           // Relay to cloud service
           const serviceUrl = getServiceUrl();
           const res = await fetch(
@@ -340,7 +372,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             {
               method: "POST",
               headers: await authHeaders(),
-              body: JSON.stringify({ sender: mapping.user, payload: body }),
+              body: JSON.stringify({ sender, payload: body }),
             }
           );
 

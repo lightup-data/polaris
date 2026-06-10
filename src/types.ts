@@ -5,8 +5,8 @@ import { z } from "zod";
 export const ParticipantId = z
   .string()
   .regex(
-    /^(user|agent):[a-z0-9][a-z0-9._-]*$/,
-    "Must be user:<name> or agent:<name> (lowercase alphanumeric, dots, hyphens, underscores)"
+    /^(user|agent|slack):[a-z0-9][a-z0-9._-]*$/,
+    "Must be user:<name>, agent:<name>, or slack:<name> (lowercase alphanumeric, dots, hyphens, underscores)"
   );
 
 export type ParticipantId = z.infer<typeof ParticipantId>;

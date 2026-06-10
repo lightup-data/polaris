@@ -330,7 +330,7 @@ describe("e2e: capture.sh through daemon", () => {
     const body = await res.json();
     expect(body).toHaveLength(1);
     expect(body[0].payload.stop_response).toBe("Auth middleware is ready");
-    expect(body[0].sender).toBe("user:manu");
+    expect(body[0].sender).toBe("agent:claude"); // Stop events are sent by the agent
   });
 
   test("hook script exits 0 when daemon is down", async () => {

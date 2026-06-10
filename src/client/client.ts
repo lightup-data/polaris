@@ -54,10 +54,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object" as const,
         properties: {
           project: { type: "string", description: "Project name" },
-          session: { type: "string", description: "Session name" },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
+          session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
+          agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
         },
-        required: ["project", "session", "user"],
+        required: ["project", "user"],
       },
     },
     {
@@ -116,22 +117,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { project, session, user } = args as { project: string; session: string; user: string };
+    const { project, user, session, agent } = args as { project: string; user: string; session?: string; agent?: string };
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
         project,
-        session,
         user,
+        ...(session ? { session } : {}),
+        ...(agent ? { agent } : {}),
       });
-      const body = await res.json();
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string };
       if (res.ok) {
-        currentProject = project;
-        currentSession = session;
+        currentProject = body.project ?? project;
+        currentSession = body.session ?? session ?? "";
         currentUser = user;
-        return { content: [{ type: "text", text: `Connected to ${project}/${session} as ${user}.` }] };
+        return { content: [{ type: "text", text: `Connected to ${currentProject}/${currentSession} as ${user}.` }] };
       }
-      return { content: [{ type: "text", text: `Failed to connect: ${(body as { error?: string }).error ?? "unknown error"}` }] };
+      return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to connect — is the Polaris daemon running? Start it with `polaris daemon` or `bun run src/daemon/daemon.ts`." }] };
     }
