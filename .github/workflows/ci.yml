@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [master]
+  push:
+    branches: [master]
 
 jobs:
   test:
@@ -39,3 +41,38 @@ jobs:
         run: PGPASSWORD=polaris psql -h localhost -U polaris -d polaris -c "CREATE DATABASE polaris_test OWNER polaris;"
 
       - run: bun test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Auto-bump patch version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          npm version patch --no-git-tag-version
+          NEW=$(node -p "require('./package.json').version")
+          echo "VERSION=$NEW" >> $GITHUB_ENV
+          echo "Bumped $CURRENT → $NEW"
+
+      - name: Publish to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          npm publish --access public
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "v${{ env.VERSION }} [skip ci]"
+          git push
