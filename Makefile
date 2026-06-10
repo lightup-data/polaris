@@ -26,10 +26,11 @@ web:
 	@echo "Starting web app on http://localhost:3000"
 	@npx bun --hot run src/web/serve.ts &
 
-# Local daemon (port 4322)
+# Local daemon (port 4322) — uses local profile token if available
 daemon:
 	@echo "Starting daemon on http://127.0.0.1:4322"
-	@POLARIS_DAEMON_PORT=4322 POLARIS_SERVICE_URL=http://localhost:4321 npx bun run src/daemon/daemon.ts &
+	@TOKEN=$$(jq -r '.profiles.local.token // empty' ~/.polaris/config.json 2>/dev/null || echo ""); \
+	POLARIS_DAEMON_PORT=4322 POLARIS_SERVICE_URL=http://localhost:4321 POLARIS_AUTH_TOKEN="$$TOKEN" npx bun run src/daemon/daemon.ts &
 
 # Slack bridge (auto-detects org from DB, needs SLACK_APP_TOKEN in .env)
 bridge:
