@@ -8,6 +8,7 @@ const port = Number(process.env.WEB_PORT ?? 3000);
 export default {
   port,
   fetch: app.fetch,
+  idleTimeout: 30,
 };
 
 console.error(`Polaris web app listening on http://localhost:${port}`);
