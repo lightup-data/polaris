@@ -161,7 +161,7 @@ function error(message: string, status: number): Response {
   return json({ error: message }, status);
 }
 
-export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 4321)): {
+export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 4322)): {
   server: Server;
   sessions: Map<string, SessionMapping>;
   mcpCallbacks: Map<string, (event: unknown) => void>;
