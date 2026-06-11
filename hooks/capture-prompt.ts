@@ -10,12 +10,19 @@
 const POLARIS_PORT = process.env.POLARIS_PORT ?? "4322";
 const POLARIS_URL = `http://127.0.0.1:${POLARIS_PORT}/events`;
 
+// Daemon auth: include the shared local secret when provided (wired into the
+// hook command env by `polaris install`)
+const headers: Record<string, string> = { "Content-Type": "application/json" };
+if (process.env.POLARIS_DAEMON_SECRET) {
+  headers["x-polaris-daemon-secret"] = process.env.POLARIS_DAEMON_SECRET;
+}
+
 try {
   const input = JSON.parse(await Bun.stdin.text());
 
   const res = await fetch(POLARIS_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(input),
   }).catch(() => null);
 
