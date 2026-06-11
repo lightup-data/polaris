@@ -1,4 +1,4 @@
-app.withpolaris.ai {
+withpolaris.ai, app.withpolaris.ai {
     reverse_proxy web:3000
 }
 
