@@ -3,6 +3,7 @@
 
 import { nav, slackIcon, type NavOpts } from "./layout";
 import type { SessionFixture, ProjectFixture, DeviceFixture } from "./fixtures";
+import type { Annotation } from "../types";
 
 interface ViewContext {
   token: string;
@@ -50,6 +51,8 @@ function copyBlock(text: string): string {
 function sectionHeader(title: string): string {
   return `<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">${title}</h2>`;
 }
+
+const formInputClass = "border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-polaris-300 focus:border-polaris-300";
 
 function statusBadge(label: string, done: boolean): string {
   return done
@@ -259,7 +262,10 @@ function renderProjectCard(project: ProjectFixture, userName: string, token: str
           <p class="text-sm font-semibold text-gray-900">${project.name}</p>
           ${project.slackChannel ? `<span class="text-xs text-gray-400">${project.slackChannel}</span>` : ""}
         </div>
-        <span class="text-xs text-gray-400">${sessionCount} session${sessionCount !== 1 ? "s" : ""}</span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-400">${sessionCount} session${sessionCount !== 1 ? "s" : ""}</span>
+          <a href="/projects/${encodeURIComponent(project.name)}/settings?token=${token}" class="text-xs font-medium text-gray-400 hover:text-polaris-700">Settings</a>
+        </div>
       </div>
       <div class="divide-y divide-gray-50">
         ${project.sessions.map((s) => {
@@ -485,16 +491,99 @@ function renderTranscriptItem(e: TranscriptEvent): string {
   return "";
 }
 
+// --- Annotation controls (star / tag / decision curation) ---
+
+// Short excerpt of the event's main text, used as the default note when marking a decision.
+function eventExcerpt(e: TranscriptEvent): string {
+  const p = e.payload as EventPayload;
+  const text =
+    typeof p.prompt === "string" ? p.prompt
+    : typeof p.content === "string" ? p.content
+    : typeof p.stop_response === "string" && p.stop_response ? p.stop_response
+    : typeof p.last_assistant_message === "string" ? p.last_assistant_message
+    : "";
+  return text.slice(0, 200);
+}
+
+function annotationForm(action: string, fields: Record<string, string>, button: string): string {
+  const inputs = Object.entries(fields)
+    .map(([name, value]) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`)
+    .join("");
+  return `<form method="POST" action="${action}" class="inline-flex">${inputs}${button}</form>`;
+}
+
+function renderAnnotationControls(e: TranscriptEvent, annotations: Annotation[], base: string, token: string): string {
+  const own = annotations.filter((a) => a.event_id === e.id);
+  const star = own.find((a) => a.kind === "star");
+  const tags = own.filter((a) => a.kind === "tag");
+  const decision = own.find((a) => a.kind === "decision");
+  const addAction = `${base}/annotations?token=${token}`;
+  const deleteAction = (id: string) => `${base}/annotations/${encodeURIComponent(id)}/delete?token=${token}`;
+
+  const starControl = star
+    ? annotationForm(deleteAction(star.id), {}, `<button type="submit" class="text-xs font-medium text-amber-500 hover:text-amber-600" title="Remove star">&#9733; Starred</button>`)
+    : annotationForm(addAction, { event_id: e.id, kind: "star" }, `<button type="submit" class="text-xs text-gray-400 hover:text-amber-600" title="Star this event">&#9734; Star</button>`);
+
+  const tagChips = tags
+    .map((t) =>
+      annotationForm(deleteAction(t.id), {}, `<button type="submit" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-polaris-100 text-polaris-800 hover:bg-polaris-200" title="Remove tag">#${escapeHtml(t.value ?? "")} <span class="text-polaris-400">&times;</span></button>`)
+    )
+    .join("");
+
+  const tagAdder = `
+      <details class="inline-block">
+        <summary class="text-xs text-gray-400 hover:text-polaris-700 cursor-pointer select-none list-none">+ Tag</summary>
+        <form method="POST" action="${addAction}" class="inline-flex items-center gap-1 mt-1">
+          <input type="hidden" name="event_id" value="${e.id}">
+          <input type="hidden" name="kind" value="tag">
+          <input name="value" required placeholder="tag-name" class="w-28 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-polaris-300">
+          <button type="submit" class="px-2 py-0.5 bg-polaris-700 text-white text-xs font-medium rounded hover:bg-polaris-800">Add</button>
+        </form>
+      </details>`;
+
+  const decisionControl = decision
+    ? annotationForm(deleteAction(decision.id), {}, `<button type="submit" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200" title="Unmark decision">&#9873; Decision <span class="text-purple-400">&times;</span></button>`)
+    : annotationForm(addAction, { event_id: e.id, kind: "decision", value: eventExcerpt(e) }, `<button type="submit" class="text-xs text-gray-400 hover:text-purple-700" title="Mark as decision">&#9873; Decision</button>`);
+
+  return `
+    <div class="flex flex-wrap items-center gap-2 mt-1 px-1">
+      ${starControl}
+      ${tagChips}
+      ${tagAdder}
+      ${decisionControl}
+    </div>`;
+}
+
 export function renderTranscriptView(
   ctx: PageContext,
   project: string,
   session: string,
   events: TranscriptEvent[],
   nextCursor: string | null,
-  before?: string
+  before?: string,
+  annotations: Annotation[] = []
 ): string {
   const base = `/sessions/${encodeURIComponent(project)}/${encodeURIComponent(session)}`;
-  const items = [...events].reverse().map(renderTranscriptItem).filter((html) => html !== "").join("\n");
+  const items = [...events]
+    .reverse()
+    .map((e) => {
+      const html = renderTranscriptItem(e);
+      return html ? `<div>${html}${renderAnnotationControls(e, annotations, base, ctx.token)}</div>` : "";
+    })
+    .filter((html) => html !== "")
+    .join("\n");
+
+  // Session-level annotations (no event_id) render as badges under the header.
+  const sessionBadges = annotations
+    .filter((a) => a.event_id === null)
+    .map((a) =>
+      a.kind === "tag"
+        ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-polaris-100 text-polaris-800">#${escapeHtml(a.value ?? "")}</span>`
+        : a.kind === "decision"
+          ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">&#9873; ${escapeHtml(a.value ?? "Decision")}</span>`
+          : `<span class="text-xs text-amber-500">&#9733;</span>`
+    )
+    .join("");
 
   const pagingLinks = [
     before ? `<a href="${base}?token=${ctx.token}" class="text-xs font-medium text-polaris-700 hover:text-polaris-800">Back to latest</a>` : "",
@@ -510,6 +599,7 @@ export function renderTranscriptView(
           <h1 class="text-2xl font-bold text-gray-900">${escapeHtml(session)}</h1>
           <span class="text-sm text-gray-400 font-mono">${escapeHtml(project)}</span>
         </div>
+        ${sessionBadges ? `<div class="flex flex-wrap items-center gap-2 mb-3">${sessionBadges}</div>` : ""}
         ${pagingLinks ? `<div class="flex items-center gap-4 mb-3">${pagingLinks}</div>` : ""}
         ${items
           ? `<div class="space-y-3">${items}</div>`
@@ -534,6 +624,7 @@ export interface SearchQuery {
   project: string;
   sender: string;
   source: string;
+  tag: string;
 }
 
 export interface SearchResult {
@@ -589,13 +680,123 @@ export function renderSearchView(ctx: PageContext, query: SearchQuery, results: 
             <input name="q" value="${escapeHtml(query.q)}" placeholder="Search prompts, responses, and messages" class="flex-1 ${inputClass}">
             <button type="submit" class="px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Search</button>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <input name="project" value="${escapeHtml(query.project)}" placeholder="Project" class="${inputClass}">
             <input name="sender" value="${escapeHtml(query.sender)}" placeholder="Sender (e.g. user:priya)" class="${inputClass}">
             <select name="source" class="bg-white ${inputClass}">${sourceOptions}</select>
+            <input name="tag" value="${escapeHtml(query.tag)}" placeholder="Tag" class="${inputClass}">
           </div>
         </form>
       </div>
       ${resultsSection}
+    </div>`;
+}
+
+// --- Decisions view ---
+// Org-wide list of 'decision' annotations, each linking back to its transcript.
+
+export function renderDecisionsView(ctx: PageContext, projectFilter: string, decisions: Annotation[] | null, error?: string): string {
+  let listSection = "";
+  if (error) {
+    listSection = `<div class="bg-white border border-red-200 rounded-lg p-5 text-sm text-red-700">${escapeHtml(error)}</div>`;
+  } else if (decisions !== null) {
+    const items = decisions.map((d) => {
+      const href = `/sessions/${encodeURIComponent(d.project)}/${encodeURIComponent(d.session)}?token=${ctx.token}`;
+      return `
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex items-baseline gap-2 text-xs text-gray-400">
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">&#9873; Decision</span>
+            ${d.participant_id ? `<span class="font-medium text-gray-700">${escapeHtml(d.participant_id)}</span>` : ""}
+            <span class="font-mono">${escapeHtml(d.project)}/${escapeHtml(d.session)}</span>
+            <span class="ml-auto">${new Date(d.created_at).toLocaleString()}</span>
+          </div>
+          <p class="mt-1.5 text-sm text-gray-700 whitespace-pre-wrap">${d.value ? escapeHtml(d.value) : '<span class="text-gray-400">No note</span>'}</p>
+          <a href="${href}" class="mt-2 inline-block text-xs font-medium text-polaris-700 hover:text-polaris-800">View transcript</a>
+        </div>`;
+    }).join("");
+    listSection = decisions.length
+      ? `<div class="space-y-3">${items}</div>`
+      : `<div class="bg-white border border-gray-200 rounded-lg p-5 text-sm text-gray-500">No decisions recorded yet. Mark transcript events as decisions to collect them here.</div>`;
+  }
+
+  return `
+    ${nav(ctx.token, navOpts(ctx))}
+    <div class="max-w-3xl mx-auto px-6 pt-12 pb-16 space-y-6">
+      <div>
+        ${sectionHeader("Decisions")}
+        <form method="GET" action="/decisions" class="bg-white border border-gray-200 rounded-lg p-5 flex gap-2">
+          <input type="hidden" name="token" value="${ctx.token}">
+          <input name="project" value="${escapeHtml(projectFilter)}" placeholder="Filter by project" class="flex-1 ${formInputClass}">
+          <button type="submit" class="px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Filter</button>
+        </form>
+      </div>
+      ${listSection}
+    </div>`;
+}
+
+// --- Project settings view ---
+// Visibility toggle ('org' = everyone, 'members' = restricted) and member management.
+
+export interface ProjectMemberView {
+  participant_id: string;
+  role: string | null;
+}
+
+export function renderProjectSettingsView(ctx: PageContext, project: string, visibility: string, members: ProjectMemberView[], membersError?: string): string {
+  const base = `/projects/${encodeURIComponent(project)}`;
+  const isMembers = visibility === "members";
+
+  const memberRows = members.map((m) => `
+    <div class="px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <p class="text-sm font-mono text-gray-700">${escapeHtml(m.participant_id)}</p>
+        ${m.role ? `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">${escapeHtml(m.role)}</span>` : ""}
+      </div>
+      <form method="POST" action="${base}/members/${encodeURIComponent(m.participant_id)}/delete?token=${ctx.token}">
+        <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700">Remove</button>
+      </form>
+    </div>`).join("");
+
+  return `
+    ${nav(ctx.token, navOpts(ctx))}
+    <div class="max-w-3xl mx-auto px-6 pt-12 pb-16 space-y-10">
+      <div>
+        ${sectionHeader("Project settings")}
+        <div class="flex items-baseline justify-between mb-4">
+          <h1 class="text-2xl font-bold text-gray-900">${escapeHtml(project)}</h1>
+          <a href="/dashboard?token=${ctx.token}" class="text-xs font-medium text-polaris-700 hover:text-polaris-800">Back to dashboard</a>
+        </div>
+        <form method="POST" action="${base}/visibility?token=${ctx.token}" class="bg-white border border-gray-200 rounded-lg p-5">
+          <p class="text-sm font-semibold text-gray-900">Visibility</p>
+          <p class="text-sm text-gray-500 mt-1">Who can view this project's sessions and transcripts.</p>
+          <div class="mt-3 space-y-2">
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+              <input type="radio" name="visibility" value="org"${isMembers ? "" : " checked"}>
+              Everyone in the organization
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+              <input type="radio" name="visibility" value="members"${isMembers ? " checked" : ""}>
+              Members only
+            </label>
+          </div>
+          <button type="submit" class="mt-4 px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Save visibility</button>
+        </form>
+      </div>
+
+      <div>
+        ${sectionHeader("Members")}
+        ${membersError ? `<div class="bg-white border border-red-200 rounded-lg p-5 text-sm text-red-700 mb-3">${escapeHtml(membersError)}</div>` : ""}
+        <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
+          ${memberRows || `<div class="px-4 py-3 text-sm text-gray-500">No members yet.${isMembers ? "" : " Membership only applies when visibility is set to members only."}</div>`}
+        </div>
+        <form method="POST" action="${base}/members?token=${ctx.token}" class="mt-3 bg-white border border-gray-200 rounded-lg p-5">
+          <p class="text-sm font-semibold text-gray-900">Add member</p>
+          <div class="mt-3 flex flex-col sm:flex-row gap-2">
+            <input name="participant_id" required placeholder="user:priya" class="flex-1 ${formInputClass}">
+            <input name="role" placeholder="Role (optional)" class="sm:w-40 ${formInputClass}">
+            <button type="submit" class="px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Add</button>
+          </div>
+        </form>
+      </div>
     </div>`;
 }

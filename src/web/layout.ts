@@ -48,7 +48,8 @@ document.addEventListener('click', function(e) {
 
 export function nav(token?: string, opts?: NavOpts): string {
   const right = token
-    ? `<a href="/search?token=${token}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Search</a>
+    ? `<a href="/decisions?token=${token}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Decisions</a>
+       <a href="/search?token=${token}" class="text-sm font-medium text-gray-600 hover:text-gray-900">Search</a>
        <div class="relative group">
          <button class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition">
            <div class="w-7 h-7 rounded-full bg-polaris-600 flex items-center justify-center text-white text-xs font-bold">${(opts?.userName ?? "U").charAt(0).toUpperCase()}</div>
@@ -65,6 +66,7 @@ export function nav(token?: string, opts?: NavOpts): string {
              <p class="text-[10px] text-gray-400">${opts?.orgName ?? ""}</p>
            </div>
            <a href="/dashboard?token=${token}" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Dashboard</a>
+           <a href="/decisions?token=${token}" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Decisions</a>
            <a href="/search?token=${token}" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Search</a>
            <a href="/profile?token=${token}" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Profile</a>
            <div class="border-t border-gray-100"></div>
