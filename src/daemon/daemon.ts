@@ -1,5 +1,5 @@
 import type { Server, ServerWebSocket } from "bun";
-import { readFile, appendFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -29,6 +29,7 @@ const injectQueues = new Map<string, Array<{ from: string; content: string; time
 interface PolarisConfig {
   active: string;
   profiles: Record<string, { api: string; token: string; [key: string]: unknown }>;
+  daemonSecret?: string;
 }
 
 let cachedConfig: PolarisConfig | null | undefined = undefined;
@@ -85,6 +86,25 @@ async function authHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
   if (token) return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
   return { "Content-Type": "application/json" };
+}
+
+// --- Daemon shared-secret auth ---
+//
+// When a secret is resolved (env POLARIS_DAEMON_SECRET, else config.json
+// `daemonSecret`), ALL daemon HTTP endpoints require the header
+// `x-polaris-daemon-secret: <secret>` and reply 401 otherwise. When no
+// secret is resolved, no auth is enforced (back-compat / tests).
+// Note: config.json is only consulted via the startup cache (loaded in the
+// import.meta.main block). Tests that call startDaemon() in-process never
+// load the developer's real config, so they always run unauthenticated.
+function getDaemonSecret(): string | null {
+  // Env var wins; an explicitly empty value means "no auth" (matches the
+  // POLARIS_AUTH_TOKEN convention above).
+  if (process.env.POLARIS_DAEMON_SECRET !== undefined) {
+    return process.env.POLARIS_DAEMON_SECRET || null;
+  }
+  const secret = cachedConfig?.daemonSecret;
+  return typeof secret === "string" && secret ? secret : null;
 }
 
 // --- Cloud WebSocket management ---
@@ -161,6 +181,101 @@ async function logEvent(endpoint: string, payload: unknown, response?: { status:
   } catch { /* best-effort — don't break the request */ }
 }
 
+// --- Write-ahead outbox ---
+//
+// When an upstream relay fails (network error or 5xx), the event is persisted
+// to ~/.polaris/outbox/ instead of being dropped, and a background retry loop
+// re-POSTs it with exponential backoff (1s doubling, capped at 30s). Files are
+// removed on success — and on a permanent upstream 4xx, which no retry can
+// fix. Re-sends are idempotent upstream (events have stable ids), so a
+// duplicate POST after a lost response is harmless. The JSONL log above is
+// unchanged and still records everything.
+
+const OUTBOX_DIR = join(homedir(), ".polaris", "outbox");
+
+interface OutboxEntry {
+  t: string;
+  project: string;
+  session: string;
+  body: unknown; // the exact { sender, payload } body for the events endpoint
+}
+
+const pendingOutbox = new Set<string>(); // absolute file paths awaiting retry
+let outboxTimer: ReturnType<typeof setTimeout> | null = null;
+let outboxDelayMs = 1000;
+const OUTBOX_MAX_DELAY_MS = 30_000;
+let outboxReady: Promise<void> | null = null;
+
+function ensureOutboxDir(): Promise<void> {
+  if (!outboxReady) outboxReady = mkdir(OUTBOX_DIR, { recursive: true }).then(() => {});
+  return outboxReady;
+}
+
+async function enqueueOutbox(project: string, session: string, body: unknown): Promise<void> {
+  try {
+    await ensureOutboxDir();
+    const entry: OutboxEntry = { t: new Date().toISOString(), project, session, body };
+    const file = join(OUTBOX_DIR, `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.json`);
+    await writeFile(file, JSON.stringify(entry) + "\n");
+    pendingOutbox.add(file);
+    scheduleOutboxFlush();
+  } catch { /* best-effort — the JSONL log still has the payload */ }
+}
+
+function scheduleOutboxFlush(): void {
+  if (outboxTimer || pendingOutbox.size === 0) return;
+  outboxTimer = setTimeout(() => {
+    outboxTimer = null;
+    void flushOutbox();
+  }, outboxDelayMs);
+  // Don't keep the process (or the test runner) alive just for retries
+  (outboxTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+async function flushOutbox(): Promise<void> {
+  const serviceUrl = getServiceUrl();
+  let hadFailure = false;
+  for (const file of Array.from(pendingOutbox)) {
+    try {
+      const entry = JSON.parse(await readFile(file, "utf-8")) as OutboxEntry;
+      const res = await fetch(
+        `${serviceUrl}/projects/${entry.project}/sessions/${entry.session}/events`,
+        { method: "POST", headers: await authHeaders(), body: JSON.stringify(entry.body) }
+      );
+      if (res.ok || (res.status >= 400 && res.status < 500)) {
+        if (!res.ok) {
+          console.error(`polaris daemon: dropping outbox entry ${file} — upstream rejected it permanently (${res.status})`);
+        }
+        pendingOutbox.delete(file);
+        await unlink(file).catch(() => {});
+      } else {
+        hadFailure = true; // 5xx — keep for the next pass
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        pendingOutbox.delete(file); // removed externally (e.g. polaris recover)
+      } else {
+        hadFailure = true; // network/parse error — keep for the next pass
+      }
+    }
+  }
+  outboxDelayMs = hadFailure ? Math.min(outboxDelayMs * 2, OUTBOX_MAX_DELAY_MS) : 1000;
+  scheduleOutboxFlush();
+}
+
+// Pick up outbox files left over from a previous daemon run. Only called from
+// the import.meta.main block: tests that start the daemon in-process must
+// never replay (or delete) a developer's real outbox against a test server.
+async function scanOutbox(): Promise<void> {
+  try {
+    await ensureOutboxDir();
+    for (const name of await readdir(OUTBOX_DIR)) {
+      if (name.endsWith(".json")) pendingOutbox.add(join(OUTBOX_DIR, name));
+    }
+    scheduleOutboxFlush();
+  } catch { /* best-effort */ }
+}
+
 // --- HTTP Server ---
 
 function json(data: unknown, status = 200): Response {
@@ -187,6 +302,13 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
       const url = new URL(req.url);
       const { pathname } = url;
       const method = req.method;
+
+      // Shared-secret auth: enforced on ALL endpoints when a secret is
+      // configured; no-op when none is resolved (tests / back-compat).
+      const daemonSecret = getDaemonSecret();
+      if (daemonSecret && req.headers.get("x-polaris-daemon-secret") !== daemonSecret) {
+        return error("Unauthorized", 401);
+      }
 
       // POST /register — MCP server registers its CC session
       if (method === "POST" && pathname === "/register") {
@@ -352,11 +474,20 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const ccSessionId = body.session_id;
           if (!ccSessionId) return error("session_id required in hook payload", 400);
 
+          // Session routing (deterministic, in priority order):
+          // 1. Exact match: session_id is a known mapping (registered via
+          //    MCP, connected via /connect, or a previously learned alias) —
+          //    always routed by that match, regardless of how many other
+          //    sessions are connected. A matchable event is never dropped.
+          // 2. No match + exactly one connected session: route to it and
+          //    remember session_id as an alias of that mapping (the MCP
+          //    client's generated UUID differs from CC's hook session_id),
+          //    so later events route by rule 1 even once more sessions join.
+          // 3. No match + multiple connected sessions: truly unmatchable —
+          //    drop, but loudly (console warning + JSONL log entry).
+          // 4. No match + nothing connected: not_connected (existing).
           let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
-            // CC session_id doesn't match any registered MCP client.
-            // Try to find a connected session to route to (the MCP client
-            // generates its own UUID, which differs from CC's session_id).
             const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
             if (connectedSessions.length === 1) {
               // Only one active session — route to it and remember the mapping
@@ -371,7 +502,17 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               }
               injectQueues.set(ccSessionId, queue);
             } else if (connectedSessions.length > 1) {
-              // Multiple sessions — can't determine which one. Discard.
+              // Multiple sessions and session_id matches none of them (nor any
+              // learned alias) — can't determine which one. Drop with a clear
+              // warning, never silently.
+              const candidates = connectedSessions.map((m) => `${m.project}/${m.session}`).join(", ");
+              console.error(
+                `polaris daemon: dropping ${String(body.hook_event_name ?? "hook")} event — ` +
+                `session_id ${ccSessionId} matches no known mapping and ${connectedSessions.length} ` +
+                `sessions are connected (${candidates}). ` +
+                `Reconnect with polaris_connect in the affected Claude session to re-establish routing.`
+              );
+              await logEvent("/events", body, { status: 0, body: `dropped: ambiguous across ${connectedSessions.length} sessions (${candidates})` });
               return json({ status: "ambiguous" });
             } else {
               return json({ status: "not_connected" });
@@ -382,16 +523,36 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const hookEvent = body.hook_event_name as string | undefined;
           const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
 
-          // Relay to cloud service
+          // Relay to cloud service; on network failure or upstream 5xx,
+          // persist to the write-ahead outbox instead of dropping
           const serviceUrl = getServiceUrl();
-          const res = await fetch(
-            `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
-            {
-              method: "POST",
-              headers: await authHeaders(),
-              body: JSON.stringify({ sender, payload: body }),
+          const relayBody = { sender, payload: body };
+          let res: Response | null = null;
+          try {
+            res = await fetch(
+              `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
+              {
+                method: "POST",
+                headers: await authHeaders(),
+                body: JSON.stringify(relayBody),
+              }
+            );
+          } catch {
+            res = null; // network failure
+          }
+
+          if (!res || res.status >= 500) {
+            console.error(`polaris daemon: upstream relay failed (${res ? res.status : "network error"}) — queued to outbox`);
+            await logEvent("/events", body, { status: res?.status ?? 0, body: "queued to outbox" });
+            await enqueueOutbox(mapping.project, mapping.session, relayBody);
+            // The event is durably accepted (outbox), so still drain injects
+            if (hookEvent === "UserPromptSubmit") {
+              const queue = injectQueues.get(mapping.ccSessionId);
+              const pendingInjects = queue ? queue.splice(0, queue.length) : [];
+              return json({ ok: true, pendingInjects, queued: true });
             }
-          );
+            return json({ status: "queued" });
+          }
 
           if (!res.ok) {
             const err = await res.text();
@@ -510,22 +671,34 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (!mapping || !mapping.project) return error("Not connected", 400);
 
           const serviceUrl = getServiceUrl();
-          const res = await fetch(
-            `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
-            {
-              method: "POST",
-              headers: await authHeaders(),
-              body: JSON.stringify({
-                // Replies come from the agent, not the human driver
-                sender: mapping.agent,
-                payload: {
-                  hook_event_name: "Stop",
-                  session_id: body.ccSessionId,
-                  stop_response: body.message,
-                },
-              }),
-            }
-          );
+          const relayBody = {
+            // Replies come from the agent, not the human driver
+            sender: mapping.agent,
+            payload: {
+              hook_event_name: "Stop",
+              session_id: body.ccSessionId,
+              stop_response: body.message,
+            },
+          };
+          let res: Response | null = null;
+          try {
+            res = await fetch(
+              `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
+              {
+                method: "POST",
+                headers: await authHeaders(),
+                body: JSON.stringify(relayBody),
+              }
+            );
+          } catch {
+            res = null; // network failure
+          }
+          if (!res || res.status >= 500) {
+            console.error(`polaris daemon: upstream reply relay failed (${res ? res.status : "network error"}) — queued to outbox`);
+            await logEvent("/reply", body, { status: res?.status ?? 0, body: "queued to outbox" });
+            await enqueueOutbox(mapping.project, mapping.session, relayBody);
+            return json({ status: "queued" });
+          }
           if (!res.ok) {
             const err = await res.text();
             await logEvent("/reply", body, { status: res.status, body: err });
@@ -562,14 +735,30 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
     },
   });
 
-  return { server, sessions, stop: () => server.stop(true) };
+  return {
+    server,
+    sessions,
+    stop: () => {
+      if (outboxTimer) {
+        clearTimeout(outboxTimer);
+        outboxTimer = null;
+      }
+      server.stop(true);
+    },
+  };
 }
 
 // --- Run if executed directly ---
 if (import.meta.main) {
   // Load config before starting so getServiceUrl() has the active profile
+  // (and getDaemonSecret() the configured daemonSecret)
   await loadConfig();
+  // Replay any events left in the outbox by a previous daemon run
+  await scanOutbox();
   const { server } = startDaemon();
   console.error(`Polaris daemon listening on http://127.0.0.1:${server.port}`);
   console.error(`  API endpoint: ${getServiceUrl()}`);
+  if (getDaemonSecret()) {
+    console.error("  Auth: x-polaris-daemon-secret required on all endpoints");
+  }
 }
