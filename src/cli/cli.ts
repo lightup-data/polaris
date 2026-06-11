@@ -126,33 +126,23 @@ async function install(participantId?: string) {
   // The binary is at ~/.polaris/mcp/node_modules/.bin/polaris-mcp
   const mcpBin = join(mcpDir, "node_modules", ".bin", "polaris-mcp");
 
-  const mcpConfig = {
-    mcpServers: {
-      polaris: {
-        command: mcpBin,
-        args: [],
-        env: {
-          POLARIS_DAEMON_URL: "http://127.0.0.1:4322",
-        },
-      },
-    },
-  };
-
-  const mcpConfigPath = join(CLAUDE_DIR, ".mcp.json");
-  let existingMcp: Record<string, unknown> = {};
-  try {
-    existingMcp = JSON.parse(await readFile(mcpConfigPath, "utf-8"));
-  } catch { /* doesn't exist yet */ }
-
-  const mergedMcp = {
-    ...existingMcp,
-    mcpServers: {
-      ...(existingMcp as { mcpServers?: Record<string, unknown> }).mcpServers,
-      ...mcpConfig.mcpServers,
-    },
-  };
-  await writeFile(mcpConfigPath, JSON.stringify(mergedMcp, null, 2));
-  console.log("  ✓ MCP server config written");
+  // Register MCP server with Claude Code via `claude mcp add`
+  // This writes to the correct config location that Claude Code reads
+  // Remove first to avoid duplicates, then add with user scope
+  Bun.spawnSync(["claude", "mcp", "remove", "polaris", "-s", "user"], {
+    stdout: "ignore", stderr: "ignore",
+  });
+  const mcpAdd = Bun.spawnSync(
+    ["claude", "mcp", "add", "polaris", "-s", "user", "-e", "POLARIS_DAEMON_URL=http://127.0.0.1:4322", "--", mcpBin],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  if (mcpAdd.exitCode === 0) {
+    console.log("  ✓ MCP server registered with Claude Code");
+  } else {
+    console.error("  Warning: could not register MCP server with Claude Code.");
+    console.error("  " + mcpAdd.stderr.toString().trim());
+    console.error(`  Run manually: claude mcp add -s user -e POLARIS_DAEMON_URL=http://127.0.0.1:4322 polaris -- ${mcpBin}`);
+  }
 
   // Hooks
   const captureShPath = join(import.meta.dir, "..", "..", "hooks", "capture.sh");
