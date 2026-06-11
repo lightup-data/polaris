@@ -99,6 +99,9 @@ export const Project = z.object({
   name: z.string().min(1),
   slack_channel_id: z.string().nullable().optional(),
   slack_channel_name: z.string().nullable().optional(),
+  // 'org' (default, visible to whole org) or 'members' (restricted to project_members).
+  // Optional for back-compat with rows/payloads that predate the visibility migration.
+  visibility: z.string().optional(),
   created_at: z.string().datetime(),
 });
 
@@ -113,3 +116,21 @@ export const Session = z.object({
 });
 
 export type Session = z.infer<typeof Session>;
+
+// --- Annotations (curation: stars, tags, decisions) ---
+
+export const AnnotationKind = z.enum(["star", "tag", "decision"]);
+export type AnnotationKind = z.infer<typeof AnnotationKind>;
+
+export const Annotation = z.object({
+  id: z.string().uuid(),
+  event_id: z.string().uuid().nullable(),
+  project: z.string().min(1),
+  session: z.string().min(1),
+  participant_id: z.string().nullable(),
+  kind: AnnotationKind,
+  value: z.string().nullable(),
+  created_at: z.string().datetime(),
+});
+
+export type Annotation = z.infer<typeof Annotation>;
