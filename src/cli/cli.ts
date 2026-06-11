@@ -109,20 +109,22 @@ function appToApi(appUrl: string): string {
 async function install(participantId?: string) {
   await mkdir(CLAUDE_DIR, { recursive: true });
 
-  // Ensure the package is globally installed so polaris-mcp binary persists
-  console.log("  Installing @lightupai/polaris globally...");
-  const npmInstall = Bun.spawnSync(["npm", "install", "-g", "@lightupai/polaris@latest"], {
-    stdout: "ignore",
-    stderr: "pipe",
-  });
+  // Install package to ~/.polaris/mcp/ (user-local, no sudo needed, persistent)
+  const mcpDir = join(POLARIS_DIR, "mcp");
+  await mkdir(mcpDir, { recursive: true });
+
+  console.log("  Installing MCP server to ~/.polaris/mcp/...");
+  const npmInstall = Bun.spawnSync(
+    ["npm", "install", "--prefix", mcpDir, "@lightupai/polaris@latest"],
+    { stdout: "ignore", stderr: "pipe" }
+  );
   if (npmInstall.exitCode !== 0) {
-    console.error("  Warning: global install failed. MCP server may not work.");
-    console.error("  Run manually: npm install -g @lightupai/polaris");
+    console.error("  Warning: MCP server install failed.");
+    console.error("  " + npmInstall.stderr.toString().trim());
   }
 
-  // Find the globally installed polaris-mcp binary
-  const whichResult = Bun.spawnSync(["which", "polaris-mcp"], { stdout: "pipe" });
-  const mcpBin = whichResult.stdout.toString().trim() || "polaris-mcp";
+  // The binary is at ~/.polaris/mcp/node_modules/.bin/polaris-mcp
+  const mcpBin = join(mcpDir, "node_modules", ".bin", "polaris-mcp");
 
   const mcpConfig = {
     mcpServers: {
