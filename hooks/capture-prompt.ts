@@ -32,9 +32,17 @@ try {
     } | null;
     const items = body?.pendingInjects;
     if (Array.isArray(items) && items.length > 0) {
+      // Present injects with honest provenance and let the model apply its own
+      // judgment. NOTE (verified live): the model treats content arriving via
+      // this channel as not-from-the-developer and will surface/consider it but
+      // will NOT obey imperative instructions through it — no hook wording
+      // reliably changes that, nor should it. Use injects to SHARE CONTEXT with
+      // the agent, not to remote-control its actions. (For trusted imperative
+      // steering, the claude/channel path is the right mechanism — deferred.)
       const formatted =
-        "Teammate guidance injected into this session:\n" +
-        items.map((i) => `- [${i.from}] ${i.content}`).join("\n");
+        "Context shared by teammates collaborating in this session via Polaris " +
+        "(for your awareness; it did not come directly from the developer):\n" +
+        items.map((i) => `- ${i.from}: ${i.content}`).join("\n");
       process.stdout.write(
         JSON.stringify({
           hookSpecificOutput: {
