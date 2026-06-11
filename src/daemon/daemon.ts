@@ -13,6 +13,7 @@ interface SessionMapping {
   agent: string;
   slackChannel?: string;
   ws: WebSocket | null;
+  pendingMapping?: boolean; // true until a hook event maps the real CC session ID
 }
 
 function generateSessionName(): string {
@@ -232,6 +233,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             user: body.user,
             agent: agentId,
             ws: null,
+            pendingMapping: true, // waiting for hook event to map the real CC session ID
           };
           sessions.set(body.ccSessionId, mapping);
 
@@ -347,18 +349,24 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (!mapping || !mapping.project) {
             // CC session_id doesn't match any registered MCP client.
             // The MCP server uses a different UUID than CC's session_id.
-            // Try to find the MCP session that this CC session belongs to.
-            // Heuristic: if only one connected session exists, route to it.
-            // Otherwise, drop the event — the user needs to /polaris join first.
-            const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
-            if (connectedSessions.length === 1) {
-              mapping = connectedSessions[0];
-              // Remember this mapping for future events from this CC session
+            // Match to a session with pendingMapping (most recent first).
+            const pending = Array.from(sessions.values()).filter((m) => m.project && m.pendingMapping);
+            if (pending.length > 0) {
+              // Map the CC session ID to the most recently connected pending session
+              mapping = pending[pending.length - 1];
+              mapping.pendingMapping = false;
+              // Register under the real CC session ID for future events
               sessions.set(ccSessionId, { ...mapping, ccSessionId });
+              console.error(`[daemon] Mapped CC session ${ccSessionId.slice(0, 8)} → ${mapping.project}/${mapping.session}`);
             } else {
-              // Multiple or zero sessions — can't determine which one.
-              // Drop silently; events will flow once /polaris join maps the session.
-              return json({ status: connectedSessions.length > 0 ? "ambiguous" : "not_connected" });
+              // No pending sessions — try single-session fallback
+              const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
+              if (connectedSessions.length === 1) {
+                mapping = connectedSessions[0];
+                sessions.set(ccSessionId, { ...mapping, ccSessionId });
+              } else {
+                return json({ status: connectedSessions.length > 0 ? "ambiguous" : "not_connected" });
+              }
             }
           }
 
