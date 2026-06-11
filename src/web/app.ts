@@ -17,7 +17,16 @@ import {
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
-import { renderSetupView, renderActiveView, renderProfileView, renderErrorView } from "./views";
+import {
+  renderSetupView,
+  renderActiveView,
+  renderProfileView,
+  renderErrorView,
+  renderTranscriptView,
+  renderSearchView,
+  type TranscriptEvent,
+  type SearchResult,
+} from "./views";
 import { renderLandingPage } from "./pages";
 import { createSystemChannel, postSystemEvent } from "../slack/system";
 import {
@@ -65,6 +74,9 @@ setInterval(() => {
 
 export function createApp(sql: Sql) {
   const app = new Hono();
+
+  // Polaris API service (same convention as slack/bridge.ts)
+  const apiUrl = process.env.POLARIS_API_URL ?? "http://localhost:4321";
 
   // --- Landing page ---
 
@@ -183,13 +195,14 @@ export function createApp(sql: Sql) {
     const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
     const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
     const promptCounts = await getSessionPromptCounts(sql, payload.org_id);
+    const participantId = payload.participant_id;
 
     function buildSessionFixture(s: typeof allSessions[0]): import("./fixtures").SessionFixture {
       return {
         name: s.name,
         project: s.project,
         driver: s.driver ?? "",
-        role: (s.driver === payload.participant_id ? "driver" : "advisor") as "driver" | "advisor",
+        role: (s.driver === participantId ? "driver" : "advisor") as "driver" | "advisor",
         description: "",
         participants: s.driver ? [{ id: s.driver, role: "driver" as const }] : [],
         eventCount: promptCounts.get(`${s.project}/${s.name}`) ?? 0,
@@ -246,9 +259,125 @@ export function createApp(sql: Sql) {
       slackConnected: !!org.slack_team_id,
       cliInstalled: false,
       hasConnectedSession: false,
+      totalPrompts: 0,
     };
 
     return layout(renderProfileView(ctx, payload.participant_id), "Polaris - Profile");
+  });
+
+  // --- Session transcript ---
+
+  app.get("/sessions/:proj/:sess", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.redirect("/login");
+
+    const payload = await verifyToken(token);
+    if (!payload) return c.redirect("/login");
+
+    const org = await getOrg(sql, payload.org_id);
+    if (!org) return c.redirect("/login");
+
+    const proj = c.req.param("proj");
+    const sess = c.req.param("sess");
+    const before = c.req.query("before");
+
+    const eventsUrl = new URL(`${apiUrl}/projects/${encodeURIComponent(proj)}/sessions/${encodeURIComponent(sess)}/events`);
+    eventsUrl.searchParams.set("limit", "200");
+    if (before) eventsUrl.searchParams.set("before", before);
+
+    let events: TranscriptEvent[];
+    let nextCursor: string | null;
+    try {
+      const res = await fetch(eventsUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const message = res.status === 404 ? "Session not found." : `Failed to load transcript (${res.status}).`;
+        return layout(renderErrorView(message, "Back to dashboard", `/dashboard?token=${token}`));
+      }
+      const data = (await res.json()) as { events: TranscriptEvent[]; nextCursor: string | null };
+      events = data.events ?? [];
+      nextCursor = data.nextCursor ?? null;
+    } catch {
+      return layout(renderErrorView("Could not reach the Polaris API.", "Back to dashboard", `/dashboard?token=${token}`));
+    }
+
+    const ctx = { token, userName: payload.name, orgName: org.name, email: payload.email };
+    const title = `Polaris - ${proj}/${sess}`.replace(/[<>&"]/g, "");
+    return layout(renderTranscriptView(ctx, proj, sess, events, nextCursor, before), title);
+  });
+
+  // Proxies to the API inject endpoint; the API derives the sender from the bearer token.
+  app.post("/sessions/:proj/:sess/inject", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.redirect("/login");
+
+    const payload = await verifyToken(token);
+    if (!payload) return c.redirect("/login");
+
+    const proj = c.req.param("proj");
+    const sess = c.req.param("sess");
+    const transcriptUrl = `/sessions/${encodeURIComponent(proj)}/${encodeURIComponent(sess)}?token=${token}`;
+
+    const body = await c.req.parseBody();
+    const content = typeof body.content === "string" ? body.content.trim() : "";
+    if (!content) return c.redirect(transcriptUrl);
+
+    try {
+      const res = await fetch(`${apiUrl}/projects/${encodeURIComponent(proj)}/sessions/${encodeURIComponent(sess)}/inject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        return layout(renderErrorView(`Inject failed (${res.status}).`, "Back to transcript", transcriptUrl));
+      }
+    } catch {
+      return layout(renderErrorView("Could not reach the Polaris API.", "Back to transcript", transcriptUrl));
+    }
+
+    return c.redirect(transcriptUrl);
+  });
+
+  // --- Search ---
+
+  app.get("/search", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.redirect("/login");
+
+    const payload = await verifyToken(token);
+    if (!payload) return c.redirect("/login");
+
+    const org = await getOrg(sql, payload.org_id);
+    if (!org) return c.redirect("/login");
+
+    const query = {
+      q: (c.req.query("q") ?? "").trim(),
+      project: c.req.query("project") ?? "",
+      sender: c.req.query("sender") ?? "",
+      source: c.req.query("source") ?? "",
+    };
+
+    let results: SearchResult[] | null = null;
+    let searchError: string | undefined;
+    if (query.q) {
+      const searchUrl = new URL(`${apiUrl}/search`);
+      searchUrl.searchParams.set("q", query.q);
+      if (query.project) searchUrl.searchParams.set("project", query.project);
+      if (query.sender) searchUrl.searchParams.set("sender", query.sender);
+      if (query.source) searchUrl.searchParams.set("source", query.source);
+      try {
+        const res = await fetch(searchUrl, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          results = ((await res.json()) as { results: SearchResult[] }).results ?? [];
+        } else {
+          searchError = `Search failed (${res.status}).`;
+        }
+      } catch {
+        searchError = "Could not reach the Polaris API.";
+      }
+    }
+
+    const ctx = { token, userName: payload.name, orgName: org.name, email: payload.email };
+    return layout(renderSearchView(ctx, query, results, searchError), "Polaris - Search");
   });
 
   // --- Preview (dev only — all view states on one page) ---

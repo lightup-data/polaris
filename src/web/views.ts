@@ -16,8 +16,20 @@ interface ViewContext {
   totalPrompts: number;
 }
 
-function navOpts(ctx: ViewContext): NavOpts {
+function navOpts(ctx: { userName: string; orgName: string; email: string }): NavOpts {
   return { userName: ctx.userName, orgName: ctx.orgName, email: ctx.email };
+}
+
+// Minimal context for pages that don't need the full dashboard state (transcript, search).
+export interface PageContext {
+  token: string;
+  userName: string;
+  orgName: string;
+  email: string;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 // --- Copyable code block ---
@@ -212,7 +224,7 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
           </div>
         </details>
         <div class="space-y-4">
-          ${projects.map((p) => renderProjectCard(p, ctx.userName)).join("")}
+          ${projects.map((p) => renderProjectCard(p, ctx.userName, ctx.token)).join("")}
         </div>
       </div>`;
   }
@@ -236,7 +248,7 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
     </div>`);
 }
 
-function renderProjectCard(project: ProjectFixture, userName: string): string {
+function renderProjectCard(project: ProjectFixture, userName: string, token: string): string {
   const sessionCount = project.sessions.length;
   const participantId = `user:${userName.toLowerCase().replace(/\s+/g, ".")}`;
 
@@ -263,16 +275,18 @@ function renderProjectCard(project: ProjectFixture, userName: string): string {
           const promptLabel = s.eventCount > 0
             ? `<span class="text-xs text-gray-400">${s.eventCount} prompt${s.eventCount !== 1 ? "s" : ""}</span>`
             : '';
+          const transcriptHref = `/sessions/${encodeURIComponent(project.name)}/${encodeURIComponent(s.name)}?token=${token}`;
           return `
             <div class="px-4 py-3 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <div class="w-2 h-2 rounded-full bg-green-500"></div>
-                <p class="text-sm text-gray-700">${s.name}</p>
+                <a href="${transcriptHref}" class="text-sm text-gray-700 hover:text-polaris-700 hover:underline">${s.name}</a>
                 ${roleBadge}
               </div>
               <div class="flex items-center gap-3">
                 ${driverLabel}
                 ${promptLabel}
+                <a href="${transcriptHref}" class="text-xs font-medium text-polaris-700 hover:text-polaris-800">Transcript</a>
               </div>
             </div>`;
         }).join("")}
@@ -384,5 +398,204 @@ export function renderProfileView(ctx: ViewContext, participantId: string): stri
           ${copyBlock(ctx.token)}
         </div>
       </div>
+    </div>`;
+}
+
+// --- Session transcript view ---
+// Events arrive from the API newest-first ({ events, nextCursor }); we render ascending.
+
+export interface TranscriptEvent {
+  id: string;
+  project: string;
+  session: string;
+  timestamp: string;
+  source: string;
+  sender: string;
+  payload: Record<string, unknown>;
+}
+
+interface EventPayload {
+  hook_event_name?: string;
+  prompt?: string;
+  stop_response?: string;
+  last_assistant_message?: string;
+  tool_name?: string;
+  tool_input?: unknown;
+  tool_result?: unknown;
+  content?: string;
+}
+
+function eventMeta(e: TranscriptEvent): string {
+  return `<span class="text-xs text-gray-400">${escapeHtml(e.sender)} &middot; ${new Date(e.timestamp).toLocaleString()}</span>`;
+}
+
+function messageCard(badge: string, badgeClass: string, e: TranscriptEvent, text: string, cardClass = "bg-white border border-gray-200"): string {
+  return `
+    <div class="${cardClass} rounded-lg px-4 py-3">
+      <div class="flex items-baseline gap-2">
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium ${badgeClass}">${badge}</span>
+        ${eventMeta(e)}
+      </div>
+      <p class="mt-1.5 text-sm text-gray-800 whitespace-pre-wrap">${escapeHtml(text)}</p>
+    </div>`;
+}
+
+function renderTranscriptItem(e: TranscriptEvent): string {
+  const p = e.payload as EventPayload;
+
+  if (e.source === "inject") {
+    return `
+      <div class="border-l-4 border-amber-400 bg-amber-50 rounded-r-lg px-4 py-3">
+        <div class="flex items-baseline gap-2">
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Inject</span>
+          ${eventMeta(e)}
+        </div>
+        <p class="mt-1.5 text-sm text-gray-800 whitespace-pre-wrap">[${escapeHtml(e.sender)}] ${escapeHtml(p.content ?? "")}</p>
+      </div>`;
+  }
+
+  if (e.source === "reply") {
+    return messageCard("Reply", "bg-gray-100 text-gray-600", e, p.content ?? "");
+  }
+
+  if (typeof p.prompt === "string") {
+    return messageCard("Prompt", "bg-polaris-100 text-polaris-800", e, p.prompt);
+  }
+
+  if (typeof p.tool_name === "string") {
+    const detail = p.hook_event_name === "PostToolUse" ? p.tool_result : p.tool_input;
+    let detailText = "";
+    try { detailText = JSON.stringify(detail, null, 2) ?? ""; } catch { detailText = String(detail); }
+    return `
+      <details class="px-1">
+        <summary class="flex items-baseline gap-2 py-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer select-none">
+          <span class="font-mono text-gray-500">${escapeHtml(p.tool_name)}</span>
+          <span>${p.hook_event_name === "PostToolUse" ? "result" : "tool call"}</span>
+          <span class="ml-auto">${eventMeta(e)}</span>
+        </summary>
+        ${detailText ? `<pre class="mt-1 mb-2 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">${escapeHtml(detailText)}</pre>` : ""}
+      </details>`;
+  }
+
+  const response = typeof p.stop_response === "string" && p.stop_response ? p.stop_response : p.last_assistant_message;
+  if (typeof response === "string" && response) {
+    return messageCard("Agent", "bg-green-100 text-green-800", e, response, "bg-white border border-gray-200");
+  }
+
+  return "";
+}
+
+export function renderTranscriptView(
+  ctx: PageContext,
+  project: string,
+  session: string,
+  events: TranscriptEvent[],
+  nextCursor: string | null,
+  before?: string
+): string {
+  const base = `/sessions/${encodeURIComponent(project)}/${encodeURIComponent(session)}`;
+  const items = [...events].reverse().map(renderTranscriptItem).filter((html) => html !== "").join("\n");
+
+  const pagingLinks = [
+    before ? `<a href="${base}?token=${ctx.token}" class="text-xs font-medium text-polaris-700 hover:text-polaris-800">Back to latest</a>` : "",
+    nextCursor ? `<a href="${base}?token=${ctx.token}&before=${encodeURIComponent(nextCursor)}" class="text-xs font-medium text-polaris-700 hover:text-polaris-800">Load older</a>` : "",
+  ].filter(Boolean).join("");
+
+  return `
+    ${nav(ctx.token, navOpts(ctx))}
+    <div class="max-w-3xl mx-auto px-6 pt-12 pb-16 space-y-10">
+      <div>
+        ${sectionHeader("Session transcript")}
+        <div class="flex items-baseline justify-between mb-4">
+          <h1 class="text-2xl font-bold text-gray-900">${escapeHtml(session)}</h1>
+          <span class="text-sm text-gray-400 font-mono">${escapeHtml(project)}</span>
+        </div>
+        ${pagingLinks ? `<div class="flex items-center gap-4 mb-3">${pagingLinks}</div>` : ""}
+        ${items
+          ? `<div class="space-y-3">${items}</div>`
+          : `<div class="bg-white border border-gray-200 rounded-lg p-5 text-sm text-gray-500">No events captured for this session yet.</div>`}
+      </div>
+
+      <div>
+        ${sectionHeader("Inject guidance")}
+        <form method="POST" action="${base}/inject?token=${ctx.token}" class="bg-white border border-gray-200 rounded-lg p-5">
+          <p class="text-sm text-gray-500 mb-3">Send a note to this session's agent. It is delivered with the next prompt.</p>
+          <textarea name="content" rows="3" required placeholder="e.g. Use RS256, not HS256 &mdash; we need asymmetric keys" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-polaris-300 focus:border-polaris-300"></textarea>
+          <button type="submit" class="mt-3 px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Inject</button>
+        </form>
+      </div>
+    </div>`;
+}
+
+// --- Search view ---
+
+export interface SearchQuery {
+  q: string;
+  project: string;
+  sender: string;
+  source: string;
+}
+
+export interface SearchResult {
+  event: TranscriptEvent;
+  snippet: string;
+}
+
+// ts_headline marks matches with <b>...</b>; escape everything else, then restore the highlights.
+function snippetHtml(snippet: string): string {
+  return escapeHtml(snippet)
+    .replace(/&lt;b&gt;/g, '<b class="font-semibold text-polaris-800 bg-polaris-100 rounded px-0.5">')
+    .replace(/&lt;\/b&gt;/g, "</b>");
+}
+
+export function renderSearchView(ctx: PageContext, query: SearchQuery, results: SearchResult[] | null, searchError?: string): string {
+  const inputClass = "border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-polaris-300 focus:border-polaris-300";
+  const sourceOptions = ["", "hook", "inject", "reply"]
+    .map((s) => `<option value="${s}"${s === query.source ? " selected" : ""}>${s === "" ? "Any source" : s}</option>`)
+    .join("");
+
+  let resultsSection = "";
+  if (searchError) {
+    resultsSection = `<div class="bg-white border border-red-200 rounded-lg p-5 text-sm text-red-700">${escapeHtml(searchError)}</div>`;
+  } else if (results !== null) {
+    const resultItems = results.map(({ event, snippet }) => {
+      const href = `/sessions/${encodeURIComponent(event.project)}/${encodeURIComponent(event.session)}?token=${ctx.token}`;
+      return `
+        <a href="${href}" class="block bg-white border border-gray-200 rounded-lg p-4 hover:border-polaris-300 hover:shadow-sm transition">
+          <div class="flex items-baseline gap-2 text-xs text-gray-400">
+            <span class="font-medium text-gray-700">${escapeHtml(event.sender)}</span>
+            <span class="font-mono">${escapeHtml(event.project)}/${escapeHtml(event.session)}</span>
+            <span class="ml-auto">${new Date(event.timestamp).toLocaleString()}</span>
+          </div>
+          <p class="mt-1.5 text-sm text-gray-700">${snippetHtml(snippet)}</p>
+        </a>`;
+    }).join("");
+    resultsSection = results.length
+      ? `<div>
+           <p class="text-xs text-gray-400 mb-3">${results.length} result${results.length !== 1 ? "s" : ""} for &ldquo;${escapeHtml(query.q)}&rdquo;</p>
+           <div class="space-y-3">${resultItems}</div>
+         </div>`
+      : `<div class="bg-white border border-gray-200 rounded-lg p-5 text-sm text-gray-500">No results for &ldquo;${escapeHtml(query.q)}&rdquo;.</div>`;
+  }
+
+  return `
+    ${nav(ctx.token, navOpts(ctx))}
+    <div class="max-w-3xl mx-auto px-6 pt-12 pb-16 space-y-6">
+      <div>
+        ${sectionHeader("Search")}
+        <form method="GET" action="/search" class="bg-white border border-gray-200 rounded-lg p-5 space-y-3">
+          <input type="hidden" name="token" value="${ctx.token}">
+          <div class="flex gap-2">
+            <input name="q" value="${escapeHtml(query.q)}" placeholder="Search prompts, responses, and messages" class="flex-1 ${inputClass}">
+            <button type="submit" class="px-4 py-2 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Search</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input name="project" value="${escapeHtml(query.project)}" placeholder="Project" class="${inputClass}">
+            <input name="sender" value="${escapeHtml(query.sender)}" placeholder="Sender (e.g. user:priya)" class="${inputClass}">
+            <select name="source" class="bg-white ${inputClass}">${sourceOptions}</select>
+          </div>
+        </form>
+      </div>
+      ${resultsSection}
     </div>`;
 }
