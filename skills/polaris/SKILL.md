@@ -2,7 +2,7 @@
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
 allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join <project> | rename <new-name> | disconnect | (no args for status)]
+argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -13,12 +13,12 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**`/polaris join <project>`** — Connect to a session:
-1. Call `polaris_connect` with the given project and user identity `user:manu.bansal`
-2. A session name is auto-generated (e.g., `s-7a3f`)
+**`/polaris join #channel-name`** — Connect to a channel:
+1. Call `polaris_connect` with the given channel and user identity `user:manu.bansal`
+2. A session name is auto-generated
 3. Report the connection status including the session name
 
-**`/polaris rename <new-name>`** — Rename the current project:
+**`/polaris rename <new-name>`** — Rename the current channel:
 1. Call `polaris_rename` with the new name
 2. Report the result
 

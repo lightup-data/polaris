@@ -208,7 +208,7 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
           <summary class="text-xs text-polaris-700 hover:text-polaris-800 font-medium cursor-pointer select-none">+ Join another session</summary>
           <div class="mt-2 bg-white border border-gray-200 rounded-lg p-4">
             <p class="text-sm text-gray-500">Inside your AI agent, run:</p>
-            ${copyBlock("/polaris join &lt;project&gt;")}
+            ${copyBlock("/polaris join #channel-name")}
           </div>
         </details>
         <div class="space-y-4">
@@ -231,7 +231,7 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
           : "Inside your AI agent (Claude Code, Cursor, etc.), run:"}</p>
         ${ctx.hasConnectedSession
           ? ""
-          : copyBlock("/polaris join my-project")}
+          : copyBlock("/polaris join #my-channel")}
       </div>
     </div>`);
 }

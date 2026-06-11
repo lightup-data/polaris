@@ -53,12 +53,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          project: { type: "string", description: "Project name" },
+          channel: { type: "string", description: "Channel name (e.g., #polaris-dev or polaris-dev)" },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
         },
-        required: ["project", "user"],
+        required: ["channel", "user"],
       },
     },
     {
@@ -117,7 +117,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { project, user, session, agent } = args as { project: string; user: string; session?: string; agent?: string };
+    const { channel, user, session, agent } = args as { channel: string; user: string; session?: string; agent?: string };
+    const project = channel.replace(/^#/, ""); // strip leading # if present
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
@@ -131,7 +132,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";
         currentUser = user;
-        return { content: [{ type: "text", text: `Connected to ${currentProject}/${currentSession} as ${user}.` }] };
+        return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
     } catch {
