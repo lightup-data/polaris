@@ -118,6 +118,7 @@ tests/         Test suite (bun test)
 - [ ] Daemon local buffer — write-ahead log for fault tolerance. If the API is slow or down, the daemon should persist events locally and flush them asynchronously with retry/backoff, so hooks and MCP tools never block or lose data
 - [ ] Reconciliation and recovery — `polaris recover` command that diffs the daemon JSONL log against the DB, backfills missing events, and posts an abridged recovery summary to Slack as a thread reply at the correct timeline position
 - [ ] CD pipeline for Hetzner — auto-deploy to production on merge to master (SSH + docker compose up), similar to the npm publish job
+- [ ] Auto-update local skill/hooks — locally installed skill and hook files go stale when the repo changes. `polaris install` fixes it but there's no staleness detection or auto-update mechanism
 
 ## Development
 
