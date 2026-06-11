@@ -16,10 +16,13 @@ import {
   pushEvent,
   getProjectEvents,
   getSessionEvents,
+  getSessionEventsPage,
   getEventsSince,
+  searchEvents,
+  setSessionLabel,
   type Sql,
 } from "./db";
-import { verifyToken, type TokenPayload } from "./auth";
+import { verifyToken, assertSecretConfigured, type TokenPayload } from "./auth";
 import type { PolarisEvent, ParticipantId } from "../types";
 import { HookPayload, ParticipantId as ParticipantIdSchema } from "../types";
 
@@ -149,14 +152,18 @@ function error(message: string, status: number): Response {
 
 // --- Auth helper ---
 
-async function resolveOrgId(req: Request, defaultOrgId: string): Promise<string> {
+async function authOrgId(req: Request, defaultOrgId: string): Promise<{ orgId: string; participantId: string | null } | Response> {
   const auth = req.headers.get("Authorization");
   if (auth?.startsWith("Bearer ")) {
     const token = auth.slice(7);
     const payload = await verifyToken(token);
-    if (payload) return payload.org_id;
+    if (payload) return { orgId: payload.org_id, participantId: payload.participant_id };
   }
-  return defaultOrgId;
+  // No/invalid token: fall back to the default org outside production
+  if (process.env.NODE_ENV !== "production") {
+    return { orgId: defaultOrgId, participantId: null };
+  }
+  return error("Unauthorized", 401);
 }
 
 // --- Server factory ---
@@ -171,6 +178,7 @@ export async function startServer(opts: {
   defaultOrgId: string;
   stop: () => Promise<void>;
 }> {
+  assertSecretConfigured();
   const sql = await createDb(opts.databaseUrl);
   const port = opts.port ?? Number(process.env.PORT ?? 4321);
   const defaultOrgId = opts.defaultOrgId ?? "default";
@@ -198,9 +206,6 @@ export async function startServer(opts: {
       const method = req.method;
       let params: RouteParams | null;
 
-      // Resolve org from auth token or use default
-      const orgId = await resolveOrgId(req, defaultOrgId);
-
       // --- WebSocket upgrade ---
       params = matchRoute(method, pathname, "/projects/:proj/ws", "GET");
       if (params) {
@@ -212,6 +217,17 @@ export async function startServer(opts: {
         const upgraded = server.upgrade(req, { data: { project: params.proj, session: params.sess } });
         return upgraded ? undefined : error("WebSocket upgrade failed", 400);
       }
+
+      if (method === "GET" && pathname === "/status") {
+        return json({ ok: true, version: "0.0.1" });
+      }
+
+      // Resolve org from auth token; falls back to default org outside production,
+      // returns 401 in production without a valid token
+      const a = await authOrgId(req, defaultOrgId);
+      if (a instanceof Response) return a;
+      const orgId = a.orgId;
+      const participantId = a.participantId;
 
       // --- Project endpoints ---
 
@@ -374,6 +390,15 @@ export async function startServer(opts: {
       if (params) {
         const session = await getSession(sql, orgId, params.proj, params.sess);
         if (!session) return error("Session not found", 404);
+        // Paginated event history when limit/before is present; SSE stream otherwise
+        if (url.searchParams.has("limit") || url.searchParams.has("before")) {
+          const limitParam = url.searchParams.get("limit");
+          const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+          const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+          const before = url.searchParams.get("before") ?? undefined;
+          const { events, nextCursor } = await getSessionEventsPage(sql, orgId, params.proj, params.sess, { limit, before });
+          return json({ events, nextCursor });
+        }
         const proj = params.proj;
         const sess = params.sess;
         let controller: SseController;
@@ -392,20 +417,23 @@ export async function startServer(opts: {
         if (!session) return error("Session not found", 404);
         const body = await jsonBody(req);
         const parsed = z
-          .object({ content: z.string().min(1), sender: ParticipantIdSchema })
+          .object({ content: z.string().min(1), sender: ParticipantIdSchema.optional() })
           .safeParse(body);
         if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
+        // Authenticated callers always inject as themselves; anonymous (non-prod) callers must supply a sender
+        const sender = participantId ?? parsed.data.sender;
+        if (!sender) return error("Invalid body: sender is required", 400);
         const event: PolarisEvent = {
           id: crypto.randomUUID(),
           project: params.proj,
           session: params.sess,
           timestamp: new Date().toISOString(),
           source: "inject",
-          sender: parsed.data.sender,
+          sender,
           payload: {
             type: "inject" as const,
             content: parsed.data.content,
-            sender: parsed.data.sender,
+            sender,
             target: params.sess,
           },
         };
@@ -444,8 +472,33 @@ export async function startServer(opts: {
         return json({ status: "claimed", driver: parsed.data.driver, session: params.sess });
       }
 
-      if (method === "GET" && pathname === "/status") {
-        return json({ ok: true, version: "0.0.1" });
+      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/label", "POST");
+      if (params) {
+        const session = await getSession(sql, orgId, params.proj, params.sess);
+        if (!session) return error("Session not found", 404);
+        const body = await jsonBody(req);
+        const parsed = z.object({ label: z.string() }).safeParse(body);
+        if (!parsed.success) return error("Invalid body: label is required", 400);
+        await setSessionLabel(sql, orgId, params.proj, params.sess, parsed.data.label);
+        return json({ ok: true });
+      }
+
+      // --- Search ---
+
+      if (method === "GET" && pathname === "/search") {
+        const q = url.searchParams.get("q");
+        if (!q || !q.trim()) return error("q is required", 400);
+        const limitParam = url.searchParams.get("limit");
+        const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+        const { results } = await searchEvents(sql, orgId, {
+          q,
+          project: url.searchParams.get("project") ?? undefined,
+          session: url.searchParams.get("session") ?? undefined,
+          sender: url.searchParams.get("sender") ?? undefined,
+          source: url.searchParams.get("source") ?? undefined,
+          limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+        });
+        return json({ results });
       }
 
       return error("Not found", 404);
