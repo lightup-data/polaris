@@ -119,6 +119,7 @@ tests/         Test suite (bun test)
 - [ ] Reconciliation and recovery — `polaris recover` command that diffs the daemon JSONL log against the DB, backfills missing events, and posts an abridged recovery summary to Slack as a thread reply at the correct timeline position
 - [ ] CD pipeline for Hetzner — auto-deploy to production on merge to master (SSH + docker compose up), similar to the npm publish job
 - [ ] Auto-update local skill/hooks — locally installed skill and hook files go stale when the repo changes. `polaris install` fixes it but there's no staleness detection or auto-update mechanism
+- [ ] Slack channel name collision — if a channel name was previously deleted, Slack reserves it. Bridge should handle `name_taken` by trying a prefix/suffix (e.g., `p-project-name`)
 
 ## Development
 

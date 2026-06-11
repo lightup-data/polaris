@@ -346,19 +346,43 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
             // CC session_id doesn't match any registered MCP client.
-            // Try to find a connected session to route to (the MCP client
-            // generates its own UUID, which differs from CC's session_id).
+            // This CC session hasn't been /polaris join'd yet.
+            // Auto-create a new Polaris session in the same project as an existing session.
             const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
-            if (connectedSessions.length === 1) {
-              // Only one active session — route to it and remember the mapping
-              mapping = connectedSessions[0];
-              sessions.set(ccSessionId, { ...mapping, ccSessionId, slackChannel: undefined });
-            } else if (connectedSessions.length > 1) {
-              // Multiple sessions — can't determine which one. Discard.
-              return json({ status: "ambiguous" });
-            } else {
+            if (connectedSessions.length === 0) {
               return json({ status: "not_connected" });
             }
+
+            // Use the first connected session as a template for project/user/agent
+            const template = connectedSessions[0];
+            const newSession = generateSessionName();
+
+            // Create the session on the API
+            const serviceUrl = getServiceUrl();
+            try {
+              const createRes = await fetch(`${serviceUrl}/projects/${template.project}/sessions`, {
+                method: "POST",
+                headers: await authHeaders(),
+                body: JSON.stringify({ name: newSession, driver: template.user }),
+              });
+              if (!createRes.ok && createRes.status !== 409) {
+                return json({ status: "session_create_failed" });
+              }
+            } catch {
+              return json({ status: "api_unreachable" });
+            }
+
+            mapping = {
+              ccSessionId,
+              project: template.project,
+              session: newSession,
+              user: template.user,
+              agent: template.agent,
+              slackChannel: template.slackChannel,
+              ws: null,
+            };
+            sessions.set(ccSessionId, mapping);
+            console.error(`[daemon] Auto-created session ${template.project}/${newSession} for CC session ${ccSessionId.slice(0, 8)}`);
           }
 
           // Determine sender: human for prompts, agent for everything else
