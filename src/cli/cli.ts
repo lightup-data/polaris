@@ -178,7 +178,7 @@ async function install(participantId?: string) {
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
 allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join <project> <session> | rename <new-name> | disconnect | (no args for status)]
+argument-hint: [join <project> | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -189,9 +189,10 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join <project> <session>\`** — Connect to a session:
-1. Call \`polaris_connect\` with the given project, session, and user identity ${identity}
-2. Report the connection status
+**\`/polaris join <project>\`** — Connect to a session:
+1. Call \`polaris_connect\` with the given project and user identity ${identity}
+2. A session name is auto-generated
+3. Report the connection status including the session name
 
 **\`/polaris rename <new-name>\`** — Rename the current project:
 1. Call \`polaris_rename\` with the new name
@@ -309,7 +310,7 @@ async function login(appUrl: string, profileName?: string) {
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
 allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join <project> <session> | rename <new-name> | disconnect | (no args for status)]
+argument-hint: [join <project> | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -320,9 +321,10 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join <project> <session>\`** — Connect to a session:
-1. Call \`polaris_connect\` with the given project, session, and user identity ${identity}
-2. Report the connection status
+**\`/polaris join <project>\`** — Connect to a session:
+1. Call \`polaris_connect\` with the given project and user identity ${identity}
+2. A session name is auto-generated
+3. Report the connection status including the session name
 
 **\`/polaris rename <new-name>\`** — Rename the current project:
 1. Call \`polaris_rename\` with the new name
@@ -517,7 +519,16 @@ switch (command) {
     console.log("Polaris — authenticating\n");
     await login(appUrl, profileName);
     console.log("\n✓ Login complete!");
-    console.log("\nNext: start the daemon with `polaris daemon`, then `/polaris join <project> <session>` in your AI agent.");
+    // Auto-start daemon in background
+    const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
+    Bun.spawn(["bun", "run", daemonPath], {
+      stdout: "ignore",
+      stderr: "ignore",
+      env: { ...process.env },
+    }).unref?.();
+    console.log("  ✓ Daemon started in background");
+
+    console.log("\nNext: restart Claude Code, then run `/polaris join <project>` in your AI agent.");
     break;
   }
 
@@ -554,7 +565,16 @@ switch (command) {
     console.log("[2/2] Authenticating...\n");
     await login(DEFAULT_APP_URL);
     console.log("\n✓ Polaris is set up on this machine!");
-    console.log("\nNext: start the daemon with `polaris daemon`, then `/polaris join <project> <session>` in your AI agent.");
+    // Auto-start daemon in background
+    const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
+    Bun.spawn(["bun", "run", daemonPath], {
+      stdout: "ignore",
+      stderr: "ignore",
+      env: { ...process.env },
+    }).unref?.();
+    console.log("  ✓ Daemon started in background");
+
+    console.log("\nNext: restart Claude Code, then run `/polaris join <project>` in your AI agent.");
     break;
 
   default:
