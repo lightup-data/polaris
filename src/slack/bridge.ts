@@ -1,22 +1,24 @@
 // --- Slack Bridge ---
 // Connects a project's event stream to a Slack channel.
-// Runs server-side, one bridge per org.
+// Runs server-side, one bridge per org (startAllBridges runs one per Slack-connected org).
 //
-// Project → Slack: session events → formatted Slack posts
+// Project → Slack: session events (LISTEN 'polaris_event' + slow backfill) → formatted Slack posts
 // Slack → Project: advisor messages → injected into target session
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { createDb, getOrg, listProjects, getProjectEvents, getOrgEventsSince, getSession, createSession, pushEvent, setProjectSlackChannel, type Sql, type Org } from "../service/db";
+import { createDb, getOrg, listProjects, getEventById, getOrgEventsSince, getSession, createSession, pushEvent, setProjectSlackChannel, type Sql, type Org } from "../service/db";
+import { discoverBridgeOrgs } from "../bridge-discover-org";
 import { formatEventForSlack, toMrkdwn, THREAD_THRESHOLD } from "./format";
 import type { PolarisEvent } from "../types";
 
 // --- Channel management ---
 
-// In-memory cache: project name → Slack channel ID
-const channelCache = new Map<string, string>();
+// Per-bridge in-memory cache: project name → Slack channel ID
+// (instantiated per org so same-named projects in different orgs don't collide)
+type ChannelCache = Map<string, string>;
 
-async function getOrCreateChannel(web: WebClient, sql: Sql, orgId: string, projectName: string): Promise<string> {
+async function getOrCreateChannel(web: WebClient, sql: Sql, orgId: string, projectName: string, channelCache: ChannelCache): Promise<string> {
   // 1. Check in-memory cache
   const cached = channelCache.get(projectName);
   if (cached) return cached;
@@ -85,7 +87,7 @@ async function getOrCreateChannel(web: WebClient, sql: Sql, orgId: string, proje
 
 // --- Event → Slack posting ---
 
-async function postEventToSlack(web: WebClient, sql: Sql, orgId: string, event: PolarisEvent): Promise<void> {
+async function postEventToSlack(web: WebClient, sql: Sql, orgId: string, event: PolarisEvent, channelCache: ChannelCache): Promise<void> {
   // Skip _system events (handled separately)
   if (event.project === "_system") return;
 
@@ -96,7 +98,7 @@ async function postEventToSlack(web: WebClient, sql: Sql, orgId: string, event: 
   if (!msg) return;
 
   try {
-    const channelId = await getOrCreateChannel(web, sql, orgId, event.project);
+    const channelId = await getOrCreateChannel(web, sql, orgId, event.project, channelCache);
     const isLong = msg.text.length > THREAD_THRESHOLD;
     // POLARIS_LONG_MSG controls how messages longer than THREAD_THRESHOLD are posted:
     //   "snippet" (default) — 500-char preview + full content as expandable text snippet
@@ -169,7 +171,8 @@ async function handleSlackMessage(
     user: string;
     channel: string;
     ts: string;
-  }
+  },
+  channelCache: ChannelCache
 ): Promise<void> {
   // Ignore bot's own messages
   if (event.user === botUserId) return;
@@ -284,23 +287,29 @@ async function handleSlackMessage(
 
 // --- Bridge startup ---
 
-export async function startBridge(opts: {
-  databaseUrl?: string;
+interface OrgBridge {
   orgId: string;
-  apiBaseUrl?: string;
-}): Promise<{ stop: () => void }> {
-  const sql = await createDb(opts.databaseUrl);
-  const org = await getOrg(sql, opts.orgId);
-  if (!org) throw new Error(`Org not found: ${opts.orgId}`);
-  if (!org.slack_bot_token) throw new Error(`Org ${opts.orgId} has no Slack bot token`);
+  handleEvent: (event: PolarisEvent) => Promise<void>;
+  stop: () => void;
+}
 
-  const appToken = process.env.SLACK_APP_TOKEN;
+// One independent bridge for one org: its own WebClient (org bot token), its own
+// SocketModeClient, its own channel cache and posted-event dedupe. Realtime delivery
+// is driven by the caller via handleEvent (fed from LISTEN 'polaris_event'); a slow
+// 30s backfill poll catches anything the LISTEN path missed (e.g. during reconnects).
+async function startOrgBridge(sql: Sql, org: Org): Promise<OrgBridge> {
+  if (!org.slack_bot_token) throw new Error(`Org ${org.id} has no Slack bot token`);
+
+  // Socket Mode needs an app-level token (not stored in the orgs table). Per-org
+  // override via SLACK_APP_TOKEN_<team id>, falling back to the shared SLACK_APP_TOKEN.
+  const appToken =
+    (org.slack_team_id ? process.env[`SLACK_APP_TOKEN_${org.slack_team_id}`] : undefined) ??
+    process.env.SLACK_APP_TOKEN;
   if (!appToken) throw new Error("SLACK_APP_TOKEN required for Socket Mode");
-
-  const apiBaseUrl = opts.apiBaseUrl ?? process.env.POLARIS_API_URL ?? "http://localhost:4321";
 
   const web = new WebClient(org.slack_bot_token);
   const socketMode = new SocketModeClient({ appToken });
+  const channelCache: ChannelCache = new Map();
 
   // Get bot user ID to filter own messages
   let botUserId = "";
@@ -322,11 +331,11 @@ export async function startBridge(opts: {
       // Handle channel rename system messages
       if (msg.subtype === "channel_name" && msg.channel && msg.name) {
         console.error(`[bridge] channel renamed: ${msg.channel} → ${msg.name}`);
-        const projects = await listProjects(sql, opts.orgId);
+        const projects = await listProjects(sql, org.id);
         for (const proj of projects) {
           if (proj.slack_channel_id === msg.channel) {
             channelCache.set(proj.name, msg.channel);
-            await setProjectSlackChannel(sql, opts.orgId, proj.name, msg.channel, msg.name);
+            await setProjectSlackChannel(sql, org.id, proj.name, msg.channel, msg.name);
             // Notify local daemon so status line updates immediately
             try {
               await fetch(`http://127.0.0.1:${process.env.POLARIS_DAEMON_PORT ?? 4322}/channel-update`, {
@@ -343,27 +352,33 @@ export async function startBridge(opts: {
 
       if (msg.subtype || !msg.channel || !msg.text || !msg.user) return;
       if (msg.user === botUserId) return;
-      await handleSlackMessage(web, sql, opts.orgId, botUserId, msg as { text: string; user: string; channel: string; ts: string });
+      await handleSlackMessage(web, sql, org.id, botUserId, msg as { text: string; user: string; channel: string; ts: string }, channelCache);
     } catch (e) {
       console.error(`[bridge] message handler error:`, e);
     }
   });
 
-  // Poll for new events directly from DB (bridge runs server-side)
+  // De-dupe between the realtime LISTEN path and the safety backfill poll
   const postedEventIds = new Set<string>();
+
+  async function handleEvent(event: PolarisEvent): Promise<void> {
+    if (event.project === "_system") return;
+    if (postedEventIds.has(event.id)) return;
+    postedEventIds.add(event.id);
+    await postEventToSlack(web, sql, org.id, event, channelCache);
+  }
+
+  // Safety backfill: slow poll catching anything the LISTEN path missed
   let lastPollTime = new Date().toISOString();
 
   async function pollEvents() {
     try {
       const since = lastPollTime;
-      const events = await getOrgEventsSince(sql, opts.orgId, since);
+      const events = await getOrgEventsSince(sql, org.id, since);
       const now = new Date().toISOString();
 
       for (const event of events) {
-        if (event.project === "_system") continue;
-        if (postedEventIds.has(event.id)) continue;
-        postedEventIds.add(event.id);
-        await postEventToSlack(web, sql, opts.orgId, event);
+        await handleEvent(event);
       }
 
       lastPollTime = now;
@@ -372,7 +387,7 @@ export async function startBridge(opts: {
     }
   }
 
-  const pollInterval = setInterval(pollEvents, 5000);
+  const pollInterval = setInterval(pollEvents, 30_000);
 
   // Start Socket Mode
   await socketMode.start();
@@ -380,9 +395,134 @@ export async function startBridge(opts: {
   console.error(`[bridge] Watching for messages in project channels`);
 
   return {
+    orgId: org.id,
+    handleEvent,
     stop: () => {
       clearInterval(pollInterval);
       socketMode.disconnect();
+    },
+  };
+}
+
+// Realtime backbone: one dedicated LISTEN('polaris_event') subscription. NOTIFY carries
+// the event id only; fetch the full event via getEventById (carries org_id) and route it.
+async function listenForEvents(
+  sql: Sql,
+  route: (event: PolarisEvent & { org_id: string }) => Promise<void>
+): Promise<() => Promise<void>> {
+  const { unlisten } = await sql.listen("polaris_event", (id) => {
+    void (async () => {
+      try {
+        const event = await getEventById(sql, id);
+        if (event) await route(event);
+      } catch (e) {
+        console.error("[bridge] LISTEN handler error:", e);
+      }
+    })();
+  });
+  return unlisten;
+}
+
+// Single-org bridge (back-compat: docker/bridge-entrypoint.sh passes one org id).
+export async function startBridge(opts: {
+  databaseUrl?: string;
+  orgId: string;
+  apiBaseUrl?: string;
+}): Promise<{ stop: () => void }> {
+  const sql = await createDb(opts.databaseUrl);
+  const org = await getOrg(sql, opts.orgId);
+  if (!org) throw new Error(`Org not found: ${opts.orgId}`);
+  if (!org.slack_bot_token) throw new Error(`Org ${opts.orgId} has no Slack bot token`);
+
+  const bridge = await startOrgBridge(sql, org);
+  const unlisten = await listenForEvents(sql, async (event) => {
+    if (event.org_id === org.id) await bridge.handleEvent(event);
+  });
+
+  return {
+    stop: () => {
+      void unlisten().catch(() => {});
+      bridge.stop();
+      sql.end();
+    },
+  };
+}
+
+// In-process guard: orgs this process is already bridging
+const startedOrgIds = new Set<string>();
+
+// Multi-org mode: discover every Slack-connected org and start one independent bridge
+// per org. Double-start is guarded twice: the in-process startedOrgIds set, plus a
+// session-scoped Postgres advisory lock (held on a reserved connection for the bridge's
+// lifetime) so two processes never bridge the same org. pg_try_advisory_lock (not the
+// blocking pg_advisory_lock) so a second process skips the org instead of hanging.
+export async function startAllBridges(opts: {
+  databaseUrl?: string;
+  apiBaseUrl?: string;
+} = {}): Promise<{ stop: () => void }> {
+  const sql = await createDb(opts.databaseUrl);
+  const bridges = new Map<string, OrgBridge>();
+  const cleanups: Array<() => void> = [];
+
+  const orgIds = await discoverBridgeOrgs(sql);
+  if (orgIds.length === 0) {
+    console.error("[bridge] No Slack-connected orgs found");
+  }
+
+  for (const orgId of orgIds) {
+    if (startedOrgIds.has(orgId)) {
+      console.error(`[bridge] Org ${orgId} already bridged in this process, skipping`);
+      continue;
+    }
+
+    // Cross-process guard: advisory lock on a hash of the org id, held for the life of
+    // the bridge on a dedicated (reserved) connection.
+    const lock = await sql.reserve();
+    let locked = false;
+    try {
+      const [row] = await lock`SELECT pg_try_advisory_lock(hashtext('polaris_bridge'), hashtext(${orgId})) AS locked`;
+      locked = row?.locked === true;
+    } catch (e) {
+      console.error(`[bridge] Advisory lock check failed for org ${orgId}:`, e);
+    }
+    if (!locked) {
+      lock.release();
+      console.error(`[bridge] Org ${orgId} is already bridged by another process, skipping`);
+      continue;
+    }
+
+    try {
+      const org = await getOrg(sql, orgId);
+      if (!org?.slack_bot_token) throw new Error("org missing or has no Slack bot token");
+      const bridge = await startOrgBridge(sql, org);
+      startedOrgIds.add(orgId);
+      bridges.set(orgId, bridge);
+      cleanups.push(() => {
+        bridge.stop();
+        bridges.delete(orgId);
+        startedOrgIds.delete(orgId);
+        void lock`SELECT pg_advisory_unlock(hashtext('polaris_bridge'), hashtext(${orgId}))`
+          .then(() => lock.release(), () => lock.release());
+      });
+    } catch (e) {
+      console.error(`[bridge] Failed to start bridge for org ${orgId}:`, e);
+      try { await lock`SELECT pg_advisory_unlock(hashtext('polaris_bridge'), hashtext(${orgId}))`; } catch { /* lock dies with the session */ }
+      lock.release();
+    }
+  }
+
+  // ONE LISTEN subscription fans events out to the right org's bridge by org_id
+  const unlisten = await listenForEvents(sql, async (event) => {
+    const bridge = bridges.get(event.org_id);
+    if (bridge) await bridge.handleEvent(event);
+  });
+
+  console.error(`[bridge] Multi-org bridge running for ${bridges.size} org(s)`);
+
+  return {
+    stop: () => {
+      void unlisten().catch(() => {});
+      for (const cleanup of cleanups) cleanup();
       sql.end();
     },
   };
@@ -391,9 +531,11 @@ export async function startBridge(opts: {
 // --- Run if executed directly ---
 if (import.meta.main) {
   const orgId = process.argv[2];
-  if (!orgId) {
-    console.error("Usage: bun run src/slack/bridge.ts <org-id>");
-    process.exit(1);
+  if (orgId) {
+    // Back-compat: explicit org id → single-org bridge (docker/bridge-entrypoint.sh)
+    await startBridge({ orgId });
+  } else {
+    // No args → bridge every Slack-connected org
+    await startAllBridges();
   }
-  await startBridge({ orgId });
 }
