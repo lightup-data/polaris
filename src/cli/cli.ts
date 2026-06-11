@@ -109,15 +109,26 @@ function appToApi(appUrl: string): string {
 async function install(participantId?: string) {
   await mkdir(CLAUDE_DIR, { recursive: true });
 
-  // MCP server config
-  // Use npx to run polaris-mcp from the published package. This avoids
-  // dangling file paths when installed via npx (temp directory gets cleaned up).
-  // The polaris-mcp bin entry resolves to src/client/client.ts within the package.
+  // Ensure the package is globally installed so polaris-mcp binary persists
+  console.log("  Installing @lightupai/polaris globally...");
+  const npmInstall = Bun.spawnSync(["npm", "install", "-g", "@lightupai/polaris@latest"], {
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  if (npmInstall.exitCode !== 0) {
+    console.error("  Warning: global install failed. MCP server may not work.");
+    console.error("  Run manually: npm install -g @lightupai/polaris");
+  }
+
+  // Find the globally installed polaris-mcp binary
+  const whichResult = Bun.spawnSync(["which", "polaris-mcp"], { stdout: "pipe" });
+  const mcpBin = whichResult.stdout.toString().trim() || "polaris-mcp";
+
   const mcpConfig = {
     mcpServers: {
       polaris: {
-        command: "npx",
-        args: ["-y", "polaris-mcp"],
+        command: mcpBin,
+        args: [],
         env: {
           POLARIS_DAEMON_URL: "http://127.0.0.1:4322",
         },
