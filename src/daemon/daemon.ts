@@ -346,43 +346,20 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
             // CC session_id doesn't match any registered MCP client.
-            // This CC session hasn't been /polaris join'd yet.
-            // Auto-create a new Polaris session in the same project as an existing session.
+            // The MCP server uses a different UUID than CC's session_id.
+            // Try to find the MCP session that this CC session belongs to.
+            // Heuristic: if only one connected session exists, route to it.
+            // Otherwise, drop the event — the user needs to /polaris join first.
             const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
-            if (connectedSessions.length === 0) {
-              return json({ status: "not_connected" });
+            if (connectedSessions.length === 1) {
+              mapping = connectedSessions[0];
+              // Remember this mapping for future events from this CC session
+              sessions.set(ccSessionId, { ...mapping, ccSessionId });
+            } else {
+              // Multiple or zero sessions — can't determine which one.
+              // Drop silently; events will flow once /polaris join maps the session.
+              return json({ status: connectedSessions.length > 0 ? "ambiguous" : "not_connected" });
             }
-
-            // Use the first connected session as a template for project/user/agent
-            const template = connectedSessions[0];
-            const newSession = generateSessionName();
-
-            // Create the session on the API
-            const serviceUrl = getServiceUrl();
-            try {
-              const createRes = await fetch(`${serviceUrl}/projects/${template.project}/sessions`, {
-                method: "POST",
-                headers: await authHeaders(),
-                body: JSON.stringify({ name: newSession, driver: template.user }),
-              });
-              if (!createRes.ok && createRes.status !== 409) {
-                return json({ status: "session_create_failed" });
-              }
-            } catch {
-              return json({ status: "api_unreachable" });
-            }
-
-            mapping = {
-              ccSessionId,
-              project: template.project,
-              session: newSession,
-              user: template.user,
-              agent: template.agent,
-              slackChannel: template.slackChannel,
-              ws: null,
-            };
-            sessions.set(ccSessionId, mapping);
-            console.error(`[daemon] Auto-created session ${template.project}/${newSession} for CC session ${ccSessionId.slice(0, 8)}`);
           }
 
           // Determine sender: human for prompts, agent for everything else
