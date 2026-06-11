@@ -22,7 +22,7 @@ const CONFIG_FILE = join(POLARIS_DIR, "config.json");
 const LEGACY_CREDENTIALS_FILE = join(POLARIS_DIR, "credentials.json");
 const CLAUDE_DIR = join(homedir(), ".claude");
 
-const DEFAULT_APP_URL = "https://app.polaris.lightup.ai";
+const DEFAULT_APP_URL = "https://app.withpolaris.ai";
 const LOCAL_APP_URL = "http://localhost:3000";
 
 // --- Config ---
@@ -88,8 +88,8 @@ function deriveProfileName(appUrl: string): string {
   if (appUrl.includes("localhost") || appUrl.includes("127.0.0.1")) return "local";
   try {
     const host = new URL(appUrl).hostname;
-    // app.polaris.lightup.ai → prod
-    if (host.includes("polaris.lightup.ai")) return "prod";
+    // app.withpolaris.ai → prod
+    if (host.includes("withpolaris.ai")) return "prod";
     // strip common prefixes
     return host.replace(/^app\./, "").replace(/\./g, "-");
   } catch {

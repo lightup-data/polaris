@@ -53,7 +53,7 @@ function getServiceUrl(): string {
     return cachedConfig.profiles[cachedConfig.active].api;
   }
   // 3. Fallback
-  return "https://api.polaris.lightup.ai";
+  return "https://api.withpolaris.ai";
 }
 
 let cachedToken: string | null | undefined = undefined;
