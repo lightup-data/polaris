@@ -90,34 +90,6 @@ export function renderLandingPage(): string {
 
     <div class="max-w-3xl mx-auto px-6">
 
-      <!-- How it works -->
-      <div class="py-16 border-t border-gray-200">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
-        <div class="mt-8 space-y-8">
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Connect</h3>
-              <p class="mt-1 text-sm text-gray-500">Sign up and connect your team's Slack workspace. Polaris uses Slack as the collaboration layer — no new apps to learn.</p>
-            </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Install</h3>
-              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris</code> on your machine sets up hooks, MCP server, and logs you in.</p>
-            </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Collaborate</h3>
-              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to Slack. Every prompt and response streams live — teammates reply there and their messages appear inline.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       </div>
     </div>
 
@@ -315,6 +287,34 @@ export function renderLandingPage(): string {
     </div>
 
     <div class="max-w-3xl mx-auto px-6">
+
+      <!-- How it works -->
+      <div class="py-16 border-t border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
+        <div class="mt-8 space-y-8">
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Connect</h3>
+              <p class="mt-1 text-sm text-gray-500">Sign up and connect your team's Slack workspace. Polaris uses Slack as the collaboration layer — no new apps to learn.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Install</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris</code> on your machine sets up hooks, MCP server, and logs you in.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Collaborate</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to Slack. Every prompt and response streams live — teammates reply there and their messages appear inline.</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Bottom CTA -->
       <div class="py-16 border-t border-gray-200 text-center">
