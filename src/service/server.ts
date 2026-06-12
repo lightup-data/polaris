@@ -502,6 +502,26 @@ export async function startServer(opts: {
           }
         }
 
+        // Generate short aliases from first name, disambiguate collisions
+        const aliasCounts = new Map<string, number>();
+        for (const m of team) {
+          const firstName = m.name.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+          if (firstName) aliasCounts.set(firstName, (aliasCounts.get(firstName) ?? 0) + 1);
+        }
+        for (const m of team) {
+          const parts = m.name.split(/\s+/);
+          const firstName = parts[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+          if (!firstName) {
+            (m as Record<string, unknown>).alias = null;
+          } else if ((aliasCounts.get(firstName) ?? 0) > 1 && parts.length > 1) {
+            // Collision — append first letter of last name
+            const lastInitial = parts[parts.length - 1]?.[0]?.toLowerCase() ?? "";
+            (m as Record<string, unknown>).alias = `${firstName}${lastInitial}`;
+          } else {
+            (m as Record<string, unknown>).alias = firstName;
+          }
+        }
+
         return json({ members: team });
       }
 

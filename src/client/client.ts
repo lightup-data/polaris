@@ -267,17 +267,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonGet("/team");
       if (res.ok) {
-        const body = await res.json() as { members: Array<{ name: string; participant_id: string | null; slack_id: string | null; slack_handle: string | null; slack_display: string | null; polaris_user: boolean }> };
+        const body = await res.json() as { members: Array<{ name: string; participant_id: string | null; slack_id: string | null; slack_handle: string | null; slack_display: string | null; polaris_user: boolean; alias: string | null }> };
         if (body.members.length === 0) {
           return { content: [{ type: "text", text: "No team members found." }] };
         }
         const taggable = body.members.filter((m) => m.slack_id && m.slack_handle);
         const list = taggable
-          .map((m) => `  @${m.slack_handle} — ${m.name}${m.polaris_user ? " ✓" : ""} [${m.slack_id}]`)
+          .map((m) => {
+            const shortAlias = m.alias && m.alias !== m.slack_handle ? `@${m.alias}` : "";
+            const handle = `@${m.slack_handle}`;
+            const display = shortAlias ? `${shortAlias} (${handle})` : handle;
+            return `  ${display} — ${m.name}${m.polaris_user ? " ✓" : ""} [${m.slack_id}]`;
+          })
           .join("\n");
         const notTaggable = body.members.filter((m) => !m.slack_id);
         const note = notTaggable.length > 0 ? `\n\nNot on Slack: ${notTaggable.map(m => m.name).join(", ")}` : "";
-        return { content: [{ type: "text", text: `Team members (use @handle to tag, ✓ = Polaris user):\n${list}${note}` }] };
+        return { content: [{ type: "text", text: `Team (use @alias or @handle to tag, ✓ = Polaris user):\n${list}${note}` }] };
       }
       return { content: [{ type: "text", text: "Failed to fetch team list." }] };
     } catch {
