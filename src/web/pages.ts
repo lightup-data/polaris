@@ -257,6 +257,63 @@ export function renderLandingPage(): string {
       </div>
     </div>
 
+    <!-- Why Polaris -->
+    <div class="">
+      <!-- Banner -->
+      <div class="bg-gray-900 px-6 py-12 text-center">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Why Polaris</h2>
+        <p class="mt-4 text-2xl font-bold text-white leading-snug max-w-2xl mx-auto">Your prompts are the most valuable artifact in your engineering workflow.</p>
+        <p class="mt-4 text-sm text-gray-400 max-w-xl mx-auto">Every prompt carries intent, context, and decision-making that no commit message can reconstruct. Today, all of it vanishes when the session ends.</p>
+      </div>
+
+      <!-- Pain points -->
+      <div class="max-w-3xl mx-auto px-6 py-10 space-y-0">
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">AI sessions are invisible</h3>
+            <p class="mt-1 text-sm text-gray-500">When someone's coding with an AI agent, the rest of the team has no idea what's happening. It's pair programming behind a locked door.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Knowledge evaporates</h3>
+            <p class="mt-1 text-sm text-gray-500">The full reasoning chain — why the agent chose one approach over another, what it tried and rejected — disappears with the session. Only the final code survives.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Feedback comes too late</h3>
+            <p class="mt-1 text-sm text-gray-500">Teammates see the pull request, not the process. By then the agent has already committed to a path that one Slack message could have redirected.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Multiple agents, zero shared context</h3>
+            <p class="mt-1 text-sm text-gray-500">Teams running concurrent AI sessions have no coordination layer. Alice's agent doesn't know what Bob's agent is building, leading to conflicts and duplicated work.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resolution -->
+      <div class="bg-gray-50">
+        <div class="max-w-3xl mx-auto px-6 py-8">
+          <p class="text-sm text-gray-700"><span class="font-semibold text-gray-900">Polaris fixes this.</span> Every prompt, every response, every tool call — captured, streamed to your team in real time, and stored as permanent memory. Teammates can intervene mid-session. Agents across sessions share context through the hub. Nothing is lost.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="max-w-3xl mx-auto px-6">
 
       <!-- Bottom CTA -->
