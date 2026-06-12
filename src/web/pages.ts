@@ -11,16 +11,39 @@ export function renderLandingPage(): string {
       <!-- Hero -->
       <div class="pt-24 pb-16">
         <h1 class="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-          Realtime multiplayer Claude Code<br>sessions and knowledge capture
+          Meet Polaris. It's like Gong<br>for Claude Code sessions.
         </h1>
-        <p class="mt-2 text-sm font-medium text-polaris-600">It's like Gong for AI.</p>
-        <p class="mt-4 text-lg text-gray-500 max-w-2xl">
-          Move your Claude Code sessions out of private windows and into a shared workspace in Slack. Polaris runs quietly in the background to document your sessions automatically, turning isolated chats into a continuous stream of team intelligence.
+        <p class="mt-6 text-lg text-gray-500 max-w-2xl">
+          Bring your local Claude Code sessions straight into a collaborative Slack channel. Polaris works in the background to automatically capture and document the AI's entire execution path including all prompts, responses, and tool calls in real time. Teammates can watch the live log stream, intervene with inline commands via Slack, or audit the complete thought process later.
         </p>
-        <div class="mt-8 flex items-center gap-4">
-          <a href="#get-started" class="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
-          <a href="https://github.com/anthropics/polaris" class="text-sm font-medium text-gray-500 hover:text-gray-700 transition">GitHub</a>
+
+      <!-- How it works -->
+      <div class="py-16 border-t border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
+        <div class="mt-8 space-y-8">
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Connect</h3>
+              <p class="mt-1 text-sm text-gray-500">Sign up and connect your team's Slack workspace. Polaris uses Slack as the collaboration layer — no new apps to learn.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Install</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris</code> on your machine sets up hooks, MCP server, and logs you in.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Collaborate</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to Slack. Every prompt and response streams live — teammates reply there and their messages appear inline.</p>
+            </div>
+          </div>
         </div>
+      </div>
 
         <!-- Terminal demo -->
         <div class="mt-12 bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
@@ -32,10 +55,7 @@ export function renderLandingPage(): string {
           </div>
           <div class="px-5 py-4 font-mono text-sm leading-relaxed space-y-3">
             <div>
-              <span class="text-green-400">$</span> <span class="text-gray-300">npm install -g @lightupai/polaris</span>
-            </div>
-            <div>
-              <span class="text-green-400">$</span> <span class="text-gray-300">polaris</span>
+              <span class="text-green-400">$</span> <span class="text-gray-300">npx @lightupai/polaris</span>
             </div>
             <div class="text-gray-500">  Hooks installed. MCP server registered. Logged in as manu@acme.dev</div>
             <div class="border-t border-gray-700 pt-3">
@@ -51,34 +71,6 @@ export function renderLandingPage(): string {
               <span class="text-gray-400"> &mdash; make sure to add rate limiting on that endpoint</span>
             </div>
             <div class="text-gray-400">  Good call. Adding rate limiting middleware before deploying...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- How it works -->
-      <div class="py-16 border-t border-gray-200">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
-        <div class="mt-8 space-y-8">
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Install</h3>
-              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npm install -g @lightupai/polaris && polaris</code> sets up hooks, MCP server, and authenticates your team.</p>
-            </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Connect</h3>
-              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to your team's Slack channel.</p>
-            </div>
-          </div>
-          <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
-            <div>
-              <h3 class="font-semibold text-gray-900">Collaborate</h3>
-              <p class="mt-1 text-sm text-gray-500">Every prompt and response streams to Slack. Teammates reply there and their messages appear inline in your agent session.</p>
-            </div>
           </div>
         </div>
       </div>
@@ -168,25 +160,11 @@ export function renderLandingPage(): string {
         </div>
       </div>
 
-      <!-- Get Started -->
-      <div id="get-started" class="py-16 border-t border-gray-200">
-        <h2 class="text-2xl font-bold text-gray-900">Get started</h2>
-        <div class="mt-6 bg-gray-900 rounded-xl overflow-hidden">
-          <div class="flex items-center justify-between px-4 py-2.5 bg-gray-800">
-            <span class="text-xs text-gray-500 font-mono">terminal</span>
-            <button class="polaris-copy text-gray-500 hover:text-gray-300 transition" data-copy="install-cmd">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-            </button>
-          </div>
-          <pre class="px-5 py-4 font-mono text-sm text-gray-300 leading-relaxed" id="install-cmd"><span class="text-green-400">$</span> npm install -g @lightupai/polaris
-<span class="text-green-400">$</span> polaris</pre>
-        </div>
-        <p class="mt-4 text-sm text-gray-500">Then in Claude Code:</p>
-        <div class="mt-2 bg-gray-900 rounded-xl overflow-hidden">
-          <pre class="px-5 py-4 font-mono text-sm text-gray-300 leading-relaxed"><span class="text-polaris-400">&gt;</span> /polaris join #your-channel</pre>
-        </div>
-        <p class="mt-6 text-sm text-gray-500">That's it. Your session is now live to your team.</p>
-        <div class="mt-8">
+      <!-- Bottom CTA -->
+      <div class="py-16 border-t border-gray-200 text-center">
+        <h2 class="text-2xl font-bold text-gray-900">Ready to try it?</h2>
+        <p class="mt-2 text-sm text-gray-500">Set up takes less than two minutes.</p>
+        <div class="mt-6">
           <a href="/signup" class="inline-flex items-center gap-3 px-5 py-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-medium text-gray-700">
             <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 3.58z" fill="#EA4335"/></svg>
             Sign up with Google
@@ -199,7 +177,6 @@ export function renderLandingPage(): string {
       <div class="max-w-3xl mx-auto px-6 py-8 flex items-center justify-between text-sm text-gray-400">
         <span>Polaris</span>
         <div class="flex items-center gap-6">
-          <a href="https://github.com/anthropics/polaris" class="hover:text-gray-600 transition">GitHub</a>
           <a href="/login" class="hover:text-gray-600 transition">Sign in</a>
         </div>
       </div>
