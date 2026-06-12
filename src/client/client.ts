@@ -111,6 +111,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "polaris_team",
+      description: "List team members with their Slack identities. Use this to resolve @mentions before posting to Slack.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
       name: "polaris_backfill",
       description: "Recover lost events from local daemon logs. Use when events were lost due to disconnection or API downtime.",
       inputSchema: {
@@ -250,6 +258,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         })
         .join("\n");
       return { content: [{ type: "text", text: summary || "(no activity yet)" }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
+    }
+  }
+
+  if (name === "polaris_team") {
+    try {
+      const res = await daemonGet("/team");
+      if (res.ok) {
+        const body = await res.json() as { members: Array<{ name: string; participant_id: string; slack_id: string | null; slack_display: string | null }> };
+        if (body.members.length === 0) {
+          return { content: [{ type: "text", text: "No team members found." }] };
+        }
+        const list = body.members.map((m, i) =>
+          `  ${i + 1}. ${m.name} (${m.participant_id})${m.slack_display ? ` — @${m.slack_display}` : ""}${m.slack_id ? ` [${m.slack_id}]` : ""}`
+        ).join("\n");
+        return { content: [{ type: "text", text: `Team members:\n${list}` }] };
+      }
+      return { content: [{ type: "text", text: "Failed to fetch team list." }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }

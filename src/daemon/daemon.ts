@@ -669,6 +669,21 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // GET /team — list team members with Slack identities
+      if (method === "GET" && pathname === "/team") {
+        try {
+          const serviceUrl = getServiceUrl();
+          const res = await fetch(`${serviceUrl}/team`, {
+            headers: await authHeaders(),
+          });
+          if (!res.ok) return error("Failed to fetch team", res.status);
+          const data = await res.json();
+          return json(data);
+        } catch {
+          return error("API unreachable", 503);
+        }
+      }
+
       // POST /backfill — recover lost events from daemon log
       if (method === "POST" && pathname === "/backfill") {
         try {

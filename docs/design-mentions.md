@@ -92,6 +92,30 @@ The skill instructions should tell the agent:
 - Use `<@slack_id>` format in `polaris_reply` messages
 - If unsure which person, present the matches and ask
 
+## UX Flow (v1)
+
+Claude Code CLI's `@` is reserved for file references. Instead, use a conversational `/polaris tag` command:
+
+```
+User: /polaris tag
+Agent: Who would you like to tag?
+  1. Krishna Patel (@krishna)
+  2. Tuhin Roy (@tuhin)
+  3. Laura Mowry (@laura)
+User: 1
+Agent: What message?
+User: what do you think about this auth approach?
+Agent: → Posted to #polaris-dev: @krishna what do you think about this auth approach?
+```
+
+The agent calls `polaris_team` to get the list, presents it, and calls `polaris_reply` with the resolved Slack mention.
+
+### Shorthand (future)
+
+Once the flow works, add inline shorthand so the user can skip the interactive steps:
+- `/polaris tag krishna what do you think?` — resolves and posts in one step
+- Custom Claude Code `@` completion provider (feature request to Anthropic)
+
 ## Future extensions
 
 - **Mention as invitation**: tagging someone could auto-invite them as an advisor to the session
