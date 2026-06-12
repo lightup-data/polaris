@@ -1,8 +1,8 @@
 ---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_backfill
+argument-hint: [join #channel | backfill [duration] | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -21,6 +21,10 @@ Based on the arguments provided, do ONE of the following:
 **`/polaris rename <new-name>`** — Rename the current channel:
 1. Call `polaris_rename` with the new name
 2. Report the result
+
+**`/polaris backfill [duration]`** — Recover lost events:
+1. Call `polaris_backfill` with the optional duration (e.g., `2h`, `30m`)
+2. Report how many events were recovered
 
 **`/polaris disconnect`** — Disconnect:
 1. Call `polaris_disconnect`

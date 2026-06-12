@@ -154,6 +154,114 @@ async function logEvent(endpoint: string, payload: unknown, response?: { status:
   } catch { /* best-effort — don't break the request */ }
 }
 
+// --- Session history (persistent connect/disconnect log for backfill) ---
+
+const SESSION_HISTORY_FILE = join(homedir(), ".polaris", "session-history.jsonl");
+
+async function logSessionChange(action: "connect" | "disconnect", ccSessionId: string, project: string, session: string, user: string, agent: string): Promise<void> {
+  try {
+    await ensureLogDir();
+    const entry = JSON.stringify({ t: new Date().toISOString(), action, ccSessionId, project, session, user, agent });
+    await appendFile(SESSION_HISTORY_FILE, entry + "\n");
+  } catch { /* best-effort */ }
+}
+
+// --- Backfill: recover lost events from daemon log ---
+
+async function backfill(mapping: SessionMapping, duration?: string, from?: string): Promise<{ recovered: number; source: string; gaps: string[] }> {
+  const now = new Date();
+  let since: Date;
+
+  if (from) {
+    since = new Date(from);
+  } else if (duration) {
+    const match = duration.match(/^(\d+)(h|m|d)$/);
+    if (!match) return { recovered: 0, source: "none", gaps: ["invalid duration format"] };
+    const val = parseInt(match[1]);
+    const unit = match[2];
+    since = new Date(now.getTime() - val * (unit === "h" ? 3600000 : unit === "m" ? 60000 : 86400000));
+  } else {
+    // Auto-detect: query API for most recent event, backfill from there
+    try {
+      const serviceUrl = getServiceUrl();
+      const res = await fetch(
+        `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/messages`,
+        { headers: await authHeaders() }
+      );
+      if (res.ok) {
+        const events = (await res.json()) as Array<{ timestamp: string }>;
+        if (events.length > 0) {
+          since = new Date(events[events.length - 1].timestamp);
+        } else {
+          since = new Date(now.getTime() - 3600000); // default 1h
+        }
+      } else {
+        since = new Date(now.getTime() - 3600000);
+      }
+    } catch {
+      since = new Date(now.getTime() - 3600000);
+    }
+  }
+
+  // Read daemon log files covering the time range
+  const logEntries: Array<{ t: string; endpoint: string; payload: Record<string, unknown> }> = [];
+  const startDate = since.toISOString().slice(0, 10);
+  const endDate = now.toISOString().slice(0, 10);
+
+  // Collect all dates in range
+  const dates: string[] = [];
+  const d = new Date(startDate);
+  while (d.toISOString().slice(0, 10) <= endDate) {
+    dates.push(d.toISOString().slice(0, 10));
+    d.setDate(d.getDate() + 1);
+  }
+
+  for (const date of dates) {
+    const logFile = join(LOG_DIR, `daemon-${date}.jsonl`);
+    try {
+      const content = await readFile(logFile, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.endpoint !== "/events") continue;
+          if (new Date(entry.t) <= since) continue;
+          if (new Date(entry.t) > now) continue;
+          logEntries.push(entry);
+        } catch { /* skip malformed lines */ }
+      }
+    } catch { /* log file doesn't exist for this date — not an error */ }
+  }
+
+  if (logEntries.length === 0) {
+    return { recovered: 0, source: "daemon_log", gaps: [`no log entries found since ${since.toISOString()}`] };
+  }
+
+  // Replay events to the API
+  let recovered = 0;
+  const serviceUrl = getServiceUrl();
+  const headers = await authHeaders();
+
+  for (const entry of logEntries) {
+    const hookEvent = entry.payload.hook_event_name as string | undefined;
+    const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
+
+    try {
+      const res = await fetch(
+        `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ sender, payload: entry.payload }),
+        }
+      );
+      if (res.ok) recovered++;
+    } catch { /* skip failed replays */ }
+  }
+
+  return { recovered, source: "daemon_log", gaps: [] };
+}
+
 // --- HTTP Server ---
 
 function json(data: unknown, status = 200): Response {
@@ -294,6 +402,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           // Connect to cloud WebSocket
           connectCloudWs(mapping);
+          await logSessionChange("connect", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
 
           return json({
             status: "connected",
@@ -314,7 +423,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (!body.ccSessionId) return error("ccSessionId required", 400);
           disconnectCloudWs(body.ccSessionId);
           const mapping = sessions.get(body.ccSessionId);
-          if (mapping) {
+          if (mapping && mapping.project) {
+            await logSessionChange("disconnect", body.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
             mapping.project = "";
             mapping.session = "";
             mapping.user = "";
@@ -539,6 +649,21 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
         const data = await res.json();
         return json(data);
+      }
+
+      // POST /backfill — recover lost events from daemon log
+      if (method === "POST" && pathname === "/backfill") {
+        try {
+          const body = (await req.json()) as { ccSessionId: string; duration?: string; from?: string };
+          if (!body.ccSessionId) return error("ccSessionId required", 400);
+          const mapping = sessions.get(body.ccSessionId);
+          if (!mapping || !mapping.project) return error("Not connected", 400);
+
+          const result = await backfill(mapping, body.duration, body.from);
+          return json(result);
+        } catch {
+          return error("Invalid JSON", 400);
+        }
       }
 
       return error("Not found", 404);

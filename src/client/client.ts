@@ -110,6 +110,17 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["session"],
       },
     },
+    {
+      name: "polaris_backfill",
+      description: "Recover lost events from local daemon logs. Use when events were lost due to disconnection or API downtime.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          duration: { type: "string", description: "Time range to backfill (e.g., '2h', '30m', '1d'). Auto-detects if omitted." },
+          from: { type: "string", description: "ISO timestamp to backfill from. Overrides duration." },
+        },
+      },
+    },
   ],
 }));
 
@@ -223,6 +234,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         })
         .join("\n");
       return { content: [{ type: "text", text: summary || "(no activity yet)" }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
+    }
+  }
+
+  if (name === "polaris_backfill") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const { duration, from } = (args ?? {}) as { duration?: string; from?: string };
+    try {
+      const res = await daemonPost("/backfill", {
+        ccSessionId: CC_SESSION_ID,
+        ...(duration ? { duration } : {}),
+        ...(from ? { from } : {}),
+      });
+      const body = await res.json() as { recovered: number; source: string; gaps: string[] };
+      if (res.ok) {
+        const gapInfo = body.gaps.length > 0 ? `\nGaps: ${body.gaps.join(", ")}` : "";
+        return { content: [{ type: "text", text: `Backfill complete: ${body.recovered} events recovered from ${body.source}.${gapInfo}` }] };
+      }
+      return { content: [{ type: "text", text: `Backfill failed: ${(body as unknown as { error?: string }).error ?? "unknown error"}` }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }
