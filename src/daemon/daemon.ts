@@ -651,6 +651,24 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         return json(data);
       }
 
+      // GET /channels — list available channels/projects
+      if (method === "GET" && pathname === "/channels") {
+        try {
+          const serviceUrl = getServiceUrl();
+          const res = await fetch(`${serviceUrl}/projects`, {
+            headers: await authHeaders(),
+          });
+          if (!res.ok) return error("Failed to fetch channels", res.status);
+          const projects = (await res.json()) as Array<{ name: string; slack_channel_name?: string }>;
+          const channels = projects
+            .filter((p) => p.name !== "_system")
+            .map((p) => `#${p.slack_channel_name || p.name}`);
+          return json({ channels });
+        } catch {
+          return error("API unreachable", 503);
+        }
+      }
+
       // POST /backfill — recover lost events from daemon log
       if (method === "POST" && pathname === "/backfill") {
         try {

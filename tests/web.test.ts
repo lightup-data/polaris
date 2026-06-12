@@ -275,7 +275,7 @@ describe("routes", () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("Multiplayer AI collaboration");
+    expect(body).toContain("Multiplayer collaboration");
   });
 
   test("GET /preview returns 200", async () => {

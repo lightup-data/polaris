@@ -53,12 +53,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          channel: { type: "string", description: "Channel name (e.g., #polaris-dev or polaris-dev)" },
+          channel: { type: "string", description: "Channel name (e.g., #polaris-dev). Omit to list available channels." },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
         },
-        required: ["channel", "user"],
+        required: ["user"],
       },
     },
     {
@@ -128,7 +128,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { channel, user, session, agent } = args as { channel: string; user: string; session?: string; agent?: string };
+    const { channel, user, session, agent } = args as { channel?: string; user: string; session?: string; agent?: string };
+
+    // If no channel specified, list available channels
+    if (!channel) {
+      try {
+        const res = await daemonGet("/channels");
+        if (res.ok) {
+          const body = await res.json() as { channels: string[] };
+          if (body.channels.length === 0) {
+            return { content: [{ type: "text", text: "No channels found. Create one by joining: `/polaris join #channel-name`" }] };
+          }
+          return { content: [{ type: "text", text: `Available channels:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #channel-name` }] };
+        }
+      } catch { /* fall through */ }
+      return { content: [{ type: "text", text: "Specify a channel: `/polaris join #channel-name`" }] };
+    }
+
     const project = channel.replace(/^#/, ""); // strip leading # if present
     try {
       const res = await daemonPost("/connect", {
