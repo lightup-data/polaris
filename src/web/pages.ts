@@ -11,10 +11,11 @@ export function renderLandingPage(): string {
       <!-- Hero -->
       <div class="pt-24 pb-16">
         <h1 class="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-          Multiplayer collaboration<br>for Claude Code
+          Realtime multiplayer Claude Code<br>sessions and knowledge capture
         </h1>
-        <p class="mt-4 text-lg text-gray-500 max-w-xl">
-          Your teammates see what your agent is doing. They can jump in from Slack and steer it in real time.
+        <p class="mt-2 text-sm font-medium text-polaris-600">It's like Gong for AI.</p>
+        <p class="mt-4 text-lg text-gray-500 max-w-2xl">
+          Move your Claude Code sessions out of private windows and into a shared workspace in Slack. Polaris runs quietly in the background to document your sessions automatically, turning isolated chats into a continuous stream of team intelligence.
         </p>
         <div class="mt-8 flex items-center gap-4">
           <a href="#get-started" class="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>

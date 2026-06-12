@@ -189,6 +189,11 @@ export async function upsertUser(sql: Sql, id: string, email: string, name: stri
   return { ...row, created_at: row.created_at.toISOString() } as User;
 }
 
+export async function listUsers(sql: Sql, orgId: string): Promise<User[]> {
+  const rows = await sql`SELECT * FROM users WHERE org_id = ${orgId} ORDER BY name ASC`;
+  return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString() }) as User);
+}
+
 // --- Projects (org-scoped) ---
 
 export async function createProject(sql: Sql, orgId: string, name: string): Promise<Project> {
