@@ -451,36 +451,40 @@ export async function startServer(opts: {
         const org = await getOrgFn(sql, orgId);
 
         // Resolve Slack user info if bot token available
-        let slackMembers: Array<{ id: string; name: string; display_name: string }> = [];
+        let slackMembers: Array<{ id: string; name: string; display_name: string; email: string; username: string }> = [];
         if (org?.slack_bot_token) {
           try {
             const slackRes = await fetch("https://slack.com/api/users.list?limit=200", {
               headers: { Authorization: `Bearer ${org.slack_bot_token}` },
             });
             if (slackRes.ok) {
-              const slackData = (await slackRes.json()) as { members?: Array<{ id: string; real_name?: string; profile?: { display_name?: string }; deleted?: boolean; is_bot?: boolean }> };
+              const slackData = (await slackRes.json()) as { members?: Array<{ id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean }> };
               slackMembers = (slackData.members ?? [])
                 .filter((m) => !m.deleted && !m.is_bot)
                 .map((m) => ({
                   id: m.id,
                   name: m.real_name ?? "",
                   display_name: m.profile?.display_name ?? "",
+                  email: m.profile?.email ?? "",
+                  username: m.name ?? "",
                 }));
             }
           } catch { /* Slack API unavailable */ }
         }
 
-        // Join Polaris users with Slack members by email match or name match
+        // Join Polaris users with Slack members by email (most reliable)
         const team = users.map((u) => {
-          const slack = slackMembers.find((m) =>
-            m.name.toLowerCase() === u.name.toLowerCase() ||
-            m.display_name.toLowerCase() === u.name.toLowerCase().replace(/\s+/g, ".")
-          );
+          const slack = slackMembers.find((m) => m.email.toLowerCase() === u.email.toLowerCase())
+            ?? slackMembers.find((m) =>
+              m.name.toLowerCase() === u.name.toLowerCase() ||
+              m.display_name.toLowerCase() === u.name.toLowerCase().replace(/\s+/g, ".")
+            );
           return {
             name: u.name,
             participant_id: u.participant_id,
             email: u.email,
             slack_id: slack?.id ?? null,
+            slack_handle: slack?.username || null,
             slack_display: slack?.display_name || slack?.name || null,
           };
         });

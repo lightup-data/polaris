@@ -267,14 +267,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonGet("/team");
       if (res.ok) {
-        const body = await res.json() as { members: Array<{ name: string; participant_id: string; slack_id: string | null; slack_display: string | null }> };
+        const body = await res.json() as { members: Array<{ name: string; participant_id: string; slack_id: string | null; slack_handle: string | null; slack_display: string | null }> };
         if (body.members.length === 0) {
           return { content: [{ type: "text", text: "No team members found." }] };
         }
-        const list = body.members.map((m, i) =>
-          `  ${i + 1}. ${m.name} (${m.participant_id})${m.slack_display ? ` — @${m.slack_display}` : ""}${m.slack_id ? ` [${m.slack_id}]` : ""}`
-        ).join("\n");
-        return { content: [{ type: "text", text: `Team members:\n${list}` }] };
+        const list = body.members
+          .filter((m) => m.slack_id) // only show members with Slack identity
+          .map((m) => `  @${m.slack_handle ?? m.slack_display} — ${m.name} [${m.slack_id}]`)
+          .join("\n");
+        const unlinked = body.members.filter((m) => !m.slack_id);
+        const unlinkedNote = unlinked.length > 0 ? `\n\nNot linked to Slack: ${unlinked.map(m => m.name).join(", ")}` : "";
+        return { content: [{ type: "text", text: `Team members (use @handle to tag):\n${list}${unlinkedNote}` }] };
       }
       return { content: [{ type: "text", text: "Failed to fetch team list." }] };
     } catch {
