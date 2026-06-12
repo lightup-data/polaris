@@ -6,60 +6,114 @@ import type { Org } from "../service/db";
 export function renderLandingPage(): string {
   return `
     ${nav()}
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="pt-24 pb-16 text-center">
-        <h1 class="text-5xl font-bold tracking-tight text-gray-900 sm:text-6xl">
-          Multiplayer AI collaboration
+    <div class="max-w-3xl mx-auto px-6">
+
+      <!-- Hero -->
+      <div class="pt-24 pb-16">
+        <h1 class="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+          Multiplayer collaboration<br>for Claude Code
         </h1>
-        <p class="mt-6 text-lg leading-8 text-gray-600 max-w-2xl mx-auto">
-          Polaris connects your AI agent sessions to your team. Capture every interaction, pool context across workstreams, and let anyone contribute — all in real time.
+        <p class="mt-4 text-lg text-gray-500 max-w-xl">
+          Your teammates see what your agent is doing. They can jump in from Slack and steer it in real time.
         </p>
-        <div class="mt-10 flex flex-col items-center gap-4">
-          <a href="/signup" class="inline-flex items-center gap-3 px-6 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-semibold text-gray-700">
-            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 3.58z" fill="#EA4335"/></svg>
-            Sign up with Google
-          </a>
-          <a href="/login" class="px-6 py-3 text-sm font-semibold text-gray-500 hover:text-gray-700 transition">Already have an account? Sign in</a>
+        <div class="mt-8 flex items-center gap-4">
+          <a href="#get-started" class="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+          <a href="https://github.com/anthropics/polaris" class="text-sm font-medium text-gray-500 hover:text-gray-700 transition">GitHub</a>
+        </div>
+
+        <!-- Terminal demo -->
+        <div class="mt-12 bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
+          <div class="flex items-center gap-1.5 px-4 py-3 bg-gray-800">
+            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+            <span class="ml-3 text-xs text-gray-500 font-mono">claude code</span>
+          </div>
+          <div class="px-5 py-4 font-mono text-sm leading-relaxed space-y-3">
+            <div>
+              <span class="text-green-400">$</span> <span class="text-gray-300">npm install -g @lightupai/polaris</span>
+            </div>
+            <div>
+              <span class="text-green-400">$</span> <span class="text-gray-300">polaris</span>
+            </div>
+            <div class="text-gray-500">  Hooks installed. MCP server registered. Logged in as manu@acme.dev</div>
+            <div class="border-t border-gray-700 pt-3">
+              <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">/polaris join #webapp</span>
+            </div>
+            <div class="text-gray-500">  Connected to webapp/s-4f2a as user:manu</div>
+            <div class="border-t border-gray-700 pt-3">
+              <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">implement the auth middleware using RS256</span>
+            </div>
+            <div class="text-gray-400">  I'll create src/middleware/auth.ts with RS256 JWT verification...</div>
+            <div class="mt-1 pl-4 border-l-2 border-yellow-500/50">
+              <span class="text-yellow-400 text-xs">priya via slack</span>
+              <span class="text-gray-400"> &mdash; make sure to add rate limiting on that endpoint</span>
+            </div>
+            <div class="text-gray-400">  Good call. Adding rate limiting middleware before deploying...</div>
+          </div>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-8 py-16 border-t border-gray-200">
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 6.523 5 10 5c3.477 0 6.268 2.943 7.542 7-.274.985-.633 1.928-1.065 2.813M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Session capture</h3>
-          <p class="mt-2 text-sm text-gray-600">Every prompt, response, and tool call is captured and broadcast to your team's floor.</p>
-        </div>
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Context injection</h3>
-          <p class="mt-2 text-sm text-gray-600">Teammates inject expertise directly into your agent session from Slack, WhatsApp, or any floor.</p>
-        </div>
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m3 5.197V21"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Multiplayer</h3>
-          <p class="mt-2 text-sm text-gray-600">Multiple drivers, concurrent sessions, seamless handoffs. Humans and AI agents as first-class participants.</p>
-        </div>
-      </div>
-
+      <!-- How it works -->
       <div class="py-16 border-t border-gray-200">
-        <h2 class="text-2xl font-bold text-gray-900 text-center">How it works</h2>
-        <p class="mt-2 text-center text-sm text-gray-500">Everything streams to the floor — your team's Slack channel.</p>
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
+        <div class="mt-8 space-y-8">
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Install</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npm install -g @lightupai/polaris && polaris</code> sets up hooks, MCP server, and authenticates your team.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Connect</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to your team's Slack channel.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Collaborate</h3>
+              <p class="mt-1 text-sm text-gray-500">Every prompt and response streams to Slack. Teammates reply there and their messages appear inline in your agent session.</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
+      <!-- Why Polaris -->
+      <div class="py-16 border-t border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Why Polaris</h2>
+        <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="border border-gray-200 rounded-lg p-5">
+            <h3 class="font-semibold text-gray-900">No context switching</h3>
+            <p class="mt-2 text-sm text-gray-500">Teammate messages arrive directly in your coding session. No tab switching, no copy-pasting, no "hey can you check Slack."</p>
+          </div>
+          <div class="border border-gray-200 rounded-lg p-5">
+            <h3 class="font-semibold text-gray-900">Full session visibility</h3>
+            <p class="mt-2 text-sm text-gray-500">Every prompt, tool call, and response is captured and streamed to your team. Anyone can see what's happening and jump in.</p>
+          </div>
+          <div class="border border-gray-200 rounded-lg p-5">
+            <h3 class="font-semibold text-gray-900">Human + AI multiplayer</h3>
+            <p class="mt-2 text-sm text-gray-500">Multiple developers, multiple agents, concurrent sessions. Humans and AI are first-class participants on the same floor.</p>
+          </div>
+          <div class="border border-gray-200 rounded-lg p-5">
+            <h3 class="font-semibold text-gray-900">Two-minute setup</h3>
+            <p class="mt-2 text-sm text-gray-500">One npm install, one command. No config files, no Docker, no infrastructure. Works with your existing Slack workspace.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slack demo -->
+      <div class="py-16 border-t border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">What your team sees in Slack</h2>
         <div class="mt-8 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
           <div class="flex">
             <div class="w-14 bg-[#4A154B] shrink-0 flex flex-col items-center py-3 gap-3">
               <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white text-xs font-bold">A</div>
               <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
                 <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-              </div>
-              <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-                <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               </div>
             </div>
             <div class="flex-1">
@@ -107,33 +161,46 @@ export function renderLandingPage(): string {
                     <p class="text-gray-700">Good point from Priya. Switching to RS256 and updating the key config...</p>
                   </div>
                 </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">
-                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                  </div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">security-bot</span><span class="bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">agent</span><span class="text-gray-400 text-xs">&rarr; auth</span><span class="text-gray-400 text-xs">10:34 AM</span></div>
-                    <p class="text-gray-700">This auth endpoint needs rate limiting before going to production</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-green-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">AI</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Agent</span><span class="text-gray-400 text-xs">&rarr; manu/auth</span><span class="text-gray-400 text-xs">10:34 AM</span></div>
-                    <p class="text-gray-700">Adding rate limiting middleware to the auth endpoints...</p>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         </div>
-        <p class="mt-4 text-center text-sm text-gray-500">The floor — a continuous, attributed log of how your work gets built.</p>
+      </div>
+
+      <!-- Get Started -->
+      <div id="get-started" class="py-16 border-t border-gray-200">
+        <h2 class="text-2xl font-bold text-gray-900">Get started</h2>
+        <div class="mt-6 bg-gray-900 rounded-xl overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-2.5 bg-gray-800">
+            <span class="text-xs text-gray-500 font-mono">terminal</span>
+            <button class="polaris-copy text-gray-500 hover:text-gray-300 transition" data-copy="install-cmd">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            </button>
+          </div>
+          <pre class="px-5 py-4 font-mono text-sm text-gray-300 leading-relaxed" id="install-cmd"><span class="text-green-400">$</span> npm install -g @lightupai/polaris
+<span class="text-green-400">$</span> polaris</pre>
+        </div>
+        <p class="mt-4 text-sm text-gray-500">Then in Claude Code:</p>
+        <div class="mt-2 bg-gray-900 rounded-xl overflow-hidden">
+          <pre class="px-5 py-4 font-mono text-sm text-gray-300 leading-relaxed"><span class="text-polaris-400">&gt;</span> /polaris join #your-channel</pre>
+        </div>
+        <p class="mt-6 text-sm text-gray-500">That's it. Your session is now live to your team.</p>
+        <div class="mt-8">
+          <a href="/signup" class="inline-flex items-center gap-3 px-5 py-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-medium text-gray-700">
+            <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 3.58z" fill="#EA4335"/></svg>
+            Sign up with Google
+          </a>
+        </div>
       </div>
     </div>
 
-    <footer class="border-t border-gray-200 mt-16">
-      <div class="max-w-5xl mx-auto px-6 py-8 text-center text-sm text-gray-500">
-        Polaris by Lightup
+    <footer class="border-t border-gray-200 mt-8">
+      <div class="max-w-3xl mx-auto px-6 py-8 flex items-center justify-between text-sm text-gray-400">
+        <span>Polaris</span>
+        <div class="flex items-center gap-6">
+          <a href="https://github.com/anthropics/polaris" class="hover:text-gray-600 transition">GitHub</a>
+          <a href="/login" class="hover:text-gray-600 transition">Sign in</a>
+        </div>
       </div>
     </footer>`;
 }
