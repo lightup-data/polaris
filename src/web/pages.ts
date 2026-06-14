@@ -330,6 +330,31 @@ export function renderLandingPage(): string {
       </div>
     </div>
 
+    <!-- The Vision -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-3xl mx-auto px-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider text-center">The vision</h2>
+        <p class="mt-6 text-gray-700 text-center max-w-2xl mx-auto">Tobi Lutke, CEO of Shopify, recently described a future where every AI interaction in an organization flows through a shared, observable stream — what he calls "the shop floor." The vision he articulates is strikingly close to what Polaris already does.</p>
+
+        <div class="mt-8 flex justify-center">
+          <a href="https://x.com/tobi/article/2053121182044451016" target="_blank" class="block max-w-md w-full bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition overflow-hidden">
+            <div class="px-6 py-5">
+              <div class="flex items-center gap-2 text-xs text-gray-400">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                <span>Article</span>
+              </div>
+              <h3 class="mt-3 text-lg font-bold text-gray-900 leading-snug">Learning on the Shop Floor</h3>
+              <p class="mt-1 text-sm text-gray-500">by Tobi Lutke &middot; May 9, 2026</p>
+              <p class="mt-3 text-xs text-polaris-600 font-medium">Read on X &rarr;</p>
+            </div>
+          </a>
+        </div>
+
+        <p class="mt-8 text-gray-700 text-center max-w-2xl mx-auto">The idea behind Polaris was born independently, but the convergence isn't a coincidence. As AI agents become central to how software gets built, the need for this layer — variously called a <em>context graph</em>, a <em>memory layer</em>, <em>institutional memory</em>, or <em>decision traces</em> — becomes inevitable. A persistent, searchable record of every prompt, every decision, every session. Polaris is building that layer.</p>
+
+      </div>
+    </div>
+
     <div class="max-w-3xl mx-auto px-6">
 
       <!-- How it works -->
