@@ -7,7 +7,7 @@ export function renderLandingPage(): string {
   return `
     ${nav()}
     <!-- Hero: text left, hub diagram right -->
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-16 overflow-hidden">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-16">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
         <!-- Left: text -->
@@ -21,7 +21,7 @@ export function renderLandingPage(): string {
         </div>
 
         <!-- Right: hub diagram -->
-        <div class="flex flex-col items-center overflow-hidden">
+        <div class="flex flex-col items-center">
 
           <!-- Slack node -->
           <div class="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg shadow-sm">
@@ -151,7 +151,7 @@ export function renderLandingPage(): string {
         </div>
 
         <!-- Arrows -->
-        <div class="max-w-[30rem] mx-auto grid grid-cols-2 gap-4 py-3 hidden md:grid">
+        <div class="max-w-[30rem] mx-auto grid grid-cols-2 gap-4 py-3">
           <div class="flex justify-center">
             <svg class="w-6 h-10 text-gray-300" viewBox="0 0 24 40" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M8 4 L8 36 M4 8 L8 4 L12 8" stroke-linecap="round" stroke-linejoin="round"/>
