@@ -194,6 +194,17 @@ export async function listUsers(sql: Sql, orgId: string): Promise<User[]> {
   return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString() }) as User);
 }
 
+export async function getRecentSignups(sql: Sql, since: Date, limit = 10): Promise<Array<User & { org_name: string }>> {
+  const rows = await sql`
+    SELECT u.*, o.name as org_name
+    FROM users u JOIN orgs o ON u.org_id = o.id
+    WHERE u.created_at >= ${since.toISOString()}
+    ORDER BY u.created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString(), org_name: r.org_name }) as User & { org_name: string });
+}
+
 // --- Projects (org-scoped) ---
 
 export async function createProject(sql: Sql, orgId: string, name: string): Promise<Project> {
