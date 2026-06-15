@@ -14,6 +14,7 @@ import {
   listSessions,
   getSessionPromptCounts,
   getProjectEvents,
+  getRecentSignups,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -52,6 +53,33 @@ function notifySignup(opts: { name: string; email: string; domain: string; orgNa
   }).catch(() => {});
 }
 
+function startSignupRollup(sql: Sql): void {
+  const HOUR = 60 * 60 * 1000;
+
+  async function postRollup(): Promise<void> {
+    const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+    if (!botToken) return;
+
+    const since = new Date(Date.now() - HOUR);
+    const signups = await getRecentSignups(sql, since, 10);
+    if (signups.length === 0) return;
+
+    const lines = signups.map((s) => `• *${s.name}* (${s.email}) — ${s.org_name}`);
+    const text = `:chart_with_upwards_trend: *${signups.length} signup${signups.length === 1 ? "" : "s"} in the last hour*\n${lines.join("\n")}`;
+
+    fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${botToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+    }).catch(() => {});
+  }
+
+  setInterval(postRollup, HOUR);
+}
+
 // --- Google OAuth ---
 
 function getGoogle(): Google {
@@ -87,6 +115,9 @@ setInterval(() => {
 
 export function createApp(sql: Sql) {
   const app = new Hono();
+
+  // Start hourly signup rollup
+  startSignupRollup(sql);
 
   // --- Landing page ---
 
