@@ -30,6 +30,28 @@ import {
   mockDevices,
 } from "./fixtures";
 
+// --- Signup notifications ---
+
+const SIGNUP_CHANNEL = "#alerts-mql-stream";
+
+function notifySignup(opts: { name: string; email: string; domain: string; orgName: string; isNewOrg: boolean }): void {
+  const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+  if (!botToken) return;
+
+  const emoji = opts.isNewOrg ? ":tada:" : ":wave:";
+  const action = opts.isNewOrg ? "signed up (new org)" : "joined";
+  const text = `${emoji} *${opts.name}* (${opts.email}) ${action} — ${opts.orgName} (${opts.domain})`;
+
+  fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+  }).catch(() => {});
+}
+
 // --- Google OAuth ---
 
 function getGoogle(): Google {
@@ -129,6 +151,20 @@ export function createApp(sql: Sql) {
       const userId = crypto.randomUUID();
       const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
       await createUser(sql, userId, email, name, existingOrg.id, participantId);
+
+      // Notify org's Slack system channel
+      postSystemEvent({
+        sql,
+        orgId: existingOrg.id,
+        sender: participantId,
+        text: `:wave: *${name}* (${email}) joined the team`,
+        botToken: existingOrg.slack_bot_token ?? undefined,
+        channelId: existingOrg.slack_system_channel_id ?? undefined,
+      }).catch(() => {});
+
+      // Notify internal team
+      notifySignup({ name, email, domain, orgName: existingOrg.name, isNewOrg: false });
+
       const token = await createToken({ sub: userId, email, name, org_id: existingOrg.id, participant_id: participantId });
       return authRedirect(c, state, token);
     }
@@ -144,6 +180,10 @@ export function createApp(sql: Sql) {
     const userId = crypto.randomUUID();
     const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
     await createUser(sql, userId, email, name, orgId, participantId);
+
+    // Notify internal team
+    notifySignup({ name, email, domain, orgName, isNewOrg: true });
+
     const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
     return authRedirect(c, state, token);
   });
