@@ -45,6 +45,7 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET}
       SLACK_REDIRECT_URI: https://app.withpolaris.ai/slack/callback
+      SIGNUP_SLACK_BOT_TOKEN: ${SIGNUP_SLACK_BOT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
