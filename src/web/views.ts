@@ -4,6 +4,11 @@
 import { nav, slackIcon, type NavOpts } from "./layout";
 import type { SessionFixture, ProjectFixture, DeviceFixture } from "./fixtures";
 
+interface TeamMember {
+  name: string;
+  email: string;
+}
+
 interface ViewContext {
   token: string;
   userName: string;
@@ -14,6 +19,7 @@ interface ViewContext {
   cliInstalled: boolean;
   hasConnectedSession: boolean;
   totalPrompts: number;
+  teamMembers?: TeamMember[];
 }
 
 function navOpts(ctx: ViewContext): NavOpts {
@@ -48,6 +54,24 @@ function statusBadge(label: string, done: boolean): string {
     : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">${label}</span>`;
 }
 
+// --- Team members ---
+
+function renderTeamMembers(members: TeamMember[], currentEmail: string): string {
+  if (members.length === 0) return "";
+  return `
+    <div class="mt-3 bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
+      ${members.map((m) => {
+        const isYou = m.email === currentEmail;
+        return `
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <div class="w-7 h-7 rounded-full bg-polaris-600 flex items-center justify-center text-white text-xs font-bold shrink-0">${m.name.charAt(0).toUpperCase()}</div>
+            <p class="text-sm text-gray-900">${m.name}${isYou ? ' <span class="text-xs text-gray-400">(you)</span>' : ""}</p>
+            <span class="text-xs text-gray-400 ml-auto">${m.email}</span>
+          </div>`;
+      }).join("")}
+    </div>`;
+}
+
 // --- Floor section ---
 
 type StepState = "done" | "active" | "future";
@@ -67,11 +91,13 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
     const promptStat = ctx.totalPrompts > 0
       ? `<span class="text-xs text-gray-400 ml-auto">${ctx.totalPrompts} prompt${ctx.totalPrompts !== 1 ? "s" : ""}</span>`
       : '';
+    const teamCount = ctx.teamMembers?.length ?? 0;
     return `
       <div>
         <div class="flex items-baseline gap-2 mb-3">
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
           ${statusBadge("Connected", true)}
+          ${teamCount > 0 ? `<span class="text-xs text-gray-400">${teamCount} member${teamCount !== 1 ? "s" : ""}</span>` : ""}
         </div>
         <div class="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
@@ -81,6 +107,7 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           ${ctx.orgSlug ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>` : ''}
           ${promptStat}
         </div>
+        ${ctx.teamMembers ? renderTeamMembers(ctx.teamMembers, ctx.email) : ""}
       </div>`;
   }
 
@@ -88,12 +115,14 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
     const slugLabel = ctx.orgSlug
       ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>`
       : '';
+    const teamCount = ctx.teamMembers?.length ?? 0;
 
     return `
       <div>
         <div class="flex items-baseline gap-2 mb-3">
           <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
           ${statusBadge("Connected", true)}
+          ${teamCount > 0 ? `<span class="text-xs text-gray-400">${teamCount} member${teamCount !== 1 ? "s" : ""}</span>` : ""}
         </div>
         <div class="bg-white border border-gray-200 rounded-lg px-5 py-3 flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-[#4A154B] flex items-center justify-center shrink-0">
@@ -102,6 +131,7 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           <p class="text-sm font-medium text-gray-900">Slack</p>
           ${slugLabel}
         </div>
+        ${ctx.teamMembers ? renderTeamMembers(ctx.teamMembers, ctx.email) : ""}
       </div>`;
   }
 

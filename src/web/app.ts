@@ -15,6 +15,7 @@ import {
   getSessionPromptCounts,
   getProjectEvents,
   getRecentSignups,
+  listUsers,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -250,7 +251,8 @@ export function createApp(sql: Sql) {
       }
     } catch { /* _system project may not exist yet */ }
 
-    // Query real projects, sessions, and prompt counts
+    // Query team members, projects, sessions, and prompt counts
+    const teamMembers = await listUsers(sql, payload.org_id);
     const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
     const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
     const promptCounts = await getSessionPromptCounts(sql, payload.org_id);
@@ -288,6 +290,7 @@ export function createApp(sql: Sql) {
       cliInstalled,
       hasConnectedSession,
       totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
+      teamMembers: teamMembers.map((u) => ({ name: u.name, email: u.email })),
     };
 
     if (hasConnectedSession) {
@@ -328,10 +331,11 @@ export function createApp(sql: Sql) {
     const mockToken = "preview-token";
     const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email };
 
+    const mockTeam = [{ name: mockUser.name, email: mockUser.email }, { name: "Alice Chen", email: "alice@lightup.ai" }, { name: "Laura Mowry", email: "laura@lightup.ai" }];
     const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0 };
-    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127 };
+    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
+    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
+    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam };
 
     return layout(`
       <div class="max-w-5xl mx-auto px-6 py-12">
