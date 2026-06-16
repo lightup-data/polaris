@@ -48,31 +48,19 @@ export function renderLandingPage(): string {
             <span class="text-white text-[10px] font-bold mt-0.5">Polaris</span>
           </div>
 
-          <!-- Branching arrows: Polaris ↔ sessions -->
-          <!-- Branching arrows: desktop -->
-          <svg class="hidden md:block w-80 h-16 text-gray-300" viewBox="0 0 320 64" fill="none" stroke="currentColor" stroke-width="1.5" overflow="visible">
-            <path d="M160 0 L160 20" stroke-linecap="round"/>
-            <path d="M157 20 L160 0 L163 20" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M160 20 L48 58" stroke-linecap="round"/>
-            <path d="M52 46 L48 58 L60 54" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M160 20 L160 104" stroke-linecap="round"/>
-            <path d="M157 101 L160 104 L163 101" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M160 20 L272 58" stroke-linecap="round"/>
-            <path d="M260 54 L272 58 L268 46" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <!-- Branching arrow: mobile (simple vertical) -->
-          <svg class="md:hidden w-5 h-8 text-gray-300" viewBox="0 0 20 32" fill="none" stroke="currentColor" stroke-width="1.5">
+          <!-- Arrow: Polaris ↔ sessions -->
+          <svg class="w-5 h-8 text-gray-300" viewBox="0 0 20 32" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M7 4 L7 28 M4 7 L7 4 L10 7" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M13 28 L13 4 M10 25 L13 28 L16 25" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
 
           <!-- Session nodes -->
-          <div class="flex flex-wrap justify-center items-start gap-4 md:gap-6">
+          <div class="flex flex-wrap justify-center gap-4">
             <div class="flex items-center gap-2 px-4 py-2.5 bg-gray-900 rounded-lg shadow-sm">
               <img class="w-5 h-5" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAoAAAAKACAMAAAA7EzkRAAAAFVBMVEVMaXHZd1fZd1babUjZd1faf1rZd1epRaWRAAAABnRSTlMAXawH8g5t5RLrAAAACXBIWXMAAAsTAAALEwEAmpwYAAAFOklEQVR42u3WUQ6EIAxAQcDV+x95r1Bjk2Kdid81wkMdAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADebtHa9gFedPYTIAIUoAAFiAAFKEABIkABClCACFCAAhQgAkSAAkSACFCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAAQpQgAhQgAIUIAIUoAAFiAAFKEABIkABClCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAASJABChABIgABShAASJAAQpQgAhQgAIUIAIUoAAFiAARoAARIAIUIAJEgAJEgAhQgAjwnjNmfq2EGVwYAT4UvO33AqzZDwEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoACTHTHfCzC4MNkBHsnGBYUEiAARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJABAgCRIAgQAQIAkSAIEAECAJEgCBABAgCRIDwNMCVzJL2lt3LyGaLmr+xdmeLBChABIgABYgAEaAAESACFCACRIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAhSgABGgAAUoQAQoQAEKEAEKUIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACFCACBABChABIkABIkAEKEABChABClCAAkSAAhSgABGgAAUoQAQoQAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACDDJjFnRBy6aVyb6HKto3mhiJp+4W/OOXa8bX5CZ/EVqU9YbAuzwCyNAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKcEvnDCqaV3cyg86ieQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwJv8Af3P8SOrUE9bAAAAAElFTkSuQmCC"/>
               <span class="text-xs text-gray-300">Alice working on auth</span>
             </div>
-            <div class="flex items-center gap-2 px-4 py-2.5 md:mt-10 bg-white border border-gray-200 rounded-lg shadow-sm">
+            <div class="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg shadow-sm">
               <svg class="w-4 h-4 text-blue-500" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C8 4.4 4.4 8 0 8c4.4 0 8 3.6 8 8 0-4.4 3.6-8 8-8-4.4 0-8-3.6-8-8z"/></svg>
               <span class="text-xs text-gray-700">Martha writing docs</span>
             </div>
