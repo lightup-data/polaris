@@ -1,0 +1,33 @@
+name: Community activity alerts
+
+on:
+  discussion:
+    types: [created]
+  discussion_comment:
+    types: [created]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SIGNUP_SLACK_BOT_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "discussion" ]; then
+            TITLE="${{ github.event.discussion.title }}"
+            AUTHOR="${{ github.event.discussion.user.login }}"
+            URL="${{ github.event.discussion.html_url }}"
+            CATEGORY="${{ github.event.discussion.category.name }}"
+            TEXT=":speech_balloon: New discussion in *${CATEGORY}*: <${URL}|${TITLE}> by ${AUTHOR}"
+          else
+            AUTHOR="${{ github.event.comment.user.login }}"
+            TITLE="${{ github.event.discussion.title }}"
+            URL="${{ github.event.comment.html_url }}"
+            TEXT=":left_speech_bubble: ${AUTHOR} commented on <${URL}|${TITLE}>"
+          fi
+
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg channel "#alerts-mql-stream" --arg text "$TEXT" '{channel: $channel, text: $text}')"
