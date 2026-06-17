@@ -11,6 +11,31 @@ Multiplayer collaboration for AI coding agents. Connects coding sessions (Claude
 - **Slack Bridge** (`src/slack/bridge.ts`) — Bidirectional bridge between project event streams and Slack channels.
 - **Hooks** (`hooks/`) — Shell scripts that capture coding agent interactions (prompts, responses, tool calls).
 
+## Prerequisites
+
+Install these before running the Quick Start:
+
+| Tool | Why | Install |
+|---|---|---|
+| [Bun](https://bun.sh) | Runtime for all services, the CLI, and the test suite | `npm install -g bun`, `brew install oven-sh/bun/bun`, or `curl -fsSL https://bun.sh/install \| bash` |
+| [Docker](https://docs.docker.com/get-docker/) | Runs the Postgres container | Docker Desktop (macOS/Windows) or Docker Engine (Linux) — must be **running** |
+
+Then verify:
+
+```sh
+bun --version       # 1.x
+docker info         # should succeed (daemon running)
+```
+
+> **Port 5432 must be free.** `docker compose up -d` binds Postgres to `5432`. If another
+> Postgres already uses that port, either stop it, or run the container on `5433` and set
+> `DATABASE_URL=postgres://polaris:polaris@127.0.0.1:5433/polaris` (and pass the same
+> `DATABASE_URL` to `make test`, pointing at the `polaris_test` database).
+
+> **Login needs Google OAuth.** `make dev` and `polaris login` authenticate via Google SSO,
+> so `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` must be set in `.env` (see
+> [Configuration](#configuration)). The test suite (`make test`) does **not** require this.
+
 ## Quick Start
 
 ```sh
