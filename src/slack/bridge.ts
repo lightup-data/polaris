@@ -7,7 +7,7 @@
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { createDb, getOrg, listProjects, getProjectEvents, getOrgEventsSince, getSession, createSession, pushEvent, setProjectSlackChannel, type Sql, type Org } from "../service/db";
+import { createDb, getOrg, listProjects, getProjectEvents, getOrgEventsSince, getEventById, getSession, createSession, pushEvent, setProjectSlackChannel, type Sql, type Org } from "../service/db";
 import { formatEventForSlack, toMrkdwn, THREAD_THRESHOLD } from "./format";
 import type { PolarisEvent } from "../types";
 
@@ -349,30 +349,47 @@ export async function startBridge(opts: {
     }
   });
 
-  // Poll for new events directly from DB (bridge runs server-side)
-  const postedEventIds = new Set<string>();
-  let lastPollTime = new Date().toISOString();
+  // Dedup Set — prevents double-posting events that appear in both the startup
+  // catchup window and the initial LISTEN burst (cleared after 15 min)
+  const recentlyPosted = new Set<string>();
+  setTimeout(() => recentlyPosted.clear(), 15 * 60 * 1000);
 
-  async function pollEvents() {
+  async function handleNotification(payload: string): Promise<void> {
     try {
-      const since = lastPollTime;
-      const events = await getOrgEventsSince(sql, opts.orgId, since);
-      const now = new Date().toISOString();
+      const { id, org_id, project } = JSON.parse(payload) as { id: string; org_id: string; project: string };
+      if (org_id !== opts.orgId) return;
+      if (project === "_system") return;
+      if (recentlyPosted.has(id)) return;
+      recentlyPosted.add(id);
 
-      for (const event of events) {
-        if (event.project === "_system") continue;
-        if (postedEventIds.has(event.id)) continue;
-        postedEventIds.add(event.id);
-        await postEventToSlack(web, sql, opts.orgId, event);
-      }
+      // Fetch full event by ID — notification payload is intentionally minimal (8KB limit)
+      const event = await getEventById(sql, opts.orgId, id);
+      if (!event) return;
 
-      lastPollTime = now;
+      await postEventToSlack(web, sql, opts.orgId, event);
     } catch (e) {
-      console.error("[bridge] Poll error:", e);
+      console.error("[bridge] LISTEN handler error:", e);
     }
   }
 
-  const pollInterval = setInterval(pollEvents, 5000);
+  // Subscribe first so no events are missed between catchup query and LISTEN being active
+  const { unlisten } = await sql.listen("polaris_events", (payload: string) => {
+    handleNotification(payload).catch((e) => console.error("[bridge] notify dispatch error:", e));
+  });
+  console.error("[bridge] Subscribed to polaris_events via Postgres LISTEN");
+
+  // Startup catchup: post any events emitted while the bridge was offline (last 10 min)
+  const catchupSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const missed = await getOrgEventsSince(sql, opts.orgId, catchupSince);
+  let catchupCount = 0;
+  for (const event of missed) {
+    if (event.project === "_system") continue;
+    if (recentlyPosted.has(event.id)) continue; // LISTEN already handled it
+    recentlyPosted.add(event.id);
+    await postEventToSlack(web, sql, opts.orgId, event);
+    catchupCount++;
+  }
+  if (catchupCount > 0) console.error(`[bridge] Catchup posted ${catchupCount} missed events`);
 
   // Start Socket Mode
   await socketMode.start();
@@ -381,7 +398,7 @@ export async function startBridge(opts: {
 
   return {
     stop: () => {
-      clearInterval(pollInterval);
+      unlisten().catch(() => {});
       socketMode.disconnect();
       sql.end();
     },

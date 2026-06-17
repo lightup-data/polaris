@@ -367,6 +367,19 @@ export async function pushEvent(sql: Sql, orgId: string, event: PolarisEvent): P
     SELECT ${event.id}, ${orgId}, p.id, ${event.session}, ${event.timestamp}, ${event.source}, ${event.sender}, ${sql.json(event.payload)}
     FROM projects p WHERE p.org_id = ${orgId} AND p.name = ${event.project}
   `;
+  // Notify bridge processes immediately — payload carries only routing info to stay under the 8KB limit
+  await sql`SELECT pg_notify('polaris_events', ${JSON.stringify({ id: event.id, org_id: orgId, project: event.project })})`;
+}
+
+export async function getEventById(sql: Sql, orgId: string, id: string): Promise<PolarisEvent | null> {
+  const [row] = await sql`
+    SELECT e.id, p.name as project, e.session, e.timestamp, e.source, e.sender, e.payload
+    FROM events e
+    JOIN projects p ON e.project_id = p.id
+    WHERE e.id = ${id} AND e.org_id = ${orgId}
+  `;
+  if (!row) return null;
+  return rowToEvent(row);
 }
 
 function rowToEvent(row: {
