@@ -410,7 +410,7 @@ export function renderLandingPage(): string {
               <span class="text-4xl font-bold text-gray-900">Custom</span>
             </div>
             <p class="mt-2 text-sm text-gray-500">For organizations with compliance and scale needs.</p>
-            <a href="mailto:hello@withpolaris.ai" class="mt-6 block w-full text-center px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
+            <a href="mailto:support@withpolaris.ai" class="mt-6 block w-full text-center px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
             <ul class="mt-6 space-y-3 text-sm text-gray-700">
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Everything in Team</li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Custom usage limits</li>
