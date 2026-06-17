@@ -374,13 +374,31 @@ export function renderLandingPage(): string {
               <span class="text-4xl font-bold text-gray-900">$0</span>
               <span class="text-gray-500 text-sm ml-1">forever</span>
             </div>
-            <p class="mt-2 text-sm text-gray-500">For individuals and small teams getting started.</p>
+            <p class="mt-2 text-sm text-gray-500">Try Polaris with your team. No credit card required.</p>
             <a href="/signup?plan=free" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
             <ul class="mt-6 space-y-3 text-sm text-gray-700">
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>1,000</strong> prompts / month</span></li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5 GB</strong> data captured</span></li>
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>7 days session history</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>7 days</strong> session history</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Community support</li>
+            </ul>
+          </div>
+
+          <!-- Pro -->
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Pro</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$29</span>
+              <span class="text-gray-500 text-sm ml-1">/month</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For power users who rely on Polaris daily.</p>
+            <a href="/signup?plan=pro" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>25 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>30 days</strong> session history</span></li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Community support</li>
             </ul>
           </div>
@@ -392,7 +410,7 @@ export function renderLandingPage(): string {
               <span class="text-4xl font-bold text-gray-900">$49</span>
               <span class="text-gray-500 text-sm ml-1">/month</span>
             </div>
-            <p class="mt-2 text-sm text-gray-500">For teams that need more capacity, history, and search.</p>
+            <p class="mt-2 text-sm text-gray-500">For teams that need capacity, history, and support.</p>
             <a href="/signup?plan=team" class="mt-6 block w-full text-center px-4 py-2.5 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Get started</a>
             <ul class="mt-6 space-y-3 text-sm text-gray-700">
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
@@ -403,23 +421,15 @@ export function renderLandingPage(): string {
             </ul>
           </div>
 
-          <!-- Enterprise -->
-          <div class="bg-white border border-gray-200 rounded-xl p-8">
-            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Enterprise</h3>
-            <div class="mt-4">
-              <span class="text-4xl font-bold text-gray-900">Custom</span>
-            </div>
-            <p class="mt-2 text-sm text-gray-500">For organizations with compliance and scale needs.</p>
-            <a href="mailto:support@withpolaris.ai?subject=Enterprise%20plan%20inquiry" class="mt-6 block w-full text-center px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
-            <ul class="mt-6 space-y-3 text-sm text-gray-700">
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Everything in Team</li>
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Custom usage limits</li>
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>SSO, audit logs, compliance</li>
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Custom integrations</li>
-              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Dedicated support</li>
-            </ul>
-          </div>
+        </div>
 
+        <!-- Enterprise banner -->
+        <div class="mt-8 bg-white border border-gray-200 rounded-xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 class="font-semibold text-gray-900">Enterprise</h3>
+            <p class="mt-1 text-sm text-gray-500">Custom limits, SSO, audit logs, compliance, and dedicated support.</p>
+          </div>
+          <a href="mailto:support@withpolaris.ai?subject=Enterprise%20plan%20inquiry" class="shrink-0 px-5 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
         </div>
 
         <div class="mt-12 text-center text-sm text-gray-400">
