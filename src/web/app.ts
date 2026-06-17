@@ -137,10 +137,37 @@ export function createApp(sql: Sql) {
   // Start hourly signup rollup
   startSignupRollup(sql);
 
+  // --- SEO ---
+
+  app.get("/robots.txt", (c) => {
+    return new Response(
+      `User-agent: *\nAllow: /\n\nSitemap: https://app.withpolaris.ai/sitemap.xml`,
+      { headers: { "Content-Type": "text/plain" } }
+    );
+  });
+
+  app.get("/sitemap.xml", (c) => {
+    return new Response(
+      `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://app.withpolaris.ai</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`,
+      { headers: { "Content-Type": "application/xml" } }
+    );
+  });
+
   // --- Landing page ---
 
   app.get("/", (c) => {
-    return layout(renderLandingPage());
+    return layout(renderLandingPage(), "Polaris — It's like Gong for Claude Code sessions", {
+      title: "Polaris — It's like Gong for Claude Code sessions",
+      description: "Capture every AI coding session. Stream prompts, responses, and tool calls to Slack in real time. Collaborate across agents. Nothing is lost.",
+      canonical: "https://app.withpolaris.ai",
+    });
   });
 
   // --- Auth: single Google SSO flow for both signup and login ---

@@ -6,14 +6,35 @@ export interface NavOpts {
   email?: string;
 }
 
-export function layout(body: string, title = "Polaris"): Response {
+export interface SeoOpts {
+  title?: string;
+  description?: string;
+  canonical?: string;
+}
+
+export function layout(body: string, title = "Polaris", seo?: SeoOpts): Response {
+  const pageTitle = seo?.title ?? title;
+  const description = seo?.description ?? "It's like Gong for Claude Code sessions. Capture every prompt, response, and tool call. Stream to Slack. Collaborate in real time.";
+  const canonical = seo?.canonical ?? "https://app.withpolaris.ai";
+  const ogImage = "https://app.withpolaris.ai/og-image.png";
   return new Response(
     `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
+<title>${pageTitle}</title>
+<meta name="description" content="${description}">
+<link rel="canonical" href="${canonical}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="${pageTitle}">
+<meta property="og:description" content="${description}">
+<meta property="og:image" content="${ogImage}">
+<meta property="og:url" content="${canonical}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${pageTitle}">
+<meta name="twitter:description" content="${description}">
+<meta name="twitter:image" content="${ogImage}">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
