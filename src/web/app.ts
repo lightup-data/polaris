@@ -142,6 +142,13 @@ export function createApp(sql: Sql) {
 
   // --- SEO ---
 
+  app.get("/og-image.png", async (c) => {
+    const file = Bun.file(new URL("../../og-image.png", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+    });
+  });
+
   app.get("/robots.txt", (c) => {
     return new Response(
       `User-agent: *\nAllow: /\n\nSitemap: https://app.withpolaris.ai/sitemap.xml`,
