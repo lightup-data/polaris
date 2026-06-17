@@ -386,14 +386,14 @@ export function renderLandingPage(): string {
           </div>
 
           <!-- Pro -->
-          <div class="bg-white border border-gray-200 rounded-xl p-8">
-            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Pro</h3>
+          <div class="bg-white border-2 border-polaris-600 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-polaris-600 uppercase tracking-wider">Pro</h3>
             <div class="mt-4">
               <span class="text-4xl font-bold text-gray-900">$29</span>
               <span class="text-gray-500 text-sm ml-1">/month</span>
             </div>
             <p class="mt-2 text-sm text-gray-500">For power users who rely on Polaris daily.</p>
-            <a href="/signup?plan=pro" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+            <a href="/signup?plan=pro" class="mt-6 block w-full text-center px-4 py-2.5 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Get started</a>
             <ul class="mt-6 space-y-3 text-sm text-gray-700">
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5,000</strong> prompts / month</span></li>
@@ -404,14 +404,14 @@ export function renderLandingPage(): string {
           </div>
 
           <!-- Team -->
-          <div class="bg-white border-2 border-polaris-600 rounded-xl p-8">
-            <h3 class="text-sm font-semibold text-polaris-600 uppercase tracking-wider">Team</h3>
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Team</h3>
             <div class="mt-4">
               <span class="text-4xl font-bold text-gray-900">$49</span>
               <span class="text-gray-500 text-sm ml-1">/month</span>
             </div>
             <p class="mt-2 text-sm text-gray-500">For teams that need capacity, history, and support.</p>
-            <a href="/signup?plan=team" class="mt-6 block w-full text-center px-4 py-2.5 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Get started</a>
+            <a href="/signup?plan=team" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
             <ul class="mt-6 space-y-3 text-sm text-gray-700">
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
               <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>10,000</strong> prompts / month</span></li>
