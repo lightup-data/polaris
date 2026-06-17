@@ -58,8 +58,9 @@ function statusBadge(label: string, done: boolean): string {
 // --- Banner helpers ---
 
 function bannerForCtx(ctx: ViewContext): { message: string; style: "info" | "success" | "warning" } | undefined {
-  if (ctx.plan === "team") {
-    return { message: "<strong>Team plan</strong> — we'll reach out shortly to get you set up. Full access in the meantime.", style: "info" };
+  if (ctx.plan && ctx.plan !== "free") {
+    const label = ctx.plan.charAt(0).toUpperCase() + ctx.plan.slice(1);
+    return { message: `<strong>${label} plan</strong> — we'll reach out shortly to get you set up. Full access in the meantime.`, style: "info" };
   }
   return undefined;
 }

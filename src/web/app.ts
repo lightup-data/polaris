@@ -171,10 +171,10 @@ export function createApp(sql: Sql) {
     const existingUser = await getUserByEmail(sql, email);
     if (existingUser) {
       // Upgrade org plan if signing up for a higher tier
-      if (stateData.plan === "team") {
+      if (stateData.plan && stateData.plan !== "free") {
         const userOrg = await getOrg(sql, existingUser.org_id);
         if (userOrg && userOrg.plan === "free") {
-          await setOrgPlan(sql, existingUser.org_id, "free", "team", existingUser.id);
+          await setOrgPlan(sql, existingUser.org_id, "free", stateData.plan, existingUser.id);
         }
       }
 
@@ -196,8 +196,8 @@ export function createApp(sql: Sql) {
       await createUser(sql, userId, email, name, existingOrg.id, participantId);
 
       // Upgrade org plan if signing up for a higher tier
-      if (stateData.plan === "team" && existingOrg.plan === "free") {
-        await setOrgPlan(sql, existingOrg.id, "free", "team", userId);
+      if (stateData.plan && stateData.plan !== "free" && existingOrg.plan === "free") {
+        await setOrgPlan(sql, existingOrg.id, "free", stateData.plan, userId);
       }
 
       // Notify org's Slack system channel
@@ -353,7 +353,7 @@ export function createApp(sql: Sql) {
     const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
     const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
     const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam };
-    const teamPlan    = { ...fresh, plan: "team" };
+    const teamPlan    = { ...fresh, plan: "pro" };
 
     return layout(`
       <div class="max-w-5xl mx-auto px-6 py-12">
