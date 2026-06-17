@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down api web daemon bridge test clean
+.PHONY: dev dev-up dev-down api web daemon bridge test clean prod
 
 # Load .env if it exists
 ifneq (,$(wildcard .env))
@@ -45,15 +45,29 @@ bridge:
 	  else echo "Skipping bridge (no Slack-connected org found)"; fi; \
 	fi
 
+# Run web locally against prod DB
+# Opens SSH tunnel to prod postgres, starts web app with hot reload, cleans up on Ctrl-C.
+prod:
+	@lsof -ti :3000 | xargs kill -9 2>/dev/null || true
+	@lsof -ti :5433 | xargs kill -9 2>/dev/null || true
+	@PW=$$(ssh deploy@withpolaris.ai "grep POSTGRES_PASSWORD /opt/polaris/.env" | cut -d= -f2); \
+	PG_IP=$$(ssh deploy@withpolaris.ai "docker inspect polaris-postgres-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'"); \
+	echo "Tunneling prod postgres ($$PG_IP:5432) to localhost:5433"; \
+	ssh -f -N -L 5433:$$PG_IP:5432 deploy@withpolaris.ai; \
+	echo "Starting web app on http://localhost:3000 (prod DB)"; \
+	DATABASE_URL=postgres://polaris:$$PW@localhost:5433/polaris npx bun --hot run src/web/serve.ts; \
+	lsof -ti :5433 | xargs kill 2>/dev/null || true
+
 # Run tests
 test:
 	npx bun test
 
-# Stop all background processes and Postgres
+# Stop all background processes, tunnels, and Postgres
 clean:
 	@lsof -ti :4321 | xargs kill -9 2>/dev/null || true
 	@lsof -ti :4322 | xargs kill -9 2>/dev/null || true
 	@lsof -ti :3000 | xargs kill -9 2>/dev/null || true
+	@lsof -ti :5433 | xargs kill -9 2>/dev/null || true
 	@pgrep -f "bridge.ts" | xargs kill -9 2>/dev/null || true
 	docker compose down
 	@echo "Cleaned up"
