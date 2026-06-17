@@ -17,6 +17,7 @@ import {
   getRecentSignups,
   listUsers,
   setOrgPlan,
+  getDailyPromptCounts,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -284,8 +285,9 @@ export function createApp(sql: Sql) {
       }
     } catch { /* _system project may not exist yet */ }
 
-    // Query team members, projects, sessions, and prompt counts
+    // Query team members, projects, sessions, prompt counts, and daily activity
     const teamMembers = await listUsers(sql, payload.org_id);
+    const dailyPrompts = await getDailyPromptCounts(sql, payload.org_id);
     const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
     const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
     const promptCounts = await getSessionPromptCounts(sql, payload.org_id);
@@ -325,6 +327,7 @@ export function createApp(sql: Sql) {
       totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
       teamMembers: teamMembers.map((u) => ({ name: u.name, email: u.email })),
       plan: org.plan,
+      dailyPrompts,
     };
 
     if (hasConnectedSession) {
@@ -366,10 +369,17 @@ export function createApp(sql: Sql) {
     const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email };
 
     const mockTeam = [{ name: mockUser.name, email: mockUser.email }, { name: "Alice Chen", email: "alice@lightup.ai" }, { name: "Laura Mowry", email: "laura@lightup.ai" }];
+    const mockSenders = ["user:manu.bansal", "user:alice.chen", "user:laura.mowry"];
+    const mockDailyPrompts = mockSenders.flatMap((sender) =>
+      Array.from({ length: 14 }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - 13 + i);
+        return { date: d.toISOString().slice(0, 10), sender, count: Math.floor(Math.random() * 12) + 1 };
+      })
+    );
     const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
-    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
-    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam };
+    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
     const teamPlan    = { ...fresh, plan: "pro" };
 
     return layout(`

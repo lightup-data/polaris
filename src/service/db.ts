@@ -364,6 +364,18 @@ export async function getSessionPromptCounts(sql: Sql, orgId: string): Promise<M
   return counts;
 }
 
+export async function getDailyPromptCounts(sql: Sql, orgId: string, days = 14): Promise<Array<{ date: string; sender: string; count: number }>> {
+  const rows = await sql`
+    SELECT date_trunc('day', e.timestamp)::date as date, e.sender, count(*)::int as count
+    FROM events e
+    WHERE e.org_id = ${orgId} AND e.payload->>'hook_event_name' = 'UserPromptSubmit'
+      AND e.timestamp >= now() - ${days + ' days'}::interval
+    GROUP BY date, e.sender
+    ORDER BY date ASC
+  `;
+  return rows.map((r) => ({ date: r.date.toISOString().slice(0, 10), sender: r.sender, count: r.count }));
+}
+
 export async function setDriver(sql: Sql, orgId: string, project: string, session: string, driver: ParticipantId): Promise<void> {
   await sql`
     UPDATE sessions SET driver = ${driver}

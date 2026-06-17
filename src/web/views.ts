@@ -21,6 +21,7 @@ interface ViewContext {
   totalPrompts: number;
   teamMembers?: TeamMember[];
   plan?: string;
+  dailyPrompts?: Array<{ date: string; sender: string; count: number }>;
 }
 
 function navOpts(ctx: ViewContext): NavOpts {
@@ -83,6 +84,118 @@ function renderTeamMembers(members: TeamMember[], currentEmail: string): string 
     </div>`;
 }
 
+// --- Daily prompts chart ---
+
+function renderDailyPrompts(data: Array<{ date: string; sender: string; count: number }> | undefined): string {
+  if (!data || data.length === 0) return "";
+
+  const id = `heatmap-${Math.random().toString(36).slice(2, 8)}`;
+
+  // Build date columns for last 14 days
+  const dates: string[] = [];
+  const now = new Date();
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  // Totals per day
+  const dayTotals = new Map<string, number>();
+  let total = 0;
+  for (const d of data) {
+    dayTotals.set(d.date, (dayTotals.get(d.date) ?? 0) + d.count);
+    total += d.count;
+  }
+
+  // Group by sender
+  const bySender = new Map<string, Map<string, number>>();
+  for (const d of data) {
+    if (!bySender.has(d.sender)) bySender.set(d.sender, new Map());
+    bySender.get(d.sender)!.set(d.date, d.count);
+  }
+
+  function intensity(count: number, max: number): string {
+    if (count === 0) return "bg-gray-100";
+    const ratio = count / max;
+    if (ratio < 0.25) return "bg-polaris-100";
+    if (ratio < 0.5) return "bg-polaris-200";
+    if (ratio < 0.75) return "bg-polaris-400";
+    return "bg-polaris-600";
+  }
+
+  function shortName(sender: string): string {
+    const name = sender.replace(/^user:/, "").split(".")[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  // Team view — histogram bars
+  const teamMax = Math.max(...dates.map((d) => dayTotals.get(d) ?? 0), 1);
+  const teamBars = dates.map((date) => {
+    const count = dayTotals.get(date) ?? 0;
+    const pct = Math.max((count / teamMax) * 100, count > 0 ? 12 : 0);
+    const label = date.slice(5).replace("-", "/");
+    const day = new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" });
+    return `
+      <div class="flex flex-col items-center gap-1 flex-1" title="${day} ${label}: ${count}">
+        ${count > 0 ? `<span class="text-[9px] text-gray-400 leading-none">${count}</span>` : `<span class="text-[9px] leading-none">&nbsp;</span>`}
+        <div class="w-full flex flex-col justify-end" style="height: 40px">
+          <div class="w-full rounded-sm ${count > 0 ? "bg-polaris-400" : "bg-gray-100"}" style="height: ${pct}%"></div>
+        </div>
+        <span class="text-[8px] text-gray-400 leading-none">${label}</span>
+      </div>`;
+  }).join("");
+
+  const teamView = `
+    <div class="flex items-end gap-0.5">
+      ${teamBars}
+    </div>`;
+
+  // Per-user view — each row uses its own max for color scale
+  const userRows = Array.from(bySender.entries()).map(([sender, counts]) => {
+    const rowMax = Math.max(...dates.map((d) => counts.get(d) ?? 0), 1);
+    const cells = dates.map((date) => {
+      const count = counts.get(date) ?? 0;
+      const day = new Date(date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" });
+      return `<div class="h-5 flex-1 rounded-sm ${intensity(count, rowMax)}" title="${day} ${date.slice(5).replace("-", "/")}: ${count}"></div>`;
+    }).join("");
+    return `
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] text-gray-500 w-12 text-right shrink-0 truncate">${shortName(sender)}</span>
+        <div class="flex items-center gap-px flex-1">${cells}</div>
+      </div>`;
+  }).join("");
+
+  const dateLabels = dates.map((date) => {
+    return `<div class="flex-1 text-center text-[8px] text-gray-400 leading-none">${date.slice(5).replace("-", "/")}</div>`;
+  }).join("");
+
+  const userView = `
+    <div class="flex flex-col gap-1">
+      ${userRows}
+      <div class="flex items-center gap-2">
+        <span class="w-12 shrink-0"></span>
+        <div class="flex items-center gap-px flex-1">${dateLabels}</div>
+      </div>
+    </div>`;
+
+  return `
+    <div class="mt-3 bg-white border border-gray-200 rounded-lg px-4 py-3">
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-gray-500">Prompts captured</p>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-400">${total} last 14d</span>
+          <div class="flex items-center bg-gray-100 rounded-md p-0.5">
+            <button id="${id}-btn-team" onclick="document.getElementById('${id}-team').classList.remove('hidden');document.getElementById('${id}-user').classList.add('hidden');this.classList.add('bg-white','shadow-sm','text-gray-700');this.classList.remove('text-gray-400');var o=document.getElementById('${id}-btn-user');o.classList.remove('bg-white','shadow-sm','text-gray-700');o.classList.add('text-gray-400')" class="text-[10px] font-medium px-2 py-0.5 rounded cursor-pointer bg-white shadow-sm text-gray-700">Team</button>
+            <button id="${id}-btn-user" onclick="document.getElementById('${id}-user').classList.remove('hidden');document.getElementById('${id}-team').classList.add('hidden');this.classList.add('bg-white','shadow-sm','text-gray-700');this.classList.remove('text-gray-400');var o=document.getElementById('${id}-btn-team');o.classList.remove('bg-white','shadow-sm','text-gray-700');o.classList.add('text-gray-400')" class="text-[10px] font-medium px-2 py-0.5 rounded cursor-pointer text-gray-400">By user</button>
+          </div>
+        </div>
+      </div>
+      <div id="${id}-team">${teamView}</div>
+      <div id="${id}-user" class="hidden">${userView}</div>
+    </div>`;
+}
+
 // --- Floor section ---
 
 type StepState = "done" | "active" | "future";
@@ -118,6 +231,7 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           ${ctx.orgSlug ? `<span class="text-xs text-gray-400 font-mono">${ctx.orgSlug}</span>` : ''}
           ${promptStat}
         </div>
+        ${renderDailyPrompts(ctx.dailyPrompts)}
         ${ctx.teamMembers ? renderTeamMembers(ctx.teamMembers, ctx.email) : ""}
       </div>`;
   }
@@ -142,6 +256,7 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
           <p class="text-sm font-medium text-gray-900">Slack</p>
           ${slugLabel}
         </div>
+        ${renderDailyPrompts(ctx.dailyPrompts)}
         ${ctx.teamMembers ? renderTeamMembers(ctx.teamMembers, ctx.email) : ""}
       </div>`;
   }
