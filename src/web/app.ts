@@ -16,6 +16,7 @@ import {
   getProjectEvents,
   getRecentSignups,
   listUsers,
+  setOrgPlan,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -169,6 +170,14 @@ export function createApp(sql: Sql) {
     // 1. Existing user → log in
     const existingUser = await getUserByEmail(sql, email);
     if (existingUser) {
+      // Upgrade org plan if signing up for a higher tier
+      if (stateData.plan === "team") {
+        const userOrg = await getOrg(sql, existingUser.org_id);
+        if (userOrg && userOrg.plan === "free") {
+          await setOrgPlan(sql, existingUser.org_id, "free", "team", existingUser.id);
+        }
+      }
+
       const token = await createToken({
         sub: existingUser.id,
         email: existingUser.email,
@@ -185,6 +194,11 @@ export function createApp(sql: Sql) {
       const userId = crypto.randomUUID();
       const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
       await createUser(sql, userId, email, name, existingOrg.id, participantId);
+
+      // Upgrade org plan if signing up for a higher tier
+      if (stateData.plan === "team" && existingOrg.plan === "free") {
+        await setOrgPlan(sql, existingOrg.id, "free", "team", userId);
+      }
 
       // Notify org's Slack system channel
       postSystemEvent({
@@ -207,7 +221,7 @@ export function createApp(sql: Sql) {
     const orgName = domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1);
     const orgId = crypto.randomUUID();
     try {
-      await createOrg(sql, orgId, orgName, domain);
+      await createOrg(sql, orgId, orgName, domain, stateData.plan);
     } catch {
       return layout(renderErrorView("Failed to create team. Please try again.", "Try again", "/login"));
     }
@@ -293,6 +307,7 @@ export function createApp(sql: Sql) {
       hasConnectedSession,
       totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
       teamMembers: teamMembers.map((u) => ({ name: u.name, email: u.email })),
+      plan: org.plan,
     };
 
     if (hasConnectedSession) {
@@ -338,6 +353,7 @@ export function createApp(sql: Sql) {
     const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
     const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam };
     const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam };
+    const teamPlan    = { ...fresh, plan: "team" };
 
     return layout(`
       <div class="max-w-5xl mx-auto px-6 py-12">
@@ -374,6 +390,14 @@ export function createApp(sql: Sql) {
             <p class="text-sm text-gray-400 mb-4">User is driver in one session, advisor in others.</p>
             <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
               ${renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Team plan signup</h2>
+            <p class="text-sm text-gray-400 mb-4">User signed up via the Team pricing CTA.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(teamPlan)}
             </div>
           </section>
 

@@ -10,6 +10,7 @@ export interface Org {
   name: string;
   slug: string | null;
   domain: string | null;
+  plan: string;
   slack_team_id: string | null;
   slack_bot_token: string | null;
   slack_system_channel_id: string | null;
@@ -36,12 +37,16 @@ export async function createDb(connectionString?: string): Promise<Sql> {
       name TEXT NOT NULL,
       slug TEXT UNIQUE,
       domain TEXT,
+      plan TEXT NOT NULL DEFAULT 'free',
       slack_team_id TEXT,
       slack_bot_token TEXT,
       slack_system_channel_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+
+  // Migrate: add plan column if missing
+  await sql`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -119,17 +124,33 @@ export async function createDb(connectionString?: string): Promise<Sql> {
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(project_id, session, timestamp)
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS plan_changes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id TEXT NOT NULL REFERENCES orgs(id),
+      user_id TEXT NOT NULL REFERENCES users(id),
+      from_plan TEXT NOT NULL,
+      to_plan TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
   return sql;
 }
 
 // --- Orgs ---
 
-export async function createOrg(sql: Sql, id: string, name: string, domain?: string): Promise<Org> {
+export async function createOrg(sql: Sql, id: string, name: string, domain?: string, plan?: string): Promise<Org> {
   const [row] = await sql`
-    INSERT INTO orgs (id, name, domain) VALUES (${id}, ${name}, ${domain ?? null})
+    INSERT INTO orgs (id, name, domain, plan) VALUES (${id}, ${name}, ${domain ?? null}, ${plan ?? "free"})
     RETURNING *
   `;
   return { ...row, created_at: row.created_at.toISOString() } as Org;
+}
+
+export async function setOrgPlan(sql: Sql, orgId: string, fromPlan: string, toPlan: string, userId: string): Promise<void> {
+  await sql`UPDATE orgs SET plan = ${toPlan} WHERE id = ${orgId}`;
+  await sql`INSERT INTO plan_changes (org_id, user_id, from_plan, to_plan) VALUES (${orgId}, ${userId}, ${fromPlan}, ${toPlan})`;
 }
 
 export async function getOrg(sql: Sql, id: string): Promise<Org | null> {

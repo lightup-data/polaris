@@ -20,10 +20,11 @@ interface ViewContext {
   hasConnectedSession: boolean;
   totalPrompts: number;
   teamMembers?: TeamMember[];
+  plan?: string;
 }
 
 function navOpts(ctx: ViewContext): NavOpts {
-  return { userName: ctx.userName, orgName: ctx.orgName, email: ctx.email };
+  return { userName: ctx.userName, orgName: ctx.orgName, email: ctx.email, plan: ctx.plan, banner: bannerForCtx(ctx) };
 }
 
 // --- Copyable code block ---
@@ -52,6 +53,15 @@ function statusBadge(label: string, done: boolean): string {
          ${label}
        </span>`
     : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">${label}</span>`;
+}
+
+// --- Banner helpers ---
+
+function bannerForCtx(ctx: ViewContext): { message: string; style: "info" | "success" | "warning" } | undefined {
+  if (ctx.plan === "team") {
+    return { message: "<strong>Team plan</strong> — we'll reach out shortly to get you set up. Full access in the meantime.", style: "info" };
+  }
+  return undefined;
 }
 
 // --- Team members ---
