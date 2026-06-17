@@ -355,6 +355,80 @@ export function renderLandingPage(): string {
       </div>
     </div>
 
+    <!-- Pricing -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-5xl mx-auto px-6">
+
+        <div class="text-center">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Pricing</h2>
+          <p class="mt-4 text-3xl font-bold text-gray-900">Start free. Upgrade when you're ready.</p>
+          <p class="mt-2 text-gray-500">Unlimited users on every plan. No per-seat pricing.</p>
+        </div>
+
+        <div class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          <!-- Free -->
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Free</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$0</span>
+              <span class="text-gray-500 text-sm ml-1">forever</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For individuals and small teams getting started.</p>
+            <a href="/signup" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>1,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>7 days session history</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Community support</li>
+            </ul>
+          </div>
+
+          <!-- Team -->
+          <div class="bg-white border-2 border-polaris-600 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-polaris-600 uppercase tracking-wider">Team</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$49</span>
+              <span class="text-gray-500 text-sm ml-1">/month</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For teams that need more capacity, history, and search.</p>
+            <a href="/signup" class="mt-6 block w-full text-center px-4 py-2.5 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>10,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>50 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>90 days</strong> session history</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Priority support</li>
+            </ul>
+          </div>
+
+          <!-- Enterprise -->
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Enterprise</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">Custom</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For organizations with compliance and scale needs.</p>
+            <a href="mailto:hello@withpolaris.ai" class="mt-6 block w-full text-center px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Everything in Team</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Custom usage limits</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>SSO, audit logs, compliance</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Custom integrations</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Dedicated support</li>
+            </ul>
+          </div>
+
+        </div>
+
+        <div class="mt-12 text-center text-sm text-gray-400">
+          All plans include unlimited users and real-time Slack streaming. No credit card required for Free.
+        </div>
+
+      </div>
+    </div>
+
     <div class="max-w-3xl mx-auto px-6">
 
       <!-- How it works -->
