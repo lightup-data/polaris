@@ -35,13 +35,14 @@ import {
 
 const SIGNUP_CHANNEL = "#alerts-mql-stream";
 
-function notifySignup(opts: { name: string; email: string; domain: string; orgName: string; isNewOrg: boolean }): void {
+function notifySignup(opts: { name: string; email: string; domain: string; orgName: string; isNewOrg: boolean; plan?: string }): void {
   const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
   if (!botToken) return;
 
   const emoji = opts.isNewOrg ? ":tada:" : ":wave:";
   const action = opts.isNewOrg ? "signed up (new org)" : "joined";
-  const text = `${emoji} *${opts.name}* (${opts.email}) ${action} — ${opts.orgName} (${opts.domain})`;
+  const planTag = opts.plan ? ` [${opts.plan}]` : "";
+  const text = `${emoji} *${opts.name}* (${opts.email}) ${action} — ${opts.orgName} (${opts.domain})${planTag}`;
 
   fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
@@ -90,7 +91,7 @@ function getGoogle(): Google {
   );
 }
 
-const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number }>();
+const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number; plan?: string }>();
 const cliCallbackPorts = new Map<string, number>(); // state → CLI local server port
 
 // If this auth flow was initiated by the CLI, redirect the token to the CLI's local server.
@@ -127,11 +128,12 @@ export function createApp(sql: Sql) {
 
   // --- Auth: single Google SSO flow for both signup and login ---
 
-  function startGoogleAuth(c: { redirect: (url: string) => Response }) {
+  function startGoogleAuth(c: { req: { query: (k: string) => string | undefined }; redirect: (url: string) => Response }) {
     const google = getGoogle();
     const state = crypto.randomUUID();
     const codeVerifier = crypto.randomUUID();
-    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now() });
+    const plan = c.req.query("plan");
+    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now(), plan });
     const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email", "profile"]);
     return c.redirect(url.toString());
   }
@@ -194,7 +196,7 @@ export function createApp(sql: Sql) {
       }).catch(() => {});
 
       // Notify internal team
-      notifySignup({ name, email, domain, orgName: existingOrg.name, isNewOrg: false });
+      notifySignup({ name, email, domain, orgName: existingOrg.name, isNewOrg: false, plan: stateData.plan });
 
       const token = await createToken({ sub: userId, email, name, org_id: existingOrg.id, participant_id: participantId });
       return authRedirect(c, state, token);
@@ -213,7 +215,7 @@ export function createApp(sql: Sql) {
     await createUser(sql, userId, email, name, orgId, participantId);
 
     // Notify internal team
-    notifySignup({ name, email, domain, orgName, isNewOrg: true });
+    notifySignup({ name, email, domain, orgName, isNewOrg: true, plan: stateData.plan });
 
     const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
     return authRedirect(c, state, token);
