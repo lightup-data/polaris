@@ -54,6 +54,23 @@ function notifySignup(opts: { name: string; email: string; domain: string; orgNa
   }).catch(() => {});
 }
 
+export function notifyPlanChange(opts: { name: string; email: string; orgName: string; fromPlan: string; toPlan: string }): void {
+  const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+  if (!botToken) return;
+
+  const emoji = opts.toPlan === "free" ? ":arrow_down:" : ":arrow_up:";
+  const text = `${emoji} *${opts.name}* (${opts.email}) changed plan: ${opts.fromPlan} → ${opts.toPlan} — ${opts.orgName}`;
+
+  fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+  }).catch(() => {});
+}
+
 function startSignupRollup(sql: Sql): void {
   const HOUR = 60 * 60 * 1000;
 
