@@ -17,6 +17,8 @@
 - [x] **Heading hierarchy** — verified: 1×h1, 7×h2, 18×h3, proper structure (DataForSEO score 100/100)
 - [x] **Favicon** — SVG favicon (polaris-600 hub icon) with immutable cache, favicon.ico redirects to it
 - [x] **gzip/zstd compression** — enabled in Caddy, page size over the wire: 51KB→9KB
+- [x] **Schema markup (JSON-LD)** — SoftwareApplication structured data with pricing, category, platform, and organization
+- [x] **Google Analytics** — GA4 property G-N00X6NR17E, async gtag.js in layout
 
 ## SEO — To Do
 
@@ -25,33 +27,6 @@
 - [ ] **Submit sitemap to Google Search Console**
   Register `app.withpolaris.ai` at https://search.google.com/search-console.
   Verify ownership via Cloudflare DNS TXT record. Submit sitemap URL.
-
-- [ ] **Add analytics**
-  No traffic data currently. Options:
-  - Plausible (privacy-friendly, lightweight, ~$9/mo)
-  - Google Analytics (free, full-featured, heavier)
-  - Cloudflare Web Analytics (free, built into Cloudflare dashboard)
-  Add the tracking script to the layout.
-
-### Medium Priority
-
-- [ ] **Schema markup (JSON-LD)**
-  Add structured data for SoftwareApplication and Organization.
-  Helps Google show rich results (product name, pricing, etc.).
-  ```json
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "Polaris",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "macOS, Linux",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    }
-  }
-  ```
 
 - [ ] **Blog / content marketing**
   Long-tail SEO needs content pages targeting search terms:
