@@ -118,8 +118,8 @@ check("Desc/content match", content.description_to_content_consistency >= 0.8,
 
 // Technical
 check("Favicon", !checks.no_favicon, checks.no_favicon ? "missing" : "present");
-check("No render-blocking", !checks.has_render_blocking_resources,
-  checks.has_render_blocking_resources ? `${meta.render_blocking_scripts_count} script(s)` : "clean");
+check("No render-blocking scripts", (meta.render_blocking_scripts_count ?? 0) === 0,
+  (meta.render_blocking_scripts_count ?? 0) === 0 ? "clean" : `${meta.render_blocking_scripts_count} script(s)`);
 check("Content encoding", !checks.no_content_encoding,
   checks.no_content_encoding ? "no gzip/brotli" : "enabled");
 check("SEO-friendly URL", !!checks.seo_friendly_url, checks.seo_friendly_url ? "yes" : "no");
