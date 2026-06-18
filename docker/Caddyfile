@@ -1,7 +1,9 @@
 withpolaris.ai, app.withpolaris.ai {
+    encode zstd gzip
     reverse_proxy web:3000
 }
 
 api.withpolaris.ai {
+    encode zstd gzip
     reverse_proxy api:4321
 }

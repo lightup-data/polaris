@@ -37,6 +37,7 @@ export function layout(body: string, title = "Polaris", seo?: SeoOpts): Response
 <meta name="twitter:title" content="${pageTitle}">
 <meta name="twitter:description" content="${description}">
 <meta name="twitter:image" content="${ogImage}">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="bg-gray-50 text-gray-900 antialiased"><div class="overflow-x-hidden max-w-[100vw]">${body}</div>

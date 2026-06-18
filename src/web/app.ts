@@ -149,6 +149,15 @@ export function createApp(sql: Sql) {
     });
   });
 
+  app.get("/favicon.svg", async (c) => {
+    const file = Bun.file(new URL("../../favicon.svg", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=31536000, immutable" },
+    });
+  });
+
+  app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 301));
+
   // --- SEO ---
 
   app.get("/og-image.png", async (c) => {
