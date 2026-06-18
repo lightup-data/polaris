@@ -15,6 +15,8 @@
 - [x] **Lighthouse performance audit** — `make perf` runs mobile+desktop against prod and local, checks Google "good" budgets (score≥90, FCP≤1.8s, LCP≤2.5s), saves JSON to `docs/audits/`
 - [x] **DataForSEO on-page audit** — `make seo` runs 20 SEO checks via DataForSEO API, saves JSON to `docs/audits/`
 - [x] **Heading hierarchy** — verified: 1×h1, 7×h2, 18×h3, proper structure (DataForSEO score 100/100)
+- [x] **Favicon** — SVG favicon (polaris-600 hub icon) with immutable cache, favicon.ico redirects to it
+- [x] **gzip/zstd compression** — enabled in Caddy, page size over the wire: 51KB→9KB
 
 ## SEO — To Do
 
@@ -30,14 +32,6 @@
   - Google Analytics (free, full-featured, heavier)
   - Cloudflare Web Analytics (free, built into Cloudflare dashboard)
   Add the tracking script to the layout.
-
-- [ ] **Favicon**
-  No favicon set. Flagged by DataForSEO audit. Add one for browser tabs and bookmarks.
-  Use the Polaris hub icon or a simplified version.
-
-- [ ] **Enable gzip/brotli compression**
-  DataForSEO flagged `no_content_encoding`. Caddy should be compressing responses.
-  Add `encode gzip zstd` to the Caddyfile.
 
 ### Medium Priority
 
