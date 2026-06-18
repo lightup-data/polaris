@@ -56,7 +56,7 @@ test:
 # Lighthouse performance audit against production and local
 perf:
 	@npx bun run scripts/perf-audit.ts https://app.withpolaris.ai
-	@npx bun run scripts/perf-audit.ts http://localhost:3000
+	@npx bun run scripts/perf-audit.ts local
 
 # DataForSEO on-page SEO audit against production
 SEO_URL ?= https://app.withpolaris.ai
