@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down api web daemon bridge test perf seo clean
+.PHONY: dev dev-up dev-down api web daemon bridge test perf seo css css-watch clean
 
 # Load .env if it exists
 ifneq (,$(wildcard .env))
@@ -6,8 +6,15 @@ ifneq (,$(wildcard .env))
   export
 endif
 
+# Build purged Tailwind CSS
+css:
+	@npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --minify
+
+css-watch:
+	@npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --watch
+
 # Start everything for local development
-dev: dev-up api web daemon bridge
+dev: dev-up css api web daemon bridge
 
 # Postgres
 dev-up:

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@source "../*.ts";
+
+@theme {
+  --color-polaris-50: #f0f4ff;
+  --color-polaris-100: #dbe4ff;
+  --color-polaris-200: #bac8ff;
+  --color-polaris-300: #91a7ff;
+  --color-polaris-400: #748ffc;
+  --color-polaris-500: #5c7cfa;
+  --color-polaris-600: #4c6ef5;
+  --color-polaris-700: #4263eb;
+  --color-polaris-800: #3b5bdb;
+  --color-polaris-900: #364fc7;
+}
