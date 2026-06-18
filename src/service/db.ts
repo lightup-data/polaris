@@ -30,7 +30,11 @@ export interface User {
 
 export async function createDb(connectionString?: string): Promise<Sql> {
   const sql = postgres(connectionString ?? process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris");
+  await ensureSchema(sql);
+  return sql;
+}
 
+export async function ensureSchema(sql: Sql): Promise<void> {
   await sql`
     CREATE TABLE IF NOT EXISTS orgs (
       id TEXT PRIMARY KEY,
@@ -134,8 +138,6 @@ export async function createDb(connectionString?: string): Promise<Sql> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
-
-  return sql;
 }
 
 // --- Orgs ---
