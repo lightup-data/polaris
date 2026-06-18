@@ -19,6 +19,9 @@
 - [x] **gzip/zstd compression** — enabled in Caddy, page size over the wire: 51KB→9KB
 - [x] **Schema markup (JSON-LD)** — SoftwareApplication structured data with pricing, category, platform, and organization
 - [x] **Google Analytics** — GA4 property G-N00X6NR17E, async gtag.js in layout
+- [x] **404 page** — custom error page with navigation back to home
+- [x] **Page titles** — dashboard ("Dashboard — Polaris"), setup ("Setup — Polaris"), profile ("Polaris - Profile")
+- [x] **Alt text on images** — added to all img tags on the landing page
 
 ## SEO — To Do
 
@@ -36,24 +39,6 @@
   - "AI agent observability for developers"
   - "Gong for AI coding"
   Options: simple `/blog` route with markdown rendering, or a subdomain `blog.withpolaris.ai`.
-
-### Low Priority
-
-- [ ] **Improve content rate**
-  DataForSEO flagged text at 8.2% of page HTML (want ≥10%).
-  More copy or blog content will fix this.
-
-- [ ] **404 page**
-  Custom 404 page with navigation back to the landing page.
-  Currently returns a default error.
-
-- [ ] **Page title for dashboard pages**
-  Dashboard, profile, and other authenticated pages should have
-  descriptive titles (e.g., "Dashboard — Polaris") instead of just "Polaris".
-
-- [ ] **Alt text on images**
-  The Claude Code PNG icon and any other images need alt text for
-  accessibility and SEO.
 
 ## Geo — To Do
 

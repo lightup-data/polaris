@@ -383,9 +383,9 @@ export function createApp(sql: Sql) {
     };
 
     if (hasConnectedSession) {
-      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Polaris");
+      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Dashboard — Polaris");
     }
-    return layout(renderSetupView(ctx, devices), "Polaris");
+    return layout(renderSetupView(ctx, devices), "Setup — Polaris");
   });
 
   // --- Profile ---
@@ -700,6 +700,12 @@ export function createApp(sql: Sql) {
     const payload = await verifyToken(token);
     if (!payload) return c.json({ error: "Invalid token" }, 401);
     return c.json(payload);
+  });
+
+  // --- 404 ---
+
+  app.notFound((c) => {
+    return layout(renderErrorView("Page not found.", "Back to home", "/"), "Not Found — Polaris");
   });
 
   return app;
