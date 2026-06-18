@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down api web daemon bridge test clean
+.PHONY: dev dev-up dev-down api web daemon bridge test perf clean
 
 # Load .env if it exists
 ifneq (,$(wildcard .env))
@@ -45,6 +45,62 @@ bridge:
 # Run tests
 test:
 	npx bun test
+
+# Lighthouse performance audit against production
+PERF_URL ?= https://app.withpolaris.ai
+perf:
+	@echo "Running Lighthouse against $(PERF_URL) ..."
+	@npx --yes lighthouse $(PERF_URL) \
+		--only-categories=performance \
+		--output=json \
+		--output-path=./lighthouse-mobile.json \
+		--chrome-flags="--headless --no-sandbox" 2>/dev/null
+	@npx lighthouse $(PERF_URL) \
+		--only-categories=performance \
+		--preset=desktop \
+		--output=json \
+		--output-path=./lighthouse-desktop.json \
+		--chrome-flags="--headless --no-sandbox" 2>/dev/null
+	@node -e " \
+		const m = require('./lighthouse-mobile.json'); \
+		const d = require('./lighthouse-desktop.json'); \
+		const ms = m.categories.performance.score * 100; \
+		const ds = d.categories.performance.score * 100; \
+		const mFCP = m.audits['first-contentful-paint'].numericValue; \
+		const dFCP = d.audits['first-contentful-paint'].numericValue; \
+		const mLCP = m.audits['largest-contentful-paint'].numericValue; \
+		const dLCP = d.audits['largest-contentful-paint'].numericValue; \
+		const mTBT = m.audits['total-blocking-time'].numericValue; \
+		const dTBT = d.audits['total-blocking-time'].numericValue; \
+		const mCLS = m.audits['cumulative-layout-shift'].numericValue; \
+		const dCLS = d.audits['cumulative-layout-shift'].numericValue; \
+		const mSI  = m.audits['speed-index'].numericValue; \
+		const dSI  = d.audits['speed-index'].numericValue; \
+		const mW   = m.audits['total-byte-weight'].numericValue; \
+		const dW   = d.audits['total-byte-weight'].numericValue; \
+		console.log(''); \
+		console.log('  Metric                  Mobile     Desktop'); \
+		console.log('  ──────────────────────────────────────────'); \
+		console.log('  Performance score       ' + String(ms).padStart(6) + '     ' + String(ds).padStart(6)); \
+		console.log('  First Contentful Paint  ' + (mFCP/1000).toFixed(1).padStart(5) + 's    ' + (dFCP/1000).toFixed(1).padStart(5) + 's'); \
+		console.log('  Largest Contentful Paint' + (mLCP/1000).toFixed(1).padStart(5) + 's    ' + (dLCP/1000).toFixed(1).padStart(5) + 's'); \
+		console.log('  Total Blocking Time     ' + String(Math.round(mTBT)).padStart(4) + 'ms    ' + String(Math.round(dTBT)).padStart(4) + 'ms'); \
+		console.log('  Cumulative Layout Shift ' + mCLS.toFixed(3).padStart(6) + '     ' + dCLS.toFixed(3).padStart(6)); \
+		console.log('  Speed Index             ' + (mSI/1000).toFixed(1).padStart(5) + 's    ' + (dSI/1000).toFixed(1).padStart(5) + 's'); \
+		console.log('  Page weight             ' + Math.round(mW/1024) + ' KB     ' + Math.round(dW/1024) + ' KB'); \
+		console.log(''); \
+		let fail = false; \
+		if (ms < 90) { console.error('  FAIL: Mobile score ' + ms + ' < 90'); fail = true; } \
+		if (ds < 90) { console.error('  FAIL: Desktop score ' + ds + ' < 90'); fail = true; } \
+		if (mFCP > 1800) { console.error('  FAIL: Mobile FCP ' + (mFCP/1000).toFixed(1) + 's > 1.8s'); fail = true; } \
+		if (dFCP > 1800) { console.error('  FAIL: Desktop FCP ' + (dFCP/1000).toFixed(1) + 's > 1.8s'); fail = true; } \
+		if (mLCP > 2500) { console.error('  FAIL: Mobile LCP ' + (mLCP/1000).toFixed(1) + 's > 2.5s'); fail = true; } \
+		if (dLCP > 2500) { console.error('  FAIL: Desktop LCP ' + (dLCP/1000).toFixed(1) + 's > 2.5s'); fail = true; } \
+		if (fail) process.exit(1); \
+		console.log('  All budgets passed.'); \
+		console.log(''); \
+	"
+	@rm -f lighthouse-mobile.json lighthouse-desktop.json
 
 # Stop all background processes and Postgres
 clean:
