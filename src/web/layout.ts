@@ -39,6 +39,29 @@ export function layout(body: string, title = "Polaris", seo?: SeoOpts): Response
 <meta name="twitter:image" content="${ogImage}">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Polaris",
+  "description": "${description}",
+  "url": "https://app.withpolaris.ai",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux",
+  "offers": {
+    "@type": "AggregateOffer",
+    "lowPrice": "0",
+    "highPrice": "0",
+    "priceCurrency": "USD",
+    "offerCount": "3"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "Lightup",
+    "url": "https://lightup.ai"
+  }
+}
+</script>
 </head>
 <body class="bg-gray-50 text-gray-900 antialiased"><div class="overflow-x-hidden max-w-[100vw]">${body}</div>
 <script>
