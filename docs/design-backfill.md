@@ -156,6 +156,16 @@ Project renames, session changes, and Slack channel renames can happen during a 
 
 **Recommendation**: Always log `/connect` and `/disconnect` events to a separate persistent file (`~/.polaris/session-history.jsonl`) that survives daemon restarts. This gives backfill a reliable timeline of which CC session was in which project at what time.
 
+## TODOs
+
+- [ ] **Separate backfill recovery from Slack notifications** — Backfill currently replays events via `POST /events`, which unconditionally broadcasts to Slack. Need to separate: (1) silent recovery of events into Polaris (add a `backfill: true` flag to skip broadcasting), (2) optional catchup summaries on Slack (condensed summary of what happened during the gap, not raw event replay).
+
+- [ ] **Control Slack reporting verbosity** — Slack notifications from Polaris events are too verbose to be usable. Need configurable verbosity levels — e.g., per-project or per-session settings to control what gets posted and at what detail level.
+
+- [ ] **Add dedup logic to backfill with checkpointing** — Backfill currently replays all events in the time range with no dedup — the API assigns new UUIDs to each, so replaying twice doubles events. Need: (1) dedup logic so already-published events aren't re-ingested (timestamp matching or content hash per the Deduplication section above), (2) sensible checkpointing so backfill can resume without re-processing, (3) merging scheme for overlapping backfill ranges.
+
+- [ ] **Handle session discontinuity in backfill** — Backfill currently only works against the current CC session's mapping. If a user's Polaris session disconnected, they continued working in CC, then stopped and started a new CC session (without resume), backfill from the new session can't recover events from the old one. It replays everything into the current Polaris session instead of the one that was active when the events were generated. Fix: backfill should read `session-history.jsonl` to build a timeline of CC session → Polaris session mappings, cross-reference daemon log timestamps against that timeline, and replay each event to the correct Polaris session. Both data sources persist after CC sessions end (CC transcripts in `~/.claude/projects/`, daemon logs in `~/.polaris/logs/`), so the data is available — just the routing logic is missing.
+
 ## Open Questions
 
 1. **Should backfill be automatic?** The daemon could detect gaps on startup (compare last log entry to last API event) and auto-backfill. Risk: could replay stale events unintentionally.
