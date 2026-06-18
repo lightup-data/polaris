@@ -11,6 +11,31 @@ Multiplayer collaboration for AI coding agents. Connects coding sessions (Claude
 - **Slack Bridge** (`src/slack/bridge.ts`) — Bidirectional bridge between project event streams and Slack channels.
 - **Hooks** (`hooks/`) — Shell scripts that capture coding agent interactions (prompts, responses, tool calls).
 
+## Prerequisites
+
+Install these before running the Quick Start:
+
+| Tool | Why | Install |
+|---|---|---|
+| [Bun](https://bun.sh) | Runtime for all services, the CLI, and the test suite | `npm install -g bun`, `brew install oven-sh/bun/bun`, or `curl -fsSL https://bun.sh/install \| bash` |
+| [Docker](https://docs.docker.com/get-docker/) | Runs the Postgres container | Docker Desktop (macOS/Windows) or Docker Engine (Linux) — must be **running** |
+
+Then verify:
+
+```sh
+bun --version       # 1.x
+docker info         # should succeed (daemon running)
+```
+
+> **Port 5432 must be free.** `docker compose up -d` binds Postgres to `5432`. If another
+> Postgres already uses that port, either stop it, or run the container on `5433` and set
+> `DATABASE_URL=postgres://polaris:polaris@127.0.0.1:5433/polaris` (and pass the same
+> `DATABASE_URL` to `make test`, pointing at the `polaris_test` database).
+
+> **Login needs Google OAuth.** `make dev` and `polaris login` authenticate via Google SSO,
+> so `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` must be set in `.env` (see
+> [Configuration](#configuration)). The test suite (`make test`) does **not** require this.
+
 ## Quick Start
 
 ```sh
@@ -72,6 +97,46 @@ Copy `.env.example` to `.env` and fill in your credentials. All settings are loa
 | `SLACK_APP_TOKEN` | Slack app-level token (for Socket Mode) |
 | `SLACK_REDIRECT_URI` | Slack OAuth callback URL |
 
+### Local Google OAuth setup
+
+Login — both `polaris login --local` and the dashboard — uses Google SSO, so you need a Google OAuth client. (The repo ships `scripts/setup-google-oauth.sh`, but it overwrites `.env` and its automation is unreliable; set it up manually.)
+
+1. Open the [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) and create or select a project.
+2. **OAuth consent screen** (now called the *Google Auth Platform*): set User type **External**, fill in an app name and support email, and Save.
+3. **Add yourself as a Test user.** In the redesigned console this moved — it's no longer on the consent screen. Go to **APIs & Services → OAuth consent screen → Audience** (left sidebar) — or directly [console.cloud.google.com/auth/audience](https://console.cloud.google.com/auth/audience) — and under **Test users** click **+ Add users**, add the email you'll sign in with, and Save. This is **required** while the app is in *Testing* mode; without it, sign-in is blocked with `access_denied`.
+4. **Create Credentials → OAuth client ID → Web application**.
+5. Under **Authorized redirect URIs** (not "JavaScript origins"), add this **exactly**:
+   ```
+   http://localhost:3000/auth/google/callback
+   ```
+   It must match character-for-character — no trailing slash, `http` not `https`, `localhost` not `127.0.0.1`, port `3000`. This is the value the app sends by default (override with `GOOGLE_REDIRECT_URI`).
+6. Copy the **Client ID** and **Client Secret** into `.env` — edit the existing empty lines, don't recreate the file (you'd lose `POSTGRES_PASSWORD`, the JWT secret, etc.):
+   ```
+   GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=<your-secret>
+   ```
+7. Reload so the values take effect: `make clean && make dev`.
+
+> Redirect-URI changes can take a few minutes to propagate on Google's side. If you get `redirect_uri_mismatch` immediately after saving, wait ~5 minutes and retry.
+
+### Local Slack app setup (optional)
+
+Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels. Slack has no API to create apps, so this is manual (`scripts/setup-slack-app.sh` walks you through it and **appends** to `.env`, so it won't clobber existing values).
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick your dev workspace.
+2. **OAuth & Permissions**: under **Redirect URLs** add `http://localhost:3000/slack/callback` and Save. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
+3. **Socket Mode**: toggle **Enable Socket Mode** on, then generate an app-level token (scope `connections:write`). Copy it — this is `SLACK_APP_TOKEN` (starts with `xapp-`).
+4. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. (This is what lets Slack messages reach a session.)
+5. **Basic Information**: copy the **Client ID** and **Client Secret**.
+6. Add all three to `.env`:
+   ```
+   SLACK_CLIENT_ID=<client-id>
+   SLACK_CLIENT_SECRET=<client-secret>
+   SLACK_APP_TOKEN=xapp-<socket-mode-token>
+   ```
+   (`SLACK_REDIRECT_URI` defaults to `http://localhost:3000/slack/callback`.)
+7. Reload: `make clean && make dev`, then click **Connect Slack** on the dashboard to install the bot into your workspace.
+
 ### Optional
 
 | Variable | Default | Description |
@@ -119,6 +184,8 @@ tests/         Test suite (bun test)
 - [ ] Reconciliation and recovery — `polaris recover` command that diffs the daemon JSONL log against the DB, backfills missing events, and posts an abridged recovery summary to Slack as a thread reply at the correct timeline position
 - [ ] CD pipeline for Hetzner — auto-deploy to production on merge to master (SSH + docker compose up), similar to the npm publish job
 - [ ] Auto-update local skill/hooks — locally installed skill and hook files go stale when the repo changes. `polaris install` fixes it but there's no staleness detection or auto-update mechanism
+- [ ] Update available indicator — daemon periodically checks npm for newer version, caches the result. Status line shows "update available" when stale. `polaris update` command installs the latest version and rewrites skill/hooks.
+- [ ] Slack channel name collision — if a channel name was previously deleted, Slack reserves it. Bridge should handle `name_taken` by trying a prefix/suffix (e.g., `p-project-name`)
 
 ## Development
 

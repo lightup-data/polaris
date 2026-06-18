@@ -10,6 +10,7 @@ export interface Org {
   name: string;
   slug: string | null;
   domain: string | null;
+  plan: string;
   slack_team_id: string | null;
   slack_bot_token: string | null;
   slack_system_channel_id: string | null;
@@ -34,19 +35,27 @@ export interface ProjectMember {
 
 export async function createDb(connectionString?: string): Promise<Sql> {
   const sql = postgres(connectionString ?? process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris");
+  await ensureSchema(sql);
+  return sql;
+}
 
+export async function ensureSchema(sql: Sql): Promise<void> {
   await sql`
     CREATE TABLE IF NOT EXISTS orgs (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       slug TEXT UNIQUE,
       domain TEXT,
+      plan TEXT NOT NULL DEFAULT 'free',
       slack_team_id TEXT,
       slack_bot_token TEXT,
       slack_system_channel_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+
+  // Migrate: add plan column if missing
+  await sql`ALTER TABLE orgs ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -110,8 +119,7 @@ export async function createDb(connectionString?: string): Promise<Sql> {
     CREATE INDEX IF NOT EXISTS idx_events_session ON events(project_id, session, timestamp)
   `;
 
-  // Curation annotations (stars, tags, decisions). Deliberately NO foreign keys:
-  // tests/helpers.ts resetTestData drops events/sessions/projects without dropping this table.
+  // Curation annotations (stars, tags, decisions). Kept free of foreign keys.
   await sql`
     CREATE TABLE IF NOT EXISTS annotations (
       id UUID PRIMARY KEY,
@@ -134,7 +142,7 @@ export async function createDb(connectionString?: string): Promise<Sql> {
     CREATE INDEX IF NOT EXISTS idx_annotations_event ON annotations(event_id)
   `;
 
-  // Per-project ACL membership. Deliberately NO foreign keys (see annotations note above).
+  // Per-project ACL membership. Kept free of foreign keys (see annotations note above).
   await sql`
     CREATE TABLE IF NOT EXISTS project_members (
       project_id UUID,
@@ -144,9 +152,18 @@ export async function createDb(connectionString?: string): Promise<Sql> {
     )
   `;
 
-  await runMigrations(sql);
+  await sql`
+    CREATE TABLE IF NOT EXISTS plan_changes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id TEXT NOT NULL REFERENCES orgs(id),
+      user_id TEXT NOT NULL REFERENCES users(id),
+      from_plan TEXT NOT NULL,
+      to_plan TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
 
-  return sql;
+  await runMigrations(sql);
 }
 
 // Additive, idempotent migrations. Each statement uses IF NOT EXISTS so it is safe to
@@ -170,12 +187,17 @@ async function runMigrations(sql: Sql): Promise<void> {
 
 // --- Orgs ---
 
-export async function createOrg(sql: Sql, id: string, name: string, domain?: string): Promise<Org> {
+export async function createOrg(sql: Sql, id: string, name: string, domain?: string, plan?: string): Promise<Org> {
   const [row] = await sql`
-    INSERT INTO orgs (id, name, domain) VALUES (${id}, ${name}, ${domain ?? null})
+    INSERT INTO orgs (id, name, domain, plan) VALUES (${id}, ${name}, ${domain ?? null}, ${plan ?? "free"})
     RETURNING *
   `;
   return { ...row, created_at: row.created_at.toISOString() } as Org;
+}
+
+export async function setOrgPlan(sql: Sql, orgId: string, fromPlan: string, toPlan: string, userId: string): Promise<void> {
+  await sql`UPDATE orgs SET plan = ${toPlan} WHERE id = ${orgId}`;
+  await sql`INSERT INTO plan_changes (org_id, user_id, from_plan, to_plan) VALUES (${orgId}, ${userId}, ${fromPlan}, ${toPlan})`;
 }
 
 export async function getOrg(sql: Sql, id: string): Promise<Org | null> {
@@ -233,6 +255,22 @@ export async function upsertUser(sql: Sql, id: string, email: string, name: stri
     RETURNING *
   `;
   return { ...row, created_at: row.created_at.toISOString() } as User;
+}
+
+export async function listUsers(sql: Sql, orgId: string): Promise<User[]> {
+  const rows = await sql`SELECT * FROM users WHERE org_id = ${orgId} ORDER BY name ASC`;
+  return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString() }) as User);
+}
+
+export async function getRecentSignups(sql: Sql, since: Date, limit = 10): Promise<Array<User & { org_name: string }>> {
+  const rows = await sql`
+    SELECT u.*, o.name as org_name
+    FROM users u JOIN orgs o ON u.org_id = o.id
+    WHERE u.created_at >= ${since.toISOString()}
+    ORDER BY u.created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString(), org_name: r.org_name }) as User & { org_name: string });
 }
 
 // --- Projects (org-scoped) ---
@@ -428,6 +466,18 @@ export async function getSessionPromptCounts(sql: Sql, orgId: string): Promise<M
     counts.set(`${row.project}/${row.session}`, row.count);
   }
   return counts;
+}
+
+export async function getDailyPromptCounts(sql: Sql, orgId: string, days = 14): Promise<Array<{ date: string; sender: string; count: number }>> {
+  const rows = await sql`
+    SELECT date_trunc('day', e.timestamp)::date as date, e.sender, count(*)::int as count
+    FROM events e
+    WHERE e.org_id = ${orgId} AND e.payload->>'hook_event_name' = 'UserPromptSubmit'
+      AND e.timestamp >= now() - ${days + ' days'}::interval
+    GROUP BY date, e.sender
+    ORDER BY date ASC
+  `;
+  return rows.map((r) => ({ date: r.date.toISOString().slice(0, 10), sender: r.sender, count: r.count }));
 }
 
 export async function setDriver(sql: Sql, orgId: string, project: string, session: string, driver: ParticipantId): Promise<void> {

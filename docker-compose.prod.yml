@@ -41,10 +41,11 @@ services:
       WEB_PORT: 3000
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      GOOGLE_REDIRECT_URI: https://app.polaris.lightup.ai/auth/google/callback
+      GOOGLE_REDIRECT_URI: https://app.withpolaris.ai/auth/google/callback
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET}
-      SLACK_REDIRECT_URI: https://app.polaris.lightup.ai/slack/callback
+      SLACK_REDIRECT_URI: https://app.withpolaris.ai/slack/callback
+      SIGNUP_SLACK_BOT_TOKEN: ${SIGNUP_SLACK_BOT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

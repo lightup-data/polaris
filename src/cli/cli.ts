@@ -23,7 +23,7 @@ const CONFIG_FILE = join(POLARIS_DIR, "config.json");
 const LEGACY_CREDENTIALS_FILE = join(POLARIS_DIR, "credentials.json");
 const CLAUDE_DIR = join(homedir(), ".claude");
 
-const DEFAULT_APP_URL = "https://app.polaris.lightup.ai";
+const DEFAULT_APP_URL = "https://app.withpolaris.ai";
 const LOCAL_APP_URL = "http://localhost:3000";
 
 // --- Config ---
@@ -90,8 +90,8 @@ function deriveProfileName(appUrl: string): string {
   if (appUrl.includes("localhost") || appUrl.includes("127.0.0.1")) return "local";
   try {
     const host = new URL(appUrl).hostname;
-    // app.polaris.lightup.ai → prod
-    if (host.includes("polaris.lightup.ai")) return "prod";
+    // app.withpolaris.ai → prod
+    if (host.includes("withpolaris.ai")) return "prod";
     // strip common prefixes
     return host.replace(/^app\./, "").replace(/\./g, "-");
   } catch {
@@ -243,7 +243,7 @@ async function install(participantId?: string) {
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
 allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join <project> | rename <new-name> | disconnect | (no args for status)]
+argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -254,7 +254,7 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join <project>\`** — Connect to a session:
+**\`/polaris join #channel-name\`** — Connect to a channel:
 1. Call \`polaris_connect\` with the given project and user identity ${identity}
 2. A session name is auto-generated
 3. Report the connection status including the session name
@@ -375,7 +375,7 @@ async function login(appUrl: string, profileName?: string) {
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
 allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join <project> | rename <new-name> | disconnect | (no args for status)]
+argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -386,7 +386,7 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join <project>\`** — Connect to a session:
+**\`/polaris join #channel-name\`** — Connect to a channel:
 1. Call \`polaris_connect\` with the given project and user identity ${identity}
 2. A session name is auto-generated
 3. Report the connection status including the session name
@@ -798,7 +798,7 @@ switch (command) {
     }).unref?.();
     console.log("  ✓ Daemon started in background");
 
-    console.log("\nNext: restart Claude Code, then run `/polaris join <project>` in your AI agent.");
+    console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;
   }
 
@@ -848,7 +848,7 @@ switch (command) {
     }).unref?.();
     console.log("  ✓ Daemon started in background");
 
-    console.log("\nNext: restart Claude Code, then run `/polaris join <project>` in your AI agent.");
+    console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;
 
   default:

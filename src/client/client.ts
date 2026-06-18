@@ -78,12 +78,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          project: { type: "string", description: "Project name" },
+          channel: { type: "string", description: "Channel name (e.g., #polaris-dev). Omit to list available channels." },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
         },
-        required: ["project", "user"],
+        required: ["user"],
       },
     },
     {
@@ -135,6 +135,25 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["session"],
       },
     },
+    {
+      name: "polaris_team",
+      description: "List team members with their Slack identities. Use this to resolve @mentions before posting to Slack.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "polaris_backfill",
+      description: "Recover lost events from local daemon logs. Use when events were lost due to disconnection or API downtime.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          duration: { type: "string", description: "Time range to backfill (e.g., '2h', '30m', '1d'). Auto-detects if omitted." },
+          from: { type: "string", description: "ISO timestamp to backfill from. Overrides duration." },
+        },
+      },
+    },
   ],
 }));
 
@@ -168,7 +187,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { project, user, session, agent } = args as { project: string; user: string; session?: string; agent?: string };
+    const { channel, user, session, agent } = args as { channel?: string; user: string; session?: string; agent?: string };
+
+    // If no channel specified, list available channels
+    if (!channel) {
+      try {
+        const res = await daemonGet("/channels");
+        if (res.ok) {
+          const body = await res.json() as { channels: string[] };
+          if (body.channels.length === 0) {
+            return { content: [{ type: "text", text: "No channels found. Create one by joining: `/polaris join #channel-name`" }] };
+          }
+          return { content: [{ type: "text", text: `Available channels:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #channel-name` }] };
+        }
+      } catch { /* fall through */ }
+      return { content: [{ type: "text", text: "Specify a channel: `/polaris join #channel-name`" }] };
+    }
+
+    const project = channel.replace(/^#/, ""); // strip leading # if present
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
@@ -182,7 +218,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";
         currentUser = user;
-        return { content: [{ type: "text", text: `Connected to ${currentProject}/${currentSession} as ${user}.` }] };
+        return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
     } catch {
@@ -273,6 +309,55 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         })
         .join("\n");
       return { content: [{ type: "text", text: summary || "(no activity yet)" }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
+    }
+  }
+
+  if (name === "polaris_team") {
+    try {
+      const res = await daemonGet("/team");
+      if (res.ok) {
+        const body = await res.json() as { members: Array<{ name: string; participant_id: string | null; slack_id: string | null; slack_handle: string | null; slack_display: string | null; polaris_user: boolean; alias: string | null }> };
+        if (body.members.length === 0) {
+          return { content: [{ type: "text", text: "No team members found." }] };
+        }
+        const taggable = body.members.filter((m) => m.slack_id && m.slack_handle);
+        const list = taggable
+          .map((m) => {
+            const shortAlias = m.alias && m.alias !== m.slack_handle ? `@${m.alias}` : "";
+            const handle = `@${m.slack_handle}`;
+            const display = shortAlias ? `${shortAlias} (${handle})` : handle;
+            return `  ${display} — ${m.name}${m.polaris_user ? " ✓" : ""} [${m.slack_id}]`;
+          })
+          .join("\n");
+        const notTaggable = body.members.filter((m) => !m.slack_id);
+        const note = notTaggable.length > 0 ? `\n\nNot on Slack: ${notTaggable.map(m => m.name).join(", ")}` : "";
+        return { content: [{ type: "text", text: `Team (use @alias or @handle to tag, ✓ = Polaris user):\n${list}${note}` }] };
+      }
+      return { content: [{ type: "text", text: "Failed to fetch team list." }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
+    }
+  }
+
+  if (name === "polaris_backfill") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const { duration, from } = (args ?? {}) as { duration?: string; from?: string };
+    try {
+      const res = await daemonPost("/backfill", {
+        ccSessionId: CC_SESSION_ID,
+        ...(duration ? { duration } : {}),
+        ...(from ? { from } : {}),
+      });
+      const body = await res.json() as { recovered: number; source: string; gaps: string[] };
+      if (res.ok) {
+        const gapInfo = body.gaps.length > 0 ? `\nGaps: ${body.gaps.join(", ")}` : "";
+        return { content: [{ type: "text", text: `Backfill complete: ${body.recovered} events recovered from ${body.source}.${gapInfo}` }] };
+      }
+      return { content: [{ type: "text", text: `Backfill failed: ${(body as unknown as { error?: string }).error ?? "unknown error"}` }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }

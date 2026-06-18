@@ -25,6 +25,7 @@ beforeAll(async () => {
   // Drop and recreate via createDb (NOT tests/helpers.ts resetTestData, which builds
   // a sessions table without the label column) so the additive label migration applies.
   sql = await createDb(DATABASE_URL);
+  await sql`DROP TABLE IF EXISTS plan_changes`;
   await sql`DROP TABLE IF EXISTS events`;
   await sql`DROP TABLE IF EXISTS sessions`;
   await sql`DROP TABLE IF EXISTS projects`;

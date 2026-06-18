@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-HOST="${DEPLOY_HOST:-polaris.lightup.ai}"
+HOST="${DEPLOY_HOST:-withpolaris.ai}"
 USER="${DEPLOY_USER:-deploy}"
 DIR="${DEPLOY_DIR:-/opt/polaris}"
 

@@ -6,134 +6,493 @@ import type { Org } from "../service/db";
 export function renderLandingPage(): string {
   return `
     ${nav()}
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="pt-24 pb-16 text-center">
-        <h1 class="text-5xl font-bold tracking-tight text-gray-900 sm:text-6xl">
-          Multiplayer AI collaboration
-        </h1>
-        <p class="mt-6 text-lg leading-8 text-gray-600 max-w-2xl mx-auto">
-          Polaris connects your AI agent sessions to your team. Capture every interaction, pool context across workstreams, and let anyone contribute — all in real time.
-        </p>
-        <div class="mt-10 flex flex-col items-center gap-4">
-          <a href="/signup" class="inline-flex items-center gap-3 px-6 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-semibold text-gray-700">
-            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 3.58z" fill="#EA4335"/></svg>
-            Sign up with Google
-          </a>
-          <a href="/login" class="px-6 py-3 text-sm font-semibold text-gray-500 hover:text-gray-700 transition">Already have an account? Sign in</a>
-        </div>
-      </div>
+    <!-- Hero: text left, hub diagram right -->
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-16">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-8 py-16 border-t border-gray-200">
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 6.523 5 10 5c3.477 0 6.268 2.943 7.542 7-.274.985-.633 1.928-1.065 2.813M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Session capture</h3>
-          <p class="mt-2 text-sm text-gray-600">Every prompt, response, and tool call is captured and broadcast to your team's floor.</p>
+        <!-- Left: text -->
+        <div class="min-w-0">
+          <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 lg:text-5xl">
+            Meet Polaris.<br>It's like Gong for Claude Code sessions.
+          </h1>
+          <p class="mt-6 text-base sm:text-lg text-gray-500">
+            Bring your local Claude Code sessions straight into a collaborative Slack channel. Polaris works in the background to automatically capture and document the AI's entire execution path including all prompts, responses, and tool calls in real time. Teammates can watch the live log stream, intervene with inline commands via Slack, or audit the complete thought process later.
+          </p>
         </div>
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Context injection</h3>
-          <p class="mt-2 text-sm text-gray-600">Teammates inject expertise directly into your agent session from Slack, WhatsApp, or any floor.</p>
-        </div>
-        <div>
-          <div class="w-10 h-10 rounded-lg bg-polaris-100 flex items-center justify-center mb-4">
-            <svg class="w-5 h-5 text-polaris-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m3 5.197V21"/></svg>
-          </div>
-          <h3 class="text-sm font-semibold text-gray-900">Multiplayer</h3>
-          <p class="mt-2 text-sm text-gray-600">Multiple drivers, concurrent sessions, seamless handoffs. Humans and AI agents as first-class participants.</p>
-        </div>
-      </div>
 
-      <div class="py-16 border-t border-gray-200">
-        <h2 class="text-2xl font-bold text-gray-900 text-center">How it works</h2>
-        <p class="mt-2 text-center text-sm text-gray-500">Everything streams to the floor — your team's Slack channel.</p>
+        <!-- Right: hub diagram -->
+        <div class="flex flex-col items-center">
 
-        <div class="mt-8 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-          <div class="flex">
-            <div class="w-14 bg-[#4A154B] shrink-0 flex flex-col items-center py-3 gap-3">
-              <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white text-xs font-bold">A</div>
-              <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-                <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-              </div>
-              <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-                <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-              </div>
+          <!-- Slack node -->
+          <div class="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg shadow-sm">
+            <svg class="w-4 h-4 text-[#4A154B]" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.52 2.521h-2.522V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.165 0a2.528 2.528 0 0 1 2.522 2.522v6.312zm-2.522 10.124a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.521-2.52v-2.523h2.521zm0-1.271a2.527 2.527 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.313A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.522h-6.313z"/></svg>
+            <span class="text-sm font-semibold text-gray-900"># webapp</span>
+          </div>
+
+          <!-- Arrow: Slack ↔ Polaris -->
+          <svg class="w-5 h-14 text-gray-300" viewBox="0 0 20 56" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M7 4 L7 52 M4 7 L7 4 L10 7" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M13 52 L13 4 M10 49 L13 52 L16 49" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+
+          <!-- Polaris hub -->
+          <div class="w-20 h-20 rounded-full bg-polaris-700 shadow-lg flex flex-col items-center justify-center">
+            <svg class="w-6 h-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+              <circle cx="10" cy="10" r="2.5"/>
+              <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="10" y1="1" x2="10" y2="5" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="10" y1="15" x2="10" y2="19" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="1" y1="10" x2="5" y2="10" stroke="currentColor" stroke-width="1.2"/>
+              <line x1="15" y1="10" x2="19" y2="10" stroke="currentColor" stroke-width="1.2"/>
+            </svg>
+            <span class="text-white text-[10px] font-bold mt-0.5">Polaris</span>
+          </div>
+
+          <!-- Arrow: Polaris ↔ sessions -->
+          <svg class="w-5 h-8 text-gray-300" viewBox="0 0 20 32" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M7 4 L7 28 M4 7 L7 4 L10 7" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M13 28 L13 4 M10 25 L13 28 L16 25" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+
+          <!-- Session nodes -->
+          <div class="flex flex-wrap justify-center gap-4">
+            <div class="flex items-center gap-2 px-4 py-2.5 bg-gray-900 rounded-lg shadow-sm">
+              <img class="w-5 h-5" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAoAAAAKACAMAAAA7EzkRAAAAFVBMVEVMaXHZd1fZd1babUjZd1faf1rZd1epRaWRAAAABnRSTlMAXawH8g5t5RLrAAAACXBIWXMAAAsTAAALEwEAmpwYAAAFOklEQVR42u3WUQ6EIAxAQcDV+x95r1Bjk2Kdid81wkMdAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADebtHa9gFedPYTIAIUoAAFiAAFKEABIkABClCACFCAAhQgAkSAAkSACFCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAAQpQgAhQgAIUIAIUoAAFiAAFKEABIkABClCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAASJABChABIgABShAASJAAQpQgAhQgAIUIAIUoAAFiAARoAARIAIUIAJEgAJEgAhQgAjwnjNmfq2EGVwYAT4UvO33AqzZDwEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoACTHTHfCzC4MNkBHsnGBYUEiAARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJABAgCRIAgQAQIAkSAIEAECAJEgCBABAgCRIDwNMCVzJL2lt3LyGaLmr+xdmeLBChABIgABYgAEaAAESACFCACRIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAhSgABGgAAUoQAQoQAEKEAEKUIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACFCACBABChABIkABIkAEKEABChABClCAAkSAAhSgABGgAAUoQAQoQAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACDDJjFnRBy6aVyb6HKto3mhiJp+4W/OOXa8bX5CZ/EVqU9YbAuzwCyNAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKcEvnDCqaV3cyg86ieQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwJv8Af3P8SOrUE9bAAAAAElFTkSuQmCC"/>
+              <span class="text-xs text-gray-300">Alice working on auth</span>
             </div>
-            <div class="flex-1">
-              <div class="border-b border-gray-200 px-4 py-2.5 flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="text-gray-900 font-bold text-sm"># webapp</span>
-                  <span class="text-gray-400 text-xs">|</span>
-                  <span class="text-gray-400 text-xs">2 drivers, 1 advisor</span>
-                </div>
-                <div class="flex items-center gap-3">
-                  <div class="flex -space-x-1.5">
-                    <div class="w-5 h-5 rounded-full bg-blue-500 border-2 border-white"></div>
-                    <div class="w-5 h-5 rounded-full bg-yellow-500 border-2 border-white"></div>
-                    <div class="w-5 h-5 rounded-full bg-purple-600 border-2 border-white"></div>
-                  </div>
-                  <span class="text-gray-400 text-xs">3</span>
-                </div>
-              </div>
-              <div class="px-5 py-4 space-y-4 text-sm">
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">M</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Manu</span><span class="text-gray-400 text-xs">auth</span><span class="text-gray-400 text-xs">10:31 AM</span></div>
-                    <p class="text-gray-700">Let's implement the auth middleware</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-green-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">AI</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Agent</span><span class="text-gray-400 text-xs">&rarr; manu/auth</span><span class="text-gray-400 text-xs">10:31 AM</span></div>
-                    <p class="text-gray-700">I'll create <code class="bg-gray-100 px-1 rounded text-red-600 text-xs">src/middleware/auth.ts</code> with JWT verification...</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-yellow-500 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">P</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Priya</span><span class="text-gray-400 text-xs">&rarr; auth</span><span class="text-gray-400 text-xs">10:33 AM</span></div>
-                    <p class="text-gray-700">Use RS256, not HS256 — we need asymmetric keys for the microservices</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-green-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">AI</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Agent</span><span class="text-gray-400 text-xs">&rarr; manu/auth</span><span class="text-gray-400 text-xs">10:33 AM</span></div>
-                    <p class="text-gray-700">Good point from Priya. Switching to RS256 and updating the key config...</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">
-                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                  </div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">security-bot</span><span class="bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">agent</span><span class="text-gray-400 text-xs">&rarr; auth</span><span class="text-gray-400 text-xs">10:34 AM</span></div>
-                    <p class="text-gray-700">This auth endpoint needs rate limiting before going to production</p>
-                  </div>
-                </div>
-                <div class="flex gap-3">
-                  <div class="w-8 h-8 rounded-md bg-green-600 flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5">AI</div>
-                  <div>
-                    <div class="flex items-baseline gap-2"><span class="text-gray-900 font-bold text-sm">Agent</span><span class="text-gray-400 text-xs">&rarr; manu/auth</span><span class="text-gray-400 text-xs">10:34 AM</span></div>
-                    <p class="text-gray-700">Adding rate limiting middleware to the auth endpoints...</p>
-                  </div>
-                </div>
-              </div>
+            <div class="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <svg class="w-4 h-4 text-blue-500" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C8 4.4 4.4 8 0 8c4.4 0 8 3.6 8 8 0-4.4 3.6-8 8-8-4.4 0-8-3.6-8-8z"/></svg>
+              <span class="text-xs text-gray-700">Martha writing docs</span>
+            </div>
+            <div class="flex items-center gap-2 px-4 py-2.5 bg-gray-900 rounded-lg shadow-sm">
+              <img class="w-5 h-5" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAoAAAAKACAMAAAA7EzkRAAAAFVBMVEVMaXHZd1fZd1babUjZd1faf1rZd1epRaWRAAAABnRSTlMAXawH8g5t5RLrAAAACXBIWXMAAAsTAAALEwEAmpwYAAAFOklEQVR42u3WUQ6EIAxAQcDV+x95r1Bjk2Kdid81wkMdAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADebtHa9gFedPYTIAIUoAAFiAAFKEABIkABClCACFCAAhQgAkSAAkSACFCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAAQpQgAhQgAIUIAIUoAAFiAAFKEABIkABClCACBABChABIkABIkAEKEAEiAAFiAARoAARIAIUIAJEgAJEgAhQgAgQAQoQASJAASJABChABIgABShAASJAAQpQgAhQgAIUIAIUoAAFiAARoAARIAIUIAJEgAJEgAhQgAjwnjNmfq2EGVwYAT4UvO33AqzZDwEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoACTHTHfCzC4MNkBHsnGBYUEiAARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAGCABEgCBABggARIAgQAYIAESAIEAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJAECACBAEiQBAgAgQBIkAQIAIEASJABAgCRIAgQAQIAkSAIEAECAJEgCBABAgCRIDwNMCVzJL2lt3LyGaLmr+xdmeLBChABIgABYgAEaAAESACFCACRIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAhSgABGgAAUoQAQoQAEKEAEKUIACRIAIUIAIEAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACFCACBABChABIkABIkAEKEABChABClCAAkSAAhSgABGgAAUoQAQoQAEKEAEiQAEiQAQoQASIAAWIABGgABEgAhQgAkSAAkSACDDJjFnRBy6aVyb6HKto3mhiJp+4W/OOXa8bX5CZ/EVqU9YbAuzwCyNAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKUIACFKAABShAAQpQgAIUoAAFKEABClCAAhSgAAUoQAEKcEvnDCqaV3cyg86ieQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwJv8Af3P8SOrUE9bAAAAAElFTkSuQmCC"/>
+              <span class="text-xs text-gray-300">Bob building payments</span>
             </div>
           </div>
+
         </div>
-        <p class="mt-4 text-center text-sm text-gray-500">The floor — a continuous, attributed log of how your work gets built.</p>
+
       </div>
     </div>
 
-    <footer class="border-t border-gray-200 mt-16">
-      <div class="max-w-5xl mx-auto px-6 py-8 text-center text-sm text-gray-500">
-        Polaris by Lightup
+    <div class="max-w-3xl mx-auto px-6">
+
+      </div>
+    </div>
+
+    <!-- Multiplayer graphic: Slack on top, CLI sessions below, arrows between -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-5xl mx-auto px-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider text-center">One channel, every session</h2>
+
+        <!-- Row 1: Slack channel -->
+        <div class="mt-8 max-w-[30rem] mx-auto bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+          <div class="border-b border-gray-200 px-4 py-2.5 bg-gray-50 flex items-center gap-2">
+            <svg class="w-4 h-4 text-[#4A154B]" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.52 2.521h-2.522V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.165 0a2.528 2.528 0 0 1 2.522 2.522v6.312zm-2.522 10.124a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.521-2.52v-2.523h2.521zm0-1.271a2.527 2.527 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.313A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.522h-6.313z"/></svg>
+            <span class="text-gray-900 font-bold text-sm"># webapp</span>
+          </div>
+          <div class="px-4 py-3 space-y-3 text-xs">
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">A</div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">Alice</span><span class="text-gray-400 text-[10px]">auth</span><span class="text-gray-400 text-[10px]">10:31</span></div>
+                <p class="text-gray-700">implement auth middleware with RS256</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-blue-200 flex items-center justify-center shrink-0 mt-0.5"><svg class="w-4 h-4 text-blue-600" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="1" width="10" height="7" rx="1"/><rect x="1" y="5" width="14" height="2"/><rect x="5" y="4" width="2" height="1" fill="#bfdbfe"/><rect x="9" y="4" width="2" height="1" fill="#bfdbfe"/><rect x="4" y="8" width="2" height="3"/><rect x="7" y="8" width="2" height="3"/><rect x="10" y="8" width="2" height="3"/></svg></div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">agent.alice</span><span class="text-gray-400 text-[10px]">10:31</span></div>
+                <p class="text-gray-700">Creating <code class="bg-gray-100 px-1 rounded text-red-600 text-[10px]">src/middleware/auth.ts</code>...</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-orange-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">B</div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">Bob</span><span class="text-gray-400 text-[10px]">payments</span><span class="text-gray-400 text-[10px]">10:32</span></div>
+                <p class="text-gray-700">add Stripe webhook handler</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-orange-200 flex items-center justify-center shrink-0 mt-0.5"><svg class="w-4 h-4 text-orange-600" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="1" width="10" height="7" rx="1"/><rect x="1" y="5" width="14" height="2"/><rect x="5" y="4" width="2" height="1" fill="#fed7aa"/><rect x="9" y="4" width="2" height="1" fill="#fed7aa"/><rect x="4" y="8" width="2" height="3"/><rect x="7" y="8" width="2" height="3"/><rect x="10" y="8" width="2" height="3"/></svg></div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">agent.bob</span><span class="text-gray-400 text-[10px]">10:32</span></div>
+                <p class="text-gray-700">Creating <code class="bg-gray-100 px-1 rounded text-red-600 text-[10px]">src/api/webhooks/stripe.ts</code>...</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-orange-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">B</div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">Bob</span><span class="text-gray-400 text-[10px]">&rarr; auth</span><span class="text-gray-400 text-[10px]">10:33</span></div>
+                <p class="text-gray-700"><span class="text-blue-600 font-medium">@agent.alice</span> don't forget rate limiting on that endpoint</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0 mt-0.5">A</div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">Alice</span><span class="text-gray-400 text-[10px]">&rarr; payments</span><span class="text-gray-400 text-[10px]">10:33</span></div>
+                <p class="text-gray-700"><span class="text-blue-600 font-medium">@agent.bob</span> use the shared secret from vault, not env vars</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-6 h-6 rounded bg-blue-200 flex items-center justify-center shrink-0 mt-0.5"><svg class="w-4 h-4 text-blue-600" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="1" width="10" height="7" rx="1"/><rect x="1" y="5" width="14" height="2"/><rect x="5" y="4" width="2" height="1" fill="#bfdbfe"/><rect x="9" y="4" width="2" height="1" fill="#bfdbfe"/><rect x="4" y="8" width="2" height="3"/><rect x="7" y="8" width="2" height="3"/><rect x="10" y="8" width="2" height="3"/></svg></div>
+              <div>
+                <div class="flex items-baseline gap-1.5"><span class="text-gray-900 font-bold">agent.alice</span><span class="text-gray-400 text-[10px]">10:33</span></div>
+                <p class="text-gray-700">Good call. Adding rate limiter...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Arrows: single on mobile, two-column on desktop -->
+        <div class="flex justify-center md:hidden py-3">
+          <svg class="w-6 h-10 text-gray-300" viewBox="0 0 24 40" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 4 L8 36 M4 8 L8 4 L12 8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 36 L16 4 M12 32 L16 36 L20 32" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="max-w-[30rem] mx-auto hidden md:grid grid-cols-2 gap-4 py-3">
+          <div class="flex justify-center">
+            <svg class="w-6 h-10 text-gray-300" viewBox="0 0 24 40" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 4 L8 36 M4 8 L8 4 L12 8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M16 36 L16 4 M12 32 L16 36 L20 32" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="flex justify-center">
+            <svg class="w-6 h-10 text-gray-300" viewBox="0 0 24 40" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 4 L8 36 M4 8 L8 4 L12 8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M16 36 L16 4 M12 32 L16 36 L20 32" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Row 2: CLI sessions -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
+
+          <!-- Alice's terminal -->
+          <div class="bg-gray-900 rounded-xl overflow-hidden shadow-xl">
+            <div class="flex items-center gap-1.5 px-4 py-2.5 bg-gray-800">
+              <div class="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+              <span class="ml-2 text-xs text-gray-500 font-mono">alice &mdash; claude code</span>
+            </div>
+            <div class="px-4 py-3 font-mono text-xs leading-relaxed space-y-2">
+              <div>
+                <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">/polaris join #webapp</span>
+              </div>
+              <div class="text-gray-500">  Connected as alice/auth</div>
+              <div class="border-t border-gray-700 pt-2">
+                <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">implement auth middleware with RS256</span>
+              </div>
+              <div class="text-gray-400">  Creating src/middleware/auth.ts with RS256 JWT verification...</div>
+              <div class="pl-3 border-l-2 border-orange-500/50">
+                <span class="text-orange-400 text-[10px]">bob via slack</span>
+                <span class="text-gray-400"> &mdash; don't forget rate limiting</span>
+              </div>
+              <div class="text-gray-400">  Good call. Adding rate limiter...</div>
+            </div>
+          </div>
+
+          <!-- Bob's terminal -->
+          <div class="bg-gray-900 rounded-xl overflow-hidden shadow-xl">
+            <div class="flex items-center gap-1.5 px-4 py-2.5 bg-gray-800">
+              <div class="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+              <span class="ml-2 text-xs text-gray-500 font-mono">bob &mdash; claude code</span>
+            </div>
+            <div class="px-4 py-3 font-mono text-xs leading-relaxed space-y-2">
+              <div>
+                <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">/polaris join #webapp</span>
+              </div>
+              <div class="text-gray-500">  Connected as bob/payments</div>
+              <div class="border-t border-gray-700 pt-2">
+                <span class="text-polaris-400">&gt;</span> <span class="text-gray-300">add Stripe webhook handler</span>
+              </div>
+              <div class="text-gray-400">  Creating src/api/webhooks/stripe.ts...</div>
+              <div class="pl-3 border-l-2 border-blue-500/50">
+                <span class="text-blue-400 text-[10px]">alice via slack</span>
+                <span class="text-gray-400"> &mdash; use the shared secret from vault</span>
+              </div>
+              <div class="text-gray-400">  Pulling webhook secret from vault...</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- What you can do with Polaris -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-3xl mx-auto px-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">What you can do with Polaris</h2>
+
+        <div class="mt-8 space-y-8">
+          <div>
+            <h3 class="font-semibold text-gray-900">Start streaming your session</h3>
+            <div class="mt-2 bg-gray-900 text-gray-300 text-sm px-4 py-2.5 rounded-lg font-mono overflow-x-auto"><span class="text-polaris-400">&gt;</span> /polaris join #webapp</div>
+            <p class="mt-2 text-sm text-gray-500">Every prompt, response, and tool call streams to your team's Slack channel in real time.</p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Pull a teammate into your session</h3>
+            <div class="mt-2 bg-gray-900 text-gray-300 text-sm px-4 py-2.5 rounded-lg font-mono overflow-x-auto"><span class="text-polaris-400">&gt;</span> /polaris tag @bob I need your input on this auth approach</div>
+            <p class="mt-2 text-sm text-gray-500">Bob gets notified in Slack with full context. His reply appears inline in your terminal.</p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Catch up on a teammate's session</h3>
+            <div class="mt-2 bg-white border border-gray-200 rounded-lg px-4 py-2.5 flex items-start gap-2 overflow-x-auto">
+              <svg class="w-4 h-4 text-[#4A154B] shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.52 2.521h-2.522V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.165 0a2.528 2.528 0 0 1 2.522 2.522v6.312zm-2.522 10.124a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.521-2.52v-2.523h2.521zm0-1.271a2.527 2.527 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.313A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.522h-6.313z"/></svg>
+              <span class="text-sm text-gray-700 font-mono"><span class="text-blue-600 font-medium">@polaris</span> summarize alice last 2h</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">Get a summary of what happened — what was built, what decisions were made, what's still in progress.</p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Redirect an agent from Slack</h3>
+            <div class="mt-2 bg-white border border-gray-200 rounded-lg px-4 py-2.5 flex items-start gap-2 overflow-x-auto">
+              <svg class="w-4 h-4 text-[#4A154B] shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.52 2.521h-2.522V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.165 0a2.528 2.528 0 0 1 2.522 2.522v6.312zm-2.522 10.124a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.521-2.52v-2.523h2.521zm0-1.271a2.527 2.527 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.313A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.522h-6.313z"/></svg>
+              <span class="text-sm text-gray-700 font-mono"><span class="text-blue-600 font-medium">@agent.alice</span> use RS256, not HS256 &mdash; we need asymmetric keys</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">Your message lands directly in Alice's coding session. The agent picks it up and adjusts.</p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Attach session context to a PR</h3>
+            <div class="mt-2 bg-gray-900 text-gray-300 text-sm px-4 py-2.5 rounded-lg font-mono overflow-x-auto"><span class="text-polaris-400">&gt;</span> /polaris attach-pr #482</div>
+            <p class="mt-2 text-sm text-gray-500">Adds a session transcript — prompts, decisions, and reasoning — to the pull request. Reviewers see the "why," not just the "what."</p>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Search past sessions</h3>
+            <div class="mt-2 bg-white border border-gray-200 rounded-lg px-4 py-2.5 flex items-start gap-2 overflow-x-auto">
+              <svg class="w-4 h-4 text-[#4A154B] shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.52 2.521h-2.522V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.165 0a2.528 2.528 0 0 1 2.522 2.522v6.312zm-2.522 10.124a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.521-2.52v-2.523h2.521zm0-1.271a2.527 2.527 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.313A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.522h-6.313z"/></svg>
+              <span class="text-sm text-gray-700 font-mono"><span class="text-blue-600 font-medium">@polaris</span> search "webhook secret rotation"</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">Find when and why a decision was made, across all sessions.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Why Polaris -->
+    <div class="">
+      <!-- Banner -->
+      <div class="bg-gray-900 px-6 py-12 text-center">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Why Polaris</h2>
+        <p class="mt-4 text-2xl font-bold text-white leading-snug max-w-2xl mx-auto">Your prompts are the most valuable artifact in your engineering workflow.</p>
+        <p class="mt-4 text-sm text-gray-400 max-w-xl mx-auto">Every prompt carries intent, context, and decision-making that no commit message can reconstruct. Today, all of it vanishes when the session ends.</p>
+      </div>
+
+      <!-- Pain points -->
+      <div class="max-w-3xl mx-auto px-6 py-10 space-y-0">
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">AI sessions are invisible</h3>
+            <p class="mt-1 text-sm text-gray-500">When someone's coding with an AI agent, the rest of the team has no idea what's happening. It's pair programming behind a locked door.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Knowledge evaporates</h3>
+            <p class="mt-1 text-sm text-gray-500">The full reasoning chain — why the agent chose one approach over another, what it tried and rejected — disappears with the session. Only the final code survives.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6 border-b border-gray-100">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Feedback comes too late</h3>
+            <p class="mt-1 text-sm text-gray-500">Teammates see the pull request, not the process. By then the agent has already committed to a path that one Slack message could have redirected.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-6 py-6">
+          <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">Multiple agents, zero shared context</h3>
+            <p class="mt-1 text-sm text-gray-500">Teams running concurrent AI sessions have no coordination layer. Alice's agent doesn't know what Bob's agent is building, leading to conflicts and duplicated work.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resolution -->
+      <div class="bg-gray-50">
+        <div class="max-w-3xl mx-auto px-6 py-8">
+          <p class="text-sm text-gray-700"><span class="font-semibold text-gray-900">Polaris fixes this.</span> Every prompt, every response, every tool call — captured, streamed to your team in real time, and stored as permanent memory. Teammates can intervene mid-session. Agents across sessions share context through the hub. Nothing is lost.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- The Vision -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-3xl mx-auto px-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider text-center">The vision</h2>
+        <p class="mt-6 text-gray-700 text-center max-w-2xl mx-auto">Tobi Lutke, CEO of Shopify, recently described a future where every AI interaction in an organization flows through a shared, observable stream — what he calls "the shop floor." The vision he articulates is strikingly close to what Polaris already does.</p>
+
+        <div class="mt-8 flex justify-center">
+          <a href="https://x.com/tobi/article/2053121182044451016" target="_blank" class="block max-w-md w-full bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition overflow-hidden">
+            <div class="px-6 py-5">
+              <div class="flex items-center gap-2 text-xs text-gray-400">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                <span>Article</span>
+              </div>
+              <h3 class="mt-3 text-lg font-bold text-gray-900 leading-snug">Learning on the Shop Floor</h3>
+              <p class="mt-1 text-sm text-gray-500">by Tobi Lutke &middot; May 9, 2026</p>
+              <p class="mt-3 text-xs text-polaris-600 font-medium">Read on X &rarr;</p>
+            </div>
+          </a>
+        </div>
+
+        <p class="mt-8 text-gray-700 text-center max-w-2xl mx-auto">The idea behind Polaris was born independently, but the convergence isn't a coincidence. As AI agents become central to how software gets built, the need for this layer — variously called a <em>context graph</em>, a <em>memory layer</em>, <em>institutional memory</em>, or <em>decision traces</em> — becomes inevitable. A persistent, searchable record of every prompt, every decision, every session. Polaris is building that layer.</p>
+
+      </div>
+    </div>
+
+    <!-- Pricing -->
+    <div class="py-16 border-t border-gray-200">
+      <div class="max-w-5xl mx-auto px-6">
+
+        <div class="text-center">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Pricing</h2>
+          <p class="mt-4 text-3xl font-bold text-gray-900">Start free. Upgrade when you're ready.</p>
+          <p class="mt-2 text-gray-500">Unlimited users on every plan. No per-seat pricing.</p>
+        </div>
+
+        <div class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          <!-- Free -->
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Free</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$0</span>
+              <span class="text-gray-500 text-sm ml-1">forever</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">Try Polaris with your team. No credit card required.</p>
+            <a href="/signup?plan=free" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>1,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>7 days</strong> session history</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Community support</li>
+            </ul>
+          </div>
+
+          <!-- Pro -->
+          <div class="bg-white border-2 border-polaris-600 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-polaris-600 uppercase tracking-wider">Pro</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$29</span>
+              <span class="text-gray-500 text-sm ml-1">/month</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For power users who rely on Polaris daily.</p>
+            <a href="/signup?plan=pro" class="mt-6 block w-full text-center px-4 py-2.5 bg-polaris-700 text-white text-sm font-medium rounded-lg hover:bg-polaris-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>5,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>25 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>30 days</strong> session history</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Community support</li>
+            </ul>
+          </div>
+
+          <!-- Team -->
+          <div class="bg-white border border-gray-200 rounded-xl p-8">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Team</h3>
+            <div class="mt-4">
+              <span class="text-4xl font-bold text-gray-900">$49</span>
+              <span class="text-gray-500 text-sm ml-1">/month</span>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">For teams that need capacity, history, and support.</p>
+            <a href="/signup?plan=team" class="mt-6 block w-full text-center px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition">Get started</a>
+            <ul class="mt-6 space-y-3 text-sm text-gray-700">
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Unlimited users</li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>10,000</strong> prompts / month</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>50 GB</strong> data captured</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span><strong>90 days</strong> session history</span></li>
+              <li class="flex items-start gap-2"><svg class="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Priority support</li>
+            </ul>
+          </div>
+
+        </div>
+
+        <!-- Enterprise banner -->
+        <div class="mt-8 bg-white border border-gray-200 rounded-xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 class="font-semibold text-gray-900">Enterprise</h3>
+            <p class="mt-1 text-sm text-gray-500">Custom limits, SSO, audit logs, compliance, and dedicated support.</p>
+          </div>
+          <a href="mailto:support@withpolaris.ai?subject=Enterprise%20plan%20inquiry" class="shrink-0 px-5 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Contact us</a>
+        </div>
+
+        <div class="mt-12 text-center text-sm text-gray-400">
+          All plans include unlimited users and real-time Slack streaming. No credit card required for Free.
+        </div>
+
+      </div>
+    </div>
+
+    <div class="max-w-3xl mx-auto px-6">
+
+      <!-- How it works -->
+      <div class="py-16 border-t border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">How it works</h2>
+        <div class="mt-8 space-y-8">
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">1</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Connect</h3>
+              <p class="mt-1 text-sm text-gray-500">Sign up and connect your team's Slack workspace. Polaris uses Slack as the collaboration layer — no new apps to learn.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Install</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris</code> on your machine sets up hooks, MCP server, and logs you in.</p>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">3</div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Collaborate</h3>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">/polaris join #your-channel</code> links your Claude Code session to Slack. Every prompt and response streams live — teammates reply there and their messages appear inline.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom CTA -->
+      <div class="py-16 border-t border-gray-200 text-center">
+        <h2 class="text-2xl font-bold text-gray-900">Ready to try it?</h2>
+        <p class="mt-2 text-sm text-gray-500">Set up takes less than two minutes.</p>
+        <div class="mt-6 flex flex-col items-center gap-4">
+          <a href="/signup" class="inline-flex items-center gap-3 px-5 py-2.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition text-sm font-medium text-gray-700">
+            <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 3.58z" fill="#EA4335"/></svg>
+            Sign up with Google
+          </a>
+          <a href="https://github.com/lightup-data/polaris/discussions" class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 transition">
+            <svg class="w-5 h-5" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            Join the community
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <footer class="border-t border-gray-200 mt-8">
+      <div class="max-w-3xl mx-auto px-6 py-8 flex items-center justify-between text-sm text-gray-400">
+        <span>Polaris</span>
+        <div class="flex items-center gap-6">
+          <a href="https://github.com/lightup-data/polaris/discussions" class="inline-flex items-center gap-1.5 hover:text-gray-600 transition"><svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Community</a>
+          <a href="/login" class="hover:text-gray-600 transition">Sign in</a>
+        </div>
       </div>
     </footer>`;
 }

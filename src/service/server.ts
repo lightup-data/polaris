@@ -705,6 +705,113 @@ export async function startServer(opts: {
         return json({ results });
       }
 
+      // GET /team — list org members with Slack identities
+      if (method === "GET" && pathname === "/team") {
+        const { listUsers, getOrg: getOrgFn } = await import("./db");
+        const users = await listUsers(sql, orgId);
+        const org = await getOrgFn(sql, orgId);
+
+        // Resolve Slack user info if bot token available
+        let slackMembers: Array<{ id: string; name: string; display_name: string; email: string; username: string }> = [];
+        if (org?.slack_bot_token) {
+          try {
+            const slackRes = await fetch("https://slack.com/api/users.list?limit=200", {
+              headers: { Authorization: `Bearer ${org.slack_bot_token}` },
+            });
+            if (slackRes.ok) {
+              const slackData = (await slackRes.json()) as { members?: Array<{ id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean }> };
+              slackMembers = (slackData.members ?? [])
+                .filter((m) => !m.deleted && !m.is_bot)
+                .map((m) => ({
+                  id: m.id,
+                  name: m.real_name ?? "",
+                  display_name: m.profile?.display_name ?? "",
+                  email: m.profile?.email ?? "",
+                  username: m.name ?? "",
+                }));
+            }
+          } catch { /* Slack API unavailable */ }
+        }
+
+        // Build team from ALL Slack workspace members, annotate with Polaris identity
+        const matchedEmails = new Set<string>();
+        const team = slackMembers.map((m) => {
+          const polarisUser = users.find((u) => u.email.toLowerCase() === m.email.toLowerCase())
+            ?? users.find((u) => u.name.toLowerCase() === m.name.toLowerCase());
+          if (polarisUser) matchedEmails.add(polarisUser.email.toLowerCase());
+          return {
+            name: m.name || m.display_name || m.username,
+            slack_id: m.id,
+            slack_handle: m.username,
+            slack_display: m.display_name || m.name,
+            participant_id: polarisUser?.participant_id ?? null,
+            polaris_user: !!polarisUser,
+          };
+        });
+
+        // Add Polaris users not in Slack (e.g., synthetic test users)
+        for (const u of users) {
+          if (!matchedEmails.has(u.email.toLowerCase())) {
+            team.push({
+              name: u.name,
+              slack_id: null,
+              slack_handle: null,
+              slack_display: null,
+              participant_id: u.participant_id,
+              polaris_user: true,
+            });
+          }
+        }
+
+        // Generate short aliases: prefer display_name, fall back to name, then handle
+        // Filter out slackbot
+        const filtered = team.filter((m) => m.slack_handle !== "slackbot");
+        team.length = 0;
+        team.push(...filtered);
+
+        function deriveAlias(m: typeof team[0]): string {
+          // Best source: display name (what the person chose)
+          const displayName = m.slack_display?.trim();
+          if (displayName) {
+            const first = displayName.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+            if (first.length >= 2) return first;
+          }
+          // Next: real name, but skip short/initial-only first names
+          const parts = m.name.split(/\s+/);
+          for (const part of parts) {
+            const clean = part.toLowerCase().replace(/[^a-z]/g, "");
+            if (clean.length >= 2) return clean;
+          }
+          // Fall back to slack handle
+          return m.slack_handle || "";
+        }
+
+        const aliasCounts = new Map<string, number>();
+        for (const m of team) {
+          const alias = deriveAlias(m);
+          if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
+        }
+        for (const m of team) {
+          const alias = deriveAlias(m);
+          if (!alias) {
+            (m as Record<string, unknown>).alias = null;
+          } else if ((aliasCounts.get(alias) ?? 0) > 1) {
+            // Collision — append first letter of last name or use handle
+            const parts = m.name.split(/\s+/);
+            const lastInitial = parts.length > 1 ? parts[parts.length - 1]?.[0]?.toLowerCase() ?? "" : "";
+            (m as Record<string, unknown>).alias = lastInitial ? `${alias}${lastInitial}` : m.slack_handle || alias;
+          } else {
+            (m as Record<string, unknown>).alias = alias;
+          }
+        }
+
+        return json({ members: team });
+      }
+
+      if (method === "GET" && pathname === "/status") {
+        return json({ ok: true, version: "0.0.1" });
+      }
+
       return error("Not found", 404);
     },
   });

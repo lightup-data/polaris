@@ -63,6 +63,7 @@ beforeAll(async () => {
   // Drop and recreate via createDb (mirrors tests/db.test.ts) so the schema —
   // including the additive migrations — matches src/service/db.ts exactly.
   sql = await createDb(DATABASE_URL);
+  await sql`DROP TABLE IF EXISTS plan_changes`;
   await sql`DROP TABLE IF EXISTS events`;
   await sql`DROP TABLE IF EXISTS sessions`;
   await sql`DROP TABLE IF EXISTS projects`;

@@ -13,6 +13,7 @@ interface SessionMapping {
   agent: string;
   slackChannel?: string;
   ws: WebSocket | null;
+  pendingMapping?: boolean; // true until a hook event maps the real CC session ID
 }
 
 function generateSessionName(): string {
@@ -53,7 +54,7 @@ function getServiceUrl(): string {
     return cachedConfig.profiles[cachedConfig.active].api;
   }
   // 3. Fallback
-  return "https://api.polaris.lightup.ai";
+  return "https://api.withpolaris.ai";
 }
 
 let cachedToken: string | null | undefined = undefined;
@@ -276,6 +277,113 @@ async function scanOutbox(): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+// --- Session history (persistent connect/disconnect log for backfill) ---
+
+const SESSION_HISTORY_FILE = join(homedir(), ".polaris", "session-history.jsonl");
+
+async function logSessionChange(action: "connect" | "disconnect", ccSessionId: string, project: string, session: string, user: string, agent: string): Promise<void> {
+  try {
+    await ensureLogDir();
+    const entry = JSON.stringify({ t: new Date().toISOString(), action, ccSessionId, project, session, user, agent });
+    await appendFile(SESSION_HISTORY_FILE, entry + "\n");
+  } catch { /* best-effort */ }
+}
+
+// --- Backfill: recover lost events from daemon log ---
+
+async function backfill(mapping: SessionMapping, duration?: string, from?: string): Promise<{ recovered: number; source: string; gaps: string[] }> {
+  const now = new Date();
+  let since: Date;
+
+  if (from) {
+    since = new Date(from);
+  } else if (duration) {
+    const match = duration.match(/^(\d+)(h|m|d)$/);
+    if (!match) return { recovered: 0, source: "none", gaps: ["invalid duration format"] };
+    const val = parseInt(match[1]);
+    const unit = match[2];
+    since = new Date(now.getTime() - val * (unit === "h" ? 3600000 : unit === "m" ? 60000 : 86400000));
+  } else {
+    // Auto-detect: query API for most recent event, backfill from there
+    try {
+      const serviceUrl = getServiceUrl();
+      const res = await fetch(
+        `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/messages`,
+        { headers: await authHeaders() }
+      );
+      if (res.ok) {
+        const events = (await res.json()) as Array<{ timestamp: string }>;
+        if (events.length > 0) {
+          since = new Date(events[events.length - 1].timestamp);
+        } else {
+          since = new Date(now.getTime() - 3600000); // default 1h
+        }
+      } else {
+        since = new Date(now.getTime() - 3600000);
+      }
+    } catch {
+      since = new Date(now.getTime() - 3600000);
+    }
+  }
+
+  // Read daemon log files covering the time range
+  const logEntries: Array<{ t: string; endpoint: string; payload: Record<string, unknown> }> = [];
+  const startDate = since.toISOString().slice(0, 10);
+  const endDate = now.toISOString().slice(0, 10);
+
+  // Collect all dates in range
+  const dates: string[] = [];
+  const d = new Date(startDate);
+  while (d.toISOString().slice(0, 10) <= endDate) {
+    dates.push(d.toISOString().slice(0, 10));
+    d.setDate(d.getDate() + 1);
+  }
+
+  for (const date of dates) {
+    const logFile = join(LOG_DIR, `daemon-${date}.jsonl`);
+    try {
+      const content = await readFile(logFile, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.endpoint !== "/events") continue;
+          if (new Date(entry.t) <= since) continue;
+          if (new Date(entry.t) > now) continue;
+          logEntries.push(entry);
+        } catch { /* skip malformed lines */ }
+      }
+    } catch { /* log file doesn't exist for this date — not an error */ }
+  }
+
+  if (logEntries.length === 0) {
+    return { recovered: 0, source: "daemon_log", gaps: [`no log entries found since ${since.toISOString()}`] };
+  }
+
+  // Replay events to the API
+  let recovered = 0;
+  const serviceUrl = getServiceUrl();
+  const headers = await authHeaders();
+
+  for (const entry of logEntries) {
+    const hookEvent = entry.payload.hook_event_name as string | undefined;
+    const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
+
+    try {
+      const res = await fetch(
+        `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ sender, payload: entry.payload }),
+        }
+      );
+      if (res.ok) recovered++;
+    } catch { /* skip failed replays */ }
+  }
+
+  return { recovered, source: "daemon_log", gaps: [] };
+}
 // --- HTTP Server ---
 
 function json(data: unknown, status = 200): Response {
@@ -361,6 +469,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             user: body.user,
             agent: agentId,
             ws: null,
+            pendingMapping: true, // waiting for hook event to map the real CC session ID
           };
           sessions.set(body.ccSessionId, mapping);
 
@@ -421,6 +530,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           // Connect to cloud WebSocket
           connectCloudWs(mapping);
+          await logSessionChange("connect", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
 
           return json({
             status: "connected",
@@ -442,7 +552,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           disconnectCloudWs(body.ccSessionId);
           injectQueues.delete(body.ccSessionId);
           const mapping = sessions.get(body.ccSessionId);
-          if (mapping) {
+          if (mapping && mapping.project) {
+            await logSessionChange("disconnect", body.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
             mapping.project = "";
             mapping.session = "";
             mapping.user = "";
@@ -488,34 +599,51 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // 4. No match + nothing connected: not_connected (existing).
           let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
-            const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
-            if (connectedSessions.length === 1) {
-              // Only one active session — route to it and remember the mapping
-              mapping = connectedSessions[0];
-              sessions.set(ccSessionId, { ...mapping, ccSessionId, slackChannel: undefined });
-              // Share the inject queue between the original ccSessionId (where
-              // the cloud WS enqueues) and this CC hook session_id alias
-              let queue = injectQueues.get(mapping.ccSessionId);
-              if (!queue) {
-                queue = [];
-                injectQueues.set(mapping.ccSessionId, queue);
-              }
+            // CC session_id doesn't match any registered MCP client. The MCP
+            // server uses a different UUID than CC's session_id. Match to a
+            // session with pendingMapping (most recent first); fall back to the
+            // single-connected-session heuristic when none is pending.
+            const pending = Array.from(sessions.values()).filter((m) => m.project && m.pendingMapping);
+            if (pending.length > 0) {
+              // Map the CC session ID to the most recently connected pending session
+              mapping = pending[pending.length - 1];
+              mapping.pendingMapping = false;
+              // Register under the real CC session ID for future events
+              sessions.set(ccSessionId, { ...mapping, ccSessionId });
+              console.error(`[daemon] Mapped CC session ${ccSessionId.slice(0, 8)} → ${mapping.project}/${mapping.session}`);
+              // Share the inject queue between the original ccSessionId (where the
+              // cloud WS enqueues) and this CC hook session_id alias, so injected
+              // messages are drained regardless of which key later events use.
+              const queue = injectQueues.get(mapping.ccSessionId) ?? [];
+              injectQueues.set(mapping.ccSessionId, queue);
               injectQueues.set(ccSessionId, queue);
-            } else if (connectedSessions.length > 1) {
-              // Multiple sessions and session_id matches none of them (nor any
-              // learned alias) — can't determine which one. Drop with a clear
-              // warning, never silently.
-              const candidates = connectedSessions.map((m) => `${m.project}/${m.session}`).join(", ");
-              console.error(
-                `polaris daemon: dropping ${String(body.hook_event_name ?? "hook")} event — ` +
-                `session_id ${ccSessionId} matches no known mapping and ${connectedSessions.length} ` +
-                `sessions are connected (${candidates}). ` +
-                `Reconnect with polaris_connect in the affected Claude session to re-establish routing.`
-              );
-              await logEvent("/events", body, { status: 0, body: `dropped: ambiguous across ${connectedSessions.length} sessions (${candidates})` });
-              return json({ status: "ambiguous" });
             } else {
-              return json({ status: "not_connected" });
+              // No pending sessions — fall back to the single-session heuristic.
+              const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
+              if (connectedSessions.length === 1) {
+                // Only one active session — route to it and remember the mapping
+                mapping = connectedSessions[0];
+                sessions.set(ccSessionId, { ...mapping, ccSessionId, slackChannel: undefined });
+                // Share the inject queue (see note above).
+                const queue = injectQueues.get(mapping.ccSessionId) ?? [];
+                injectQueues.set(mapping.ccSessionId, queue);
+                injectQueues.set(ccSessionId, queue);
+              } else if (connectedSessions.length > 1) {
+                // Multiple sessions and session_id matches none of them (nor any
+                // learned alias) — can't determine which one. Drop with a clear
+                // warning, never silently.
+                const candidates = connectedSessions.map((m) => `${m.project}/${m.session}`).join(", ");
+                console.error(
+                  `polaris daemon: dropping ${String(body.hook_event_name ?? "hook")} event — ` +
+                  `session_id ${ccSessionId} matches no known mapping and ${connectedSessions.length} ` +
+                  `sessions are connected (${candidates}). ` +
+                  `Reconnect with polaris_connect in the affected Claude session to re-establish routing.`
+                );
+                await logEvent("/events", body, { status: 0, body: `dropped: ambiguous across ${connectedSessions.length} sessions (${candidates})` });
+                return json({ status: "ambiguous" });
+              } else {
+                return json({ status: "not_connected" });
+              }
             }
           }
 
@@ -729,6 +857,54 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
         const data = await res.json();
         return json(data);
+      }
+
+      // GET /channels — list available channels/projects
+      if (method === "GET" && pathname === "/channels") {
+        try {
+          const serviceUrl = getServiceUrl();
+          const res = await fetch(`${serviceUrl}/projects`, {
+            headers: await authHeaders(),
+          });
+          if (!res.ok) return error("Failed to fetch channels", res.status);
+          const projects = (await res.json()) as Array<{ name: string; slack_channel_name?: string }>;
+          const channels = projects
+            .filter((p) => p.name !== "_system")
+            .map((p) => `#${p.slack_channel_name || p.name}`);
+          return json({ channels });
+        } catch {
+          return error("API unreachable", 503);
+        }
+      }
+
+      // GET /team — list team members with Slack identities
+      if (method === "GET" && pathname === "/team") {
+        try {
+          const serviceUrl = getServiceUrl();
+          const res = await fetch(`${serviceUrl}/team`, {
+            headers: await authHeaders(),
+          });
+          if (!res.ok) return error("Failed to fetch team", res.status);
+          const data = await res.json();
+          return json(data);
+        } catch {
+          return error("API unreachable", 503);
+        }
+      }
+
+      // POST /backfill — recover lost events from daemon log
+      if (method === "POST" && pathname === "/backfill") {
+        try {
+          const body = (await req.json()) as { ccSessionId: string; duration?: string; from?: string };
+          if (!body.ccSessionId) return error("ccSessionId required", 400);
+          const mapping = sessions.get(body.ccSessionId);
+          if (!mapping || !mapping.project) return error("Not connected", 400);
+
+          const result = await backfill(mapping, body.duration, body.from);
+          return json(result);
+        } catch {
+          return error("Invalid JSON", 400);
+        }
       }
 
       return error("Not found", 404);

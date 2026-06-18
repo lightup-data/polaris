@@ -4,7 +4,7 @@
 
 Polaris runs entirely on localhost. We need a production deployment so the API, web dashboard, Slack bridge, and Postgres all run on a Hetzner Cloud VPS with proper HTTPS. The daemon and MCP client stay local on each developer's machine — they talk to the cloud API.
 
-Domain: `polaris.lightup.ai` (subdomains: `api.polaris.lightup.ai`, `app.polaris.lightup.ai`)
+Domain: `withpolaris.ai` (subdomains: `api.withpolaris.ai`, `app.withpolaris.ai`)
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Domain: `polaris.lightup.ai` (subdomains: `api.polaris.lightup.ai`, `app.polaris
 | File | Purpose |
 |------|---------|
 | `docker/Dockerfile` | Single Bun image, each service overrides CMD |
-| `docker/Caddyfile` | Reverse proxy: app.polaris.lightup.ai → web:3000, api.polaris.lightup.ai → api:4321 |
+| `docker/Caddyfile` | Reverse proxy: app.withpolaris.ai → web:3000, api.withpolaris.ai → api:4321 |
 | `docker/bridge-entrypoint.sh` | Wait for Postgres, discover org ID, start bridge |
 | `src/bridge-discover-org.ts` | Tiny script: query DB for Slack-connected org ID |
 | `docker-compose.prod.yml` | Full production orchestration |
@@ -58,11 +58,11 @@ CMD ["bun", "run", "src/service/server.ts"]
 ## Caddy Config
 
 ```
-app.polaris.lightup.ai {
+app.withpolaris.ai {
     reverse_proxy web:3000
 }
 
-api.polaris.lightup.ai {
+api.withpolaris.ai {
     reverse_proxy api:4321
 }
 ```
@@ -84,16 +84,16 @@ Caddy auto-provisions Let's Encrypt certs. WebSocket upgrades pass through trans
 3. Create deploy user, add SSH key
 4. Clone repo to `/opt/polaris`
 5. Create `.env` with production secrets
-6. DNS: A records for `api.polaris.lightup.ai` and `app.polaris.lightup.ai` → VPS IP
-7. Update Google OAuth + Slack redirect URIs to `https://app.polaris.lightup.ai/...`
+6. DNS: A records for `api.withpolaris.ai` and `app.withpolaris.ai` → VPS IP
+7. Update Google OAuth + Slack redirect URIs to `https://app.withpolaris.ai/...`
 8. Firewall: allow 80, 443, 22 only
 9. `docker compose -f docker-compose.prod.yml up -d`
 
 ## Verification
 
 1. `docker compose -f docker-compose.prod.yml up --build` locally — all services start
-2. `curl https://api.polaris.lightup.ai/status` returns `{"ok":true}`
-3. `https://app.polaris.lightup.ai` loads login page
+2. `curl https://api.withpolaris.ai/status` returns `{"ok":true}`
+3. `https://app.withpolaris.ai` loads login page
 4. Google SSO login works end-to-end
 5. Slack bridge connects and posts to channels
-6. Local daemon connects to `https://api.polaris.lightup.ai` and events flow
+6. Local daemon connects to `https://api.withpolaris.ai` and events flow

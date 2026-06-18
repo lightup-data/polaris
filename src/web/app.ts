@@ -14,6 +14,10 @@ import {
   listSessions,
   getSessionPromptCounts,
   getProjectEvents,
+  getRecentSignups,
+  listUsers,
+  setOrgPlan,
+  getDailyPromptCounts,
   type Sql,
 } from "../service/db";
 import { layout, nav } from "./layout";
@@ -43,6 +47,73 @@ import {
   mockDevices,
 } from "./fixtures";
 
+// --- Signup notifications ---
+
+const SIGNUP_CHANNEL = "#alerts-mql-stream";
+
+function notifySignup(opts: { name: string; email: string; domain: string; orgName: string; isNewOrg: boolean; plan?: string }): void {
+  const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+  if (!botToken) return;
+
+  const emoji = opts.isNewOrg ? ":tada:" : ":wave:";
+  const action = opts.isNewOrg ? "signed up (new org)" : "joined";
+  const planTag = opts.plan ? ` [${opts.plan}]` : "";
+  const text = `${emoji} *${opts.name}* (${opts.email}) ${action} — ${opts.orgName} (${opts.domain})${planTag}`;
+
+  fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+  }).catch(() => {});
+}
+
+export function notifyPlanChange(opts: { name: string; email: string; orgName: string; fromPlan: string; toPlan: string }): void {
+  const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+  if (!botToken) return;
+
+  const emoji = opts.toPlan === "free" ? ":arrow_down:" : ":arrow_up:";
+  const text = `${emoji} *${opts.name}* (${opts.email}) changed plan: ${opts.fromPlan} → ${opts.toPlan} — ${opts.orgName}`;
+
+  fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${botToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+  }).catch(() => {});
+}
+
+function startSignupRollup(sql: Sql): void {
+  const HOUR = 60 * 60 * 1000;
+
+  async function postRollup(): Promise<void> {
+    const botToken = process.env.SIGNUP_SLACK_BOT_TOKEN;
+    if (!botToken) return;
+
+    const since = new Date(Date.now() - HOUR);
+    const signups = await getRecentSignups(sql, since, 10);
+    if (signups.length === 0) return;
+
+    const lines = signups.map((s) => `• *${s.name}* (${s.email}) — ${s.org_name}`);
+    const text = `:chart_with_upwards_trend: *${signups.length} signup${signups.length === 1 ? "" : "s"} in the last hour*\n${lines.join("\n")}`;
+
+    fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${botToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: SIGNUP_CHANNEL, text }),
+    }).catch(() => {});
+  }
+
+  setInterval(postRollup, HOUR);
+}
+
 // --- Google OAuth ---
 
 function getGoogle(): Google {
@@ -53,7 +124,7 @@ function getGoogle(): Google {
   );
 }
 
-const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number }>();
+const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number; plan?: string }>();
 const cliCallbackPorts = new Map<string, number>(); // state → CLI local server port
 
 // If this auth flow was initiated by the CLI, redirect the token to the CLI's local server.
@@ -82,19 +153,57 @@ export function createApp(sql: Sql) {
   // Polaris API service (same convention as slack/bridge.ts)
   const apiUrl = process.env.POLARIS_API_URL ?? "http://localhost:4321";
 
+  // Start hourly signup rollup
+  startSignupRollup(sql);
+
+  // --- SEO ---
+
+  app.get("/og-image.png", async (c) => {
+    const file = Bun.file(new URL("../../og-image.png", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+    });
+  });
+
+  app.get("/robots.txt", (c) => {
+    return new Response(
+      `User-agent: *\nAllow: /\n\nSitemap: https://app.withpolaris.ai/sitemap.xml`,
+      { headers: { "Content-Type": "text/plain" } }
+    );
+  });
+
+  app.get("/sitemap.xml", (c) => {
+    return new Response(
+      `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://app.withpolaris.ai</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`,
+      { headers: { "Content-Type": "application/xml" } }
+    );
+  });
+
   // --- Landing page ---
 
   app.get("/", (c) => {
-    return layout(renderLandingPage());
+    return layout(renderLandingPage(), "Polaris — It's like Gong for Claude Code sessions", {
+      title: "Polaris — It's like Gong for Claude Code sessions",
+      description: "Capture every AI coding session. Stream prompts, responses, and tool calls to Slack in real time. Collaborate across agents. Nothing is lost.",
+      canonical: "https://app.withpolaris.ai",
+    });
   });
 
   // --- Auth: single Google SSO flow for both signup and login ---
 
-  function startGoogleAuth(c: { redirect: (url: string) => Response }) {
+  function startGoogleAuth(c: { req: { query: (k: string) => string | undefined }; redirect: (url: string) => Response }) {
     const google = getGoogle();
     const state = crypto.randomUUID();
     const codeVerifier = crypto.randomUUID();
-    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now() });
+    const plan = c.req.query("plan");
+    oauthStates.set(state, { type: "login", codeVerifier, timestamp: Date.now(), plan });
     const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email", "profile"]);
     return c.redirect(url.toString());
   }
@@ -129,6 +238,14 @@ export function createApp(sql: Sql) {
     // 1. Existing user → log in
     const existingUser = await getUserByEmail(sql, email);
     if (existingUser) {
+      // Upgrade org plan if signing up for a higher tier
+      if (stateData.plan && stateData.plan !== "free") {
+        const userOrg = await getOrg(sql, existingUser.org_id);
+        if (userOrg && userOrg.plan === "free") {
+          await setOrgPlan(sql, existingUser.org_id, "free", stateData.plan, existingUser.id);
+        }
+      }
+
       const token = await createToken({
         sub: existingUser.id,
         email: existingUser.email,
@@ -145,6 +262,25 @@ export function createApp(sql: Sql) {
       const userId = crypto.randomUUID();
       const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
       await createUser(sql, userId, email, name, existingOrg.id, participantId);
+
+      // Upgrade org plan if signing up for a higher tier
+      if (stateData.plan && stateData.plan !== "free" && existingOrg.plan === "free") {
+        await setOrgPlan(sql, existingOrg.id, "free", stateData.plan, userId);
+      }
+
+      // Notify org's Slack system channel
+      postSystemEvent({
+        sql,
+        orgId: existingOrg.id,
+        sender: participantId,
+        text: `:wave: *${name}* (${email}) joined the team`,
+        botToken: existingOrg.slack_bot_token ?? undefined,
+        channelId: existingOrg.slack_system_channel_id ?? undefined,
+      }).catch(() => {});
+
+      // Notify internal team
+      notifySignup({ name, email, domain, orgName: existingOrg.name, isNewOrg: false, plan: stateData.plan });
+
       const token = await createToken({ sub: userId, email, name, org_id: existingOrg.id, participant_id: participantId });
       return authRedirect(c, state, token);
     }
@@ -153,13 +289,17 @@ export function createApp(sql: Sql) {
     const orgName = domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1);
     const orgId = crypto.randomUUID();
     try {
-      await createOrg(sql, orgId, orgName, domain);
+      await createOrg(sql, orgId, orgName, domain, stateData.plan);
     } catch {
       return layout(renderErrorView("Failed to create team. Please try again.", "Try again", "/login"));
     }
     const userId = crypto.randomUUID();
     const participantId = `user:${name.toLowerCase().replace(/\s+/g, ".")}`;
     await createUser(sql, userId, email, name, orgId, participantId);
+
+    // Notify internal team
+    notifySignup({ name, email, domain, orgName, isNewOrg: true, plan: stateData.plan });
+
     const token = await createToken({ sub: userId, email, name, org_id: orgId, participant_id: participantId });
     return authRedirect(c, state, token);
   });
@@ -195,7 +335,9 @@ export function createApp(sql: Sql) {
       }
     } catch { /* _system project may not exist yet */ }
 
-    // Query real projects, sessions, and prompt counts
+    // Query team members, projects, sessions, prompt counts, and daily activity
+    const teamMembers = await listUsers(sql, payload.org_id);
+    const dailyPrompts = await getDailyPromptCounts(sql, payload.org_id);
     const projects = (await listProjects(sql, payload.org_id)).filter((p) => p.name !== "_system");
     const allSessions = (await listSessions(sql, payload.org_id)).filter((s) => s.project !== "_system");
     const promptCounts = await getSessionPromptCounts(sql, payload.org_id);
@@ -234,6 +376,9 @@ export function createApp(sql: Sql) {
       cliInstalled,
       hasConnectedSession,
       totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
+      teamMembers: teamMembers.map((u) => ({ name: u.name, email: u.email })),
+      plan: org.plan,
+      dailyPrompts,
     };
 
     if (hasConnectedSession) {
@@ -628,10 +773,19 @@ export function createApp(sql: Sql) {
     const mockToken = "preview-token";
     const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email };
 
+    const mockTeam = [{ name: mockUser.name, email: mockUser.email }, { name: "Alice Chen", email: "alice@lightup.ai" }, { name: "Laura Mowry", email: "laura@lightup.ai" }];
+    const mockSenders = ["user:manu.bansal", "user:alice.chen", "user:laura.mowry"];
+    const mockDailyPrompts = mockSenders.flatMap((sender) =>
+      Array.from({ length: 14 }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - 13 + i);
+        return { date: d.toISOString().slice(0, 10), sender, count: Math.floor(Math.random() * 12) + 1 };
+      })
+    );
     const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0 };
-    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127 };
+    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const teamPlan    = { ...fresh, plan: "pro" };
 
     return layout(`
       <div class="max-w-5xl mx-auto px-6 py-12">
@@ -668,6 +822,14 @@ export function createApp(sql: Sql) {
             <p class="text-sm text-gray-400 mb-4">User is driver in one session, advisor in others.</p>
             <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
               ${renderActiveView(allDone, mockActiveSessions, mockProjects, mockDevices)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Team plan signup</h2>
+            <p class="text-sm text-gray-400 mb-4">User signed up via the Team pricing CTA.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(teamPlan)}
             </div>
           </section>
 
