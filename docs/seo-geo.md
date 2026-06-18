@@ -23,13 +23,9 @@
 - [x] **Page titles** — dashboard ("Dashboard — Polaris"), setup ("Setup — Polaris"), profile ("Polaris - Profile")
 - [x] **Alt text on images** — added to all img tags on the landing page
 
+- [x] **Google Search Console** — property verified via DNS TXT record, sitemap submitted
+
 ## SEO — To Do
-
-### High Priority
-
-- [ ] **Submit sitemap to Google Search Console**
-  Register `app.withpolaris.ai` at https://search.google.com/search-console.
-  Verify ownership via Cloudflare DNS TXT record. Submit sitemap URL.
 
 - [ ] **Blog / content marketing**
   Long-tail SEO needs content pages targeting search terms:
