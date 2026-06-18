@@ -121,31 +121,21 @@ Login — both `polaris login --local` and the dashboard — uses Google SSO, so
 
 ### Local Slack app setup (optional)
 
-Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels.
+Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels. Slack has no API to create apps, so this is manual.
 
-Two things make local Slack trickier than Google, so read these first:
-
-- **Slack requires an HTTPS redirect URL** — `http://localhost` is rejected (unlike Google, Slack has no localhost exception). You need an HTTPS tunnel to your local web app (step 1).
-- **Installing the app may need workspace-admin approval.** If your workspace restricts app installs, the **Allow** step is blocked. Create the app in a **personal/dev workspace where you're an admin**, or have an admin approve it.
-
-1. **Start an HTTPS tunnel** to the local web app and note the URL:
-   ```sh
-   cloudflared tunnel --url http://localhost:3000   # → https://<random>.trycloudflare.com (no account needed)
-   ```
-   Keep it running. (Free trycloudflare URLs change on each restart; use a named cloudflared/ngrok tunnel for a stable one.)
-2. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick a workspace you can install into.
-3. **OAuth & Permissions**: under **Redirect URLs** add `https://<tunnel>/slack/callback` (HTTPS — `http://localhost` will not work) and Save. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
-4. **Socket Mode**: toggle **Enable Socket Mode** on, then generate an app-level token (scope `connections:write`). Copy it — this is `SLACK_APP_TOKEN` (starts with `xapp-`).
-5. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. (This is what lets Slack messages reach a session.)
-6. **Basic Information**: copy the **Client ID** and **Client Secret**.
-7. Add to `.env`:
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick a workspace you can install into. (If your workspace requires admin approval to install apps, an admin must approve it — otherwise use a workspace where you're an admin.)
+2. **OAuth & Permissions → Redirect URLs**: add `http://localhost:3000/slack/callback` and click **Save URLs**. Slack accepts `http://localhost` for local dev — just make sure you actually **Save** it. A missing or unsaved redirect URL is the usual cause of `redirect_uri did not match any configured URIs`. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
+3. **Socket Mode**: toggle **Enable Socket Mode** on, then generate an app-level token (scope `connections:write`). Copy it — this is `SLACK_APP_TOKEN` (starts with `xapp-`).
+4. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. **Required** for Slack messages to reach a session — without it the bridge connects but never receives messages.
+5. **Basic Information**: copy the **Client ID** and **Client Secret**.
+6. Add to `.env`:
    ```
    SLACK_CLIENT_ID=<client-id>
    SLACK_CLIENT_SECRET=<client-secret>
    SLACK_APP_TOKEN=xapp-<socket-mode-token>
-   SLACK_REDIRECT_URI=https://<tunnel>/slack/callback
    ```
-8. `make clean && make dev`, then open the dashboard, log in, and click **Connect Slack → Allow** to install the bot. This stores the bot token on your org.
+   `SLACK_REDIRECT_URI` is optional — it defaults to `http://localhost:3000/slack/callback`. Only set it if you register a different URL (e.g. an `ngrok`/`cloudflared` tunnel when you need a public HTTPS callback).
+7. `make clean && make dev`, then open the dashboard, log in, and click **Connect Slack → Allow** to install the bot. This stores the bot token on your org.
 
 ### Running the Slack bridge locally
 
