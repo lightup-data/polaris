@@ -34,7 +34,26 @@ export async function createDb(connectionString?: string): Promise<Sql> {
   return sql;
 }
 
+// Arbitrary fixed key for the schema-init advisory lock (issue #117).
+const SCHEMA_LOCK_KEY = 0x504c5253; // "PLRS"
+
 export async function ensureSchema(sql: Sql): Promise<void> {
+  // API and web both call this on startup. Serialize concurrent callers with a
+  // session-level advisory lock held on a reserved (dedicated) connection, so
+  // they don't race on `CREATE TABLE IF NOT EXISTS` — which isn't concurrency
+  // safe: two connections can both pass the existence check and then collide on
+  // the underlying pg_type creation (issue #117).
+  const lock = await sql.reserve();
+  try {
+    await lock`SELECT pg_advisory_lock(${SCHEMA_LOCK_KEY}::bigint)`;
+    await createSchemaTables(sql);
+  } finally {
+    await lock`SELECT pg_advisory_unlock(${SCHEMA_LOCK_KEY}::bigint)`;
+    lock.release();
+  }
+}
+
+async function createSchemaTables(sql: Sql): Promise<void> {
   await sql`
     CREATE TABLE IF NOT EXISTS orgs (
       id TEXT PRIMARY KEY,
