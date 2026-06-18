@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { resetTestData } from "./helpers";
 import {
   createDb,
   createOrg,
@@ -29,13 +30,7 @@ let sql: Sql;
 
 beforeEach(async () => {
   sql = await createDb(DATABASE_URL);
-  await sql`DROP TABLE IF EXISTS events`;
-  await sql`DROP TABLE IF EXISTS sessions`;
-  await sql`DROP TABLE IF EXISTS projects`;
-  await sql`DROP TABLE IF EXISTS users`;
-  await sql`DROP TABLE IF EXISTS orgs`;
-  await sql.end();
-  sql = await createDb(DATABASE_URL);
+  await resetTestData(sql);
   await createOrg(sql, "test-org", "Test Org");
 });
 
