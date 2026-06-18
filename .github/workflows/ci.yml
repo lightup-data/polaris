@@ -68,3 +68,28 @@ jobs:
           # Set version in package.json for this publish only (not committed)
           npm version "$NEW" --no-git-tag-version
           npm publish --access public
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Deploy to production
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H withpolaris.ai >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key deploy@withpolaris.ai "
+            cd /opt/polaris &&
+            git pull --ff-only &&
+            docker compose -f docker-compose.prod.yml build &&
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans &&
+            docker compose -f docker-compose.prod.yml ps
+          "
