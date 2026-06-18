@@ -47,16 +47,8 @@ Longhouse, SessionForge, CC Replay, Blackcrab, Mantra, Nokos.
 
 ### High Priority
 
-- [ ] **GitHub README as the canonical source**
-  LLMs scrape GitHub heavily. The README needs to lead with the exact
-  phrases LLMs search for: "AI coding session recording", "Gong for
-  AI coding", "Claude Code session recording". Currently the README
-  leads with architecture — rewrite the intro to match search intent.
-
-- [ ] **npm package description**
-  `npm view @lightupai/polaris` — the package description and keywords
-  are what LLMs see. Update with target phrases: "Record and stream
-  Claude Code sessions to Slack. Like Gong for AI coding."
+- [x] **GitHub README as the canonical source** — rewrote intro to lead with "Gong for Claude Code sessions", added "What Polaris does" section matching LLM fan-out queries
+- [x] **npm package description** — added description, 10 keywords, homepage, and repo URL to package.json
 
 - [ ] **Comparison / "alternatives" blog post**
   LLMs heavily cite comparison pages. Write a post like "Polaris vs
