@@ -11,6 +11,10 @@
 - [x] **sitemap.xml** — lists the landing page
 - [x] **Cloudflare DNS** — domain managed on Cloudflare with MX + SPF records
 - [x] **Email routing** — `*@withpolaris.ai` forwards to `support@lightup.ai`
+- [x] **Self-host Tailwind CSS** — replaced 127KB CDN script with purged 26KB static CSS (5.5KB gzip). Production Lighthouse: score 84→99, FCP 3.4s→1.6s, page weight 175KB→77KB
+- [x] **Lighthouse performance audit** — `make perf` runs mobile+desktop against prod and local, checks Google "good" budgets (score≥90, FCP≤1.8s, LCP≤2.5s), saves JSON to `docs/audits/`
+- [x] **DataForSEO on-page audit** — `make seo` runs 20 SEO checks via DataForSEO API, saves JSON to `docs/audits/`
+- [x] **Heading hierarchy** — verified: 1×h1, 7×h2, 18×h3, proper structure (DataForSEO score 100/100)
 
 ## SEO — To Do
 
@@ -27,10 +31,13 @@
   - Cloudflare Web Analytics (free, built into Cloudflare dashboard)
   Add the tracking script to the layout.
 
-- [ ] **Self-host Tailwind CSS**
-  Currently loading Tailwind CDN (~300KB) on every page. Purge and self-host
-  to reduce to ~10KB. Improves page speed and Core Web Vitals score.
-  Affects Google ranking.
+- [ ] **Favicon**
+  No favicon set. Flagged by DataForSEO audit. Add one for browser tabs and bookmarks.
+  Use the Polaris hub icon or a simplified version.
+
+- [ ] **Enable gzip/brotli compression**
+  DataForSEO flagged `no_content_encoding`. Caddy should be compressing responses.
+  Add `encode gzip zstd` to the Caddyfile.
 
 ### Medium Priority
 
@@ -61,15 +68,11 @@
   - "Gong for AI coding"
   Options: simple `/blog` route with markdown rendering, or a subdomain `blog.withpolaris.ai`.
 
-- [ ] **Heading hierarchy audit**
-  Ensure proper h1 → h2 → h3 structure on the landing page.
-  Only one h1 per page. Check that section headers use correct levels.
-
 ### Low Priority
 
-- [ ] **Favicon**
-  No favicon set. Add one for browser tabs and bookmarks.
-  Use the Polaris hub icon or a simplified version.
+- [ ] **Improve content rate**
+  DataForSEO flagged text at 8.2% of page HTML (want ≥10%).
+  More copy or blog content will fix this.
 
 - [ ] **404 page**
   Custom 404 page with navigation back to the landing page.
@@ -108,9 +111,9 @@
   - Or relying on Cloudflare proxy to cache static content at edge
 
 - [ ] **Cache headers for static assets**
-  OG image has 24h cache. Landing page HTML has `Cache-Control: no-store`.
-  Consider adding short cache (5-10 min) for the landing page since it
-  changes infrequently. CSS/JS should have long cache with versioned URLs.
+  OG image has 24h cache. CSS has immutable 1yr cache. Landing page HTML
+  has `Cache-Control: no-store` — consider short cache (5-10 min) since
+  it changes infrequently.
 
 ### Low Priority
 
