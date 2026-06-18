@@ -38,7 +38,7 @@ daemon:
 # Slack bridge (auto-detects org from DB, needs SLACK_APP_TOKEN in .env)
 bridge:
 	@if [ -z "$(SLACK_APP_TOKEN)" ]; then echo "Skipping bridge (no SLACK_APP_TOKEN in .env)"; else \
-	  ORG=$$(docker exec collab-polaris-postgres-1 psql -U polaris -d polaris -t -A -c "SELECT id FROM orgs WHERE slack_team_id IS NOT NULL LIMIT 1;" 2>/dev/null); \
+	  ORG=$$(docker compose exec -T polaris-postgres psql -U polaris -d polaris -t -A -c "SELECT id FROM orgs WHERE slack_team_id IS NOT NULL LIMIT 1;" 2>/dev/null); \
 	  if [ -n "$$ORG" ]; then \
 	    echo "Starting Slack bridge for org $$ORG"; \
 	    nohup npx bun run src/slack/bridge.ts $$ORG >/tmp/polaris-bridge.log 2>&1 & \
