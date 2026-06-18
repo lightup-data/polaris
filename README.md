@@ -202,6 +202,28 @@ tests/         Test suite (bun test)
 - [ ] Update available indicator — daemon periodically checks npm for newer version, caches the result. Status line shows "update available" when stale. `polaris update` command installs the latest version and rewrites skill/hooks.
 - [ ] Slack channel name collision — if a channel name was previously deleted, Slack reserves it. Bridge should handle `name_taken` by trying a prefix/suffix (e.g., `p-project-name`)
 
+## Testing
+
+```sh
+# Unit tests (uses polaris_test database)
+make test
+
+# Lighthouse performance audit against production
+# Runs mobile + desktop, checks budgets (score >= 90, FCP <= 1.8s, LCP <= 2.5s)
+# Saves results to docs/audits/perf-audit-YYYY-MM-DD.json
+make perf
+
+# DataForSEO on-page SEO audit against production
+# Checks meta tags, headings, social tags, content rate, technical SEO
+# Saves results to docs/audits/seo-audit-YYYY-MM-DD.json
+# Requires DataForSEO API credentials (see scripts/seo-audit.ts)
+make seo
+```
+
+All three targets exit non-zero on failure. `make perf` and `make seo` run against the live production site (`app.withpolaris.ai`) by default. Override with `make perf PERF_URL=http://localhost:3000` or `make seo SEO_URL=http://localhost:3000`.
+
+Audit results are saved as JSON in `docs/audits/` for historical tracking.
+
 ## Development
 
 Services run as background processes. Logs go to `/tmp/polaris-*.log`. The Makefile's `clean` target kills all processes and stops Postgres.
