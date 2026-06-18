@@ -1,12 +1,24 @@
-# Polaris
+# Polaris — It's like Gong for Claude Code sessions
 
-Multiplayer collaboration for AI coding agents. Connects coding sessions (Claude Code, Cursor, etc.) to team communication channels (Slack, WhatsApp) so teammates can observe, advise, and coordinate in real time.
+Record, stream, and collaborate on AI coding sessions in real time. Polaris captures every prompt, response, and tool call from Claude Code and streams them to Slack so your team can observe, advise, and learn from each other's sessions.
+
+**AI coding session recording for teams.** Instead of AI sessions disappearing when the terminal closes, Polaris captures the full session — what was asked, what the agent did, which files it touched, and what tools it called. Every session is searchable, shareable, and streamable to Slack.
+
+## What Polaris does
+
+- **Record Claude Code sessions** — hooks capture prompts, responses, and tool calls automatically
+- **Stream to Slack in real time** — every session gets a dedicated Slack channel with live updates
+- **Multiplayer AI coding** — teammates can watch sessions, send advice from Slack, and redirect agents mid-session
+- **Session history and search** — browse past sessions, search across projects, attach context to PRs
+- **Team dashboard** — see who's working on what, active sessions, prompt activity across the org
+
+Works with Claude Code today. Designed to support Cursor, Codex, and other AI coding tools.
 
 ## Architecture
 
-- **API** (`src/service/server.ts`) — Cloud service on port 4321. REST + WebSocket for projects, sessions, events.
-- **Web** (`src/web/`) — Dashboard on port 3000. Google SSO, Slack OAuth, real-time SSE updates.
-- **Daemon** (`src/daemon/daemon.ts`) — Local daemon on port 4322. Routes hook events from coding agents to the API.
+- **API** (`src/service/server.ts`) — Cloud service. REST + WebSocket for projects, sessions, events.
+- **Web** (`src/web/`) — Dashboard and landing page. Google SSO, Slack OAuth, real-time SSE updates.
+- **Daemon** (`src/daemon/daemon.ts`) — Local daemon. Routes hook events from coding agents to the API.
 - **MCP Client** (`src/client/client.ts`) — MCP channel server for Claude Code. Provides `/polaris` commands.
 - **Slack Bridge** (`src/slack/bridge.ts`) — Bidirectional bridge between project event streams and Slack channels.
 - **Hooks** (`hooks/`) — Shell scripts that capture coding agent interactions (prompts, responses, tool calls).
