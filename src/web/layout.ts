@@ -39,6 +39,8 @@ export function layout(body: string, title = "Polaris", seo?: SeoOpts): Response
 <meta name="twitter:image" content="${ogImage}">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/styles.css">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-N00X6NR17E"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-N00X6NR17E');</script>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
