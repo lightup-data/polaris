@@ -36,64 +36,116 @@
   - "Gong for AI coding"
   Options: simple `/blog` route with markdown rendering, or a subdomain `blog.withpolaris.ai`.
 
-## Geo — To Do
+## GEO — To Do
+
+Generative Engine Optimization — getting Polaris cited by LLMs (ChatGPT,
+Perplexity, Gemini, Claude) when users ask about AI coding session tools.
+
+**Baseline (2026-06-18):** Polaris is mentioned by 0/3 major LLMs for
+"Gong for AI coding" queries. Competitors cited: AgentReplay, vibe-replay,
+Longhouse, SessionForge, CC Replay, Blackcrab, Mantra, Nokos.
 
 ### High Priority
 
-- [ ] **Enable Cloudflare proxy (orange cloud)**
-  DNS records for `app.withpolaris.ai` and `api.withpolaris.ai` are
-  likely DNS-only (gray cloud). Switching to proxied gives:
-  - Free global CDN (faster loads worldwide)
-  - Automatic caching of static assets
-  - DDoS protection
-  - Web Application Firewall
-  Note: Caddy handles HTTPS on the server. Enabling Cloudflare proxy
-  means Cloudflare terminates TLS and connects to Caddy. Need to set
-  Cloudflare SSL mode to "Full (strict)" and ensure Caddy's certs
-  are valid. Test carefully.
+- [ ] **GitHub README as the canonical source**
+  LLMs scrape GitHub heavily. The README needs to lead with the exact
+  phrases LLMs search for: "AI coding session recording", "Gong for
+  AI coding", "Claude Code session recording". Currently the README
+  leads with architecture — rewrite the intro to match search intent.
+
+- [ ] **npm package description**
+  `npm view @lightupai/polaris` — the package description and keywords
+  are what LLMs see. Update with target phrases: "Record and stream
+  Claude Code sessions to Slack. Like Gong for AI coding."
+
+- [ ] **Comparison / "alternatives" blog post**
+  LLMs heavily cite comparison pages. Write a post like "Polaris vs
+  AgentReplay vs SessionForge — AI coding session tools compared"
+  that positions Polaris and links to withpolaris.ai. Publish on the
+  blog and cross-post to dev.to / Medium.
+
+- [ ] **Reddit / Hacker News / community presence**
+  LLMs cite Reddit and HN threads. Post in:
+  - r/ClaudeAI (GPT-5.5 already cites a Claude Code replay post there)
+  - r/ChatGPTPro, r/LocalLLaMA, r/ExperiencedDevs
+  - Hacker News Show HN
+  Include link to withpolaris.ai in posts/comments.
 
 ### Medium Priority
 
-- [ ] **Check server location**
-  Verify where the Hetzner VPS is located (likely EU — Finland or Germany).
-  If most users are US-based, consider:
-  - Migrating to a US Hetzner datacenter (Ashburn, VA)
-  - Or relying on Cloudflare proxy to cache static content at edge
+- [ ] **Landing page copy matches LLM fan-out queries**
+  GPT-5.5 searches for: "Claude Code session recording sharing tools",
+  "AI coding session recording tool Claude Code terminal replay",
+  "Claude Code observability session recordings tool". Ensure the
+  landing page H1/H2/description contain these phrases naturally.
 
-- [ ] **Cache headers for static assets**
-  OG image has 24h cache. CSS has immutable 1yr cache. Landing page HTML
-  has `Cache-Control: no-store` — consider short cache (5-10 min) since
-  it changes infrequently.
+- [ ] **Dev blog with target keyword articles**
+  Write content targeting the exact queries LLMs use:
+  - "How to record Claude Code sessions"
+  - "AI coding session recording for teams"
+  - "Multiplayer AI coding with Slack"
+  Options: `/blog` route with markdown, or subdomain `blog.withpolaris.ai`.
+
+- [ ] **GitHub Discussions / Issues as citable content**
+  LLMs scrape GitHub discussions. Active Q&A in Discussions creates
+  citable pages linking back to Polaris. Seed with FAQs and how-tos.
+
+- [ ] **Product Hunt launch**
+  Creates a high-authority page that LLMs cite. Time it with a
+  feature milestone.
 
 ### Low Priority
 
-- [ ] **Content localization**
-  Not needed yet. English only. Revisit if expanding to non-English markets.
+- [ ] **Structured data for LLM parsing**
+  Add `llms.txt` or `llms-full.txt` to the site root — an emerging
+  convention for telling LLMs about your product in a machine-friendly
+  format. See llmstxt.org.
 
-- [ ] **CDN for the npm package**
-  The CLI is published to npm. npm CDN (unpkg, jsdelivr) handles global
-  distribution automatically. No action needed.
+- [ ] **Monitor GEO position over time**
+  Set up periodic DataForSEO `ai_optimization_llm_response` queries
+  for target keywords across ChatGPT/Perplexity/Gemini. Track whether
+  Polaris starts appearing in responses. Requires DFS subscription
+  for `ai_opt_llm_ment_search`.
+
+## GEO — Competitors
+
+Tools cited by LLMs for "Gong for AI coding" (as of 2026-06-18):
+
+| Tool | Cited by | Positioning |
+|---|---|---|
+| AgentReplay | ChatGPT | "Loom for your AI coding agent" |
+| vibe-replay | ChatGPT | Analytics + replay across tools |
+| Longhouse | ChatGPT | Mission control for AI coding sessions |
+| SessionForge | ChatGPT | Team visibility / RBAC / remote sessions |
+| CC Replay | ChatGPT | Claude Code-specific local replay |
+| Blackcrab | ChatGPT | Claude Code GUI |
+| Multiplayer.app | Perplexity | AI dev workflow capture |
+| Mantra | Gemini | Unified AI session manager |
+| Nokos | Gemini | Cross-tool conversation capture |
+| claude-devtools | Gemini | JSONL transcript viewer |
 
 ## Target Keywords
 
-Primary:
+Primary (match LLM fan-out queries):
 - "AI coding session recording"
-- "Claude Code collaboration"
-- "AI agent observability"
-- "Slack integration for AI coding"
+- "Claude Code session recording"
 - "Gong for AI coding"
+- "Claude Code collaboration"
+- "AI coding session tools"
 
 Secondary:
 - "AI session capture tool"
 - "multiplayer AI coding"
-- "AI coding agent memory"
-- "context graph for AI agents"
+- "Slack integration for AI coding"
+- "AI agent observability"
 - "engineering knowledge capture AI"
 
 ## Useful Links
 
 - Google Search Console: https://search.google.com/search-console
+- Google Analytics: https://analytics.google.com (property 542281886)
 - OG image tester: https://www.opengraph.xyz/
 - Twitter card validator: https://cards-dev.twitter.com/validator
 - PageSpeed Insights: https://pagespeed.web.dev/
 - Cloudflare dashboard: https://dash.cloudflare.com/
+- DataForSEO: https://app.dataforseo.com/
