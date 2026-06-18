@@ -97,6 +97,46 @@ Copy `.env.example` to `.env` and fill in your credentials. All settings are loa
 | `SLACK_APP_TOKEN` | Slack app-level token (for Socket Mode) |
 | `SLACK_REDIRECT_URI` | Slack OAuth callback URL |
 
+### Local Google OAuth setup
+
+Login — both `polaris login --local` and the dashboard — uses Google SSO, so you need a Google OAuth client. (The repo ships `scripts/setup-google-oauth.sh`, but it overwrites `.env` and its automation is unreliable; set it up manually.)
+
+1. Open the [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) and create or select a project.
+2. **OAuth consent screen** (now called the *Google Auth Platform*): set User type **External**, fill in an app name and support email, and Save.
+3. **Add yourself as a Test user.** In the redesigned console this moved — it's no longer on the consent screen. Go to **APIs & Services → OAuth consent screen → Audience** (left sidebar) — or directly [console.cloud.google.com/auth/audience](https://console.cloud.google.com/auth/audience) — and under **Test users** click **+ Add users**, add the email you'll sign in with, and Save. This is **required** while the app is in *Testing* mode; without it, sign-in is blocked with `access_denied`.
+4. **Create Credentials → OAuth client ID → Web application**.
+5. Under **Authorized redirect URIs** (not "JavaScript origins"), add this **exactly**:
+   ```
+   http://localhost:3000/auth/google/callback
+   ```
+   It must match character-for-character — no trailing slash, `http` not `https`, `localhost` not `127.0.0.1`, port `3000`. This is the value the app sends by default (override with `GOOGLE_REDIRECT_URI`).
+6. Copy the **Client ID** and **Client Secret** into `.env` — edit the existing empty lines, don't recreate the file (you'd lose `POSTGRES_PASSWORD`, the JWT secret, etc.):
+   ```
+   GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=<your-secret>
+   ```
+7. Reload so the values take effect: `make clean && make dev`.
+
+> Redirect-URI changes can take a few minutes to propagate on Google's side. If you get `redirect_uri_mismatch` immediately after saving, wait ~5 minutes and retry.
+
+### Local Slack app setup (optional)
+
+Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels. Slack has no API to create apps, so this is manual (`scripts/setup-slack-app.sh` walks you through it and **appends** to `.env`, so it won't clobber existing values).
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick your dev workspace.
+2. **OAuth & Permissions**: under **Redirect URLs** add `http://localhost:3000/slack/callback` and Save. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
+3. **Socket Mode**: toggle **Enable Socket Mode** on, then generate an app-level token (scope `connections:write`). Copy it — this is `SLACK_APP_TOKEN` (starts with `xapp-`).
+4. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. (This is what lets Slack messages reach a session.)
+5. **Basic Information**: copy the **Client ID** and **Client Secret**.
+6. Add all three to `.env`:
+   ```
+   SLACK_CLIENT_ID=<client-id>
+   SLACK_CLIENT_SECRET=<client-secret>
+   SLACK_APP_TOKEN=xapp-<socket-mode-token>
+   ```
+   (`SLACK_REDIRECT_URI` defaults to `http://localhost:3000/slack/callback`.)
+7. Reload: `make clean && make dev`, then click **Connect Slack** on the dashboard to install the bot into your workspace.
+
 ### Optional
 
 | Variable | Default | Description |
