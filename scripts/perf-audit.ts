@@ -1,8 +1,11 @@
 /**
- * Lighthouse performance audit against production.
+ * Lighthouse performance audit.
  *
  * Usage:
  *   bun run scripts/perf-audit.ts [url]
+ *
+ * If url is http://localhost:*, builds CSS, starts the local web server,
+ * runs the audit, then stops the server.
  *
  * Runs mobile + desktop Lighthouse audits, prints a formatted report,
  * checks performance budgets, and saves raw JSON to docs/audits/.
@@ -13,6 +16,37 @@ import { execSync } from "child_process";
 import { join } from "path";
 
 const url = process.argv[2] ?? "https://app.withpolaris.ai";
+const isLocal = url.startsWith("http://localhost");
+let localServerPid: number | undefined;
+
+if (isLocal) {
+  // Build CSS and start local web server
+  console.log("");
+  console.log("  Building CSS and starting local server ...");
+  execSync("npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --minify", { stdio: "pipe" });
+
+  // Kill any existing server on the port
+  const port = new URL(url).port || "3000";
+  try { execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { stdio: "pipe" }); } catch {}
+
+  // Start web server in background
+  const proc = Bun.spawn(["bun", "run", "src/web/serve.ts"], {
+    env: { ...process.env, WEB_PORT: port, DATABASE_URL: process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  localServerPid = proc.pid;
+
+  // Wait for server to be ready
+  for (let i = 0; i < 30; i++) {
+    try {
+      await fetch(url);
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
 
 console.log("");
 console.log(`  Running Lighthouse against ${url} ...`);
@@ -83,7 +117,8 @@ const summary = {
   },
 };
 
-const jsonPath = join(auditDir, `perf-audit-${stamp}.json`);
+const suffix = isLocal ? "-local" : "";
+const jsonPath = join(auditDir, `perf-audit-${stamp}${suffix}.json`);
 writeFileSync(jsonPath, JSON.stringify(summary, null, 2) + "\n");
 
 // --- Report ---
@@ -158,11 +193,14 @@ for (const r of results) {
 
 console.log("");
 console.log(`  ${passCount} passed, ${failCount} failed`);
-console.log(`  Report saved to docs/audits/perf-audit-${stamp}.json`);
+console.log(`  Report saved to docs/audits/perf-audit-${stamp}${suffix}.json`);
 console.log("");
 
-// Cleanup temp files
+// Cleanup
 try { require("fs").unlinkSync(tmpMobile); } catch {}
 try { require("fs").unlinkSync(tmpDesktop); } catch {}
+if (localServerPid) {
+  try { process.kill(localServerPid); } catch {}
+}
 
 if (failCount > 0) process.exit(1);

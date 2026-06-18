@@ -53,10 +53,10 @@ bridge:
 test:
 	npx bun test
 
-# Lighthouse performance audit against production
-PERF_URL ?= https://app.withpolaris.ai
+# Lighthouse performance audit against production and local
 perf:
-	@npx bun run scripts/perf-audit.ts $(PERF_URL)
+	@npx bun run scripts/perf-audit.ts https://app.withpolaris.ai
+	@npx bun run scripts/perf-audit.ts http://localhost:3000
 
 # DataForSEO on-page SEO audit against production
 SEO_URL ?= https://app.withpolaris.ai
