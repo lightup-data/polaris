@@ -15,23 +15,29 @@ import { mkdirSync, writeFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
 
-const url = process.argv[2] ?? "https://app.withpolaris.ai";
-const isLocal = url.startsWith("http://localhost");
+let url = process.argv[2] ?? "https://app.withpolaris.ai";
+const isLocal = url === "local";
 let localServerPid: number | undefined;
 
+// Find a free port by binding to :0 and releasing
+async function freePort(): Promise<number> {
+  const server = Bun.serve({ port: 0, fetch: () => new Response() });
+  const port = server.port;
+  server.stop(true);
+  return port;
+}
+
 if (isLocal) {
-  // Build CSS and start local web server
+  // Build CSS and start local web server on an ephemeral port
   console.log("");
   console.log("  Building CSS and starting local server ...");
   execSync("npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --minify", { stdio: "pipe" });
 
-  // Kill any existing server on the port
-  const port = new URL(url).port || "3000";
-  try { execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { stdio: "pipe" }); } catch {}
+  const port = await freePort();
+  url = `http://localhost:${port}`;
 
-  // Start web server in background
   const proc = Bun.spawn(["bun", "run", "src/web/serve.ts"], {
-    env: { ...process.env, WEB_PORT: port, DATABASE_URL: process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris" },
+    env: { ...process.env, WEB_PORT: String(port), DATABASE_URL: process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris" },
     stdout: "pipe",
     stderr: "pipe",
   });
