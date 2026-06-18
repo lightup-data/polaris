@@ -140,6 +140,15 @@ export function createApp(sql: Sql) {
   // Start hourly signup rollup
   startSignupRollup(sql);
 
+  // --- Static assets ---
+
+  app.get("/styles.css", async (c) => {
+    const file = Bun.file(new URL("./styles/output.css", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "text/css", "Cache-Control": "public, max-age=31536000, immutable" },
+    });
+  });
+
   // --- SEO ---
 
   app.get("/og-image.png", async (c) => {

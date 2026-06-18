@@ -9,5 +9,8 @@ RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY docker/bridge-entrypoint.sh ./docker/
 
+# Build Tailwind CSS
+RUN bunx tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --minify
+
 # Default: API server
 CMD ["bun", "run", "src/service/server.ts"]
