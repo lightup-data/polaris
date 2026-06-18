@@ -121,21 +121,36 @@ Login — both `polaris login --local` and the dashboard — uses Google SSO, so
 
 ### Local Slack app setup (optional)
 
-Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels. Slack has no API to create apps, so this is manual (`scripts/setup-slack-app.sh` walks you through it and **appends** to `.env`, so it won't clobber existing values).
+Slack is optional — without `SLACK_APP_TOKEN`, `make dev` just skips the bridge. Set it up to mirror sessions to Slack channels. Slack has no API to create apps, so this is manual.
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick your dev workspace.
-2. **OAuth & Permissions**: under **Redirect URLs** add `http://localhost:3000/slack/callback` and Save. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From scratch**. Name it "Polaris" and pick a workspace you can install into. (If your workspace requires admin approval to install apps, an admin must approve it — otherwise use a workspace where you're an admin.)
+2. **OAuth & Permissions → Redirect URLs**: add `http://localhost:3000/slack/callback` and click **Save URLs**. Slack accepts `http://localhost` for local dev — just make sure you actually **Save** it. A missing or unsaved redirect URL is the usual cause of `redirect_uri did not match any configured URIs`. Under **Bot Token Scopes**, add: `channels:manage`, `channels:join`, `channels:read`, `chat:write`, `users:read`, `users:read.email`.
 3. **Socket Mode**: toggle **Enable Socket Mode** on, then generate an app-level token (scope `connections:write`). Copy it — this is `SLACK_APP_TOKEN` (starts with `xapp-`).
-4. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. (This is what lets Slack messages reach a session.)
+4. **Event Subscriptions**: toggle **Enable Events** on, and under **Subscribe to bot events** add `message.channels`, then Save. **Required** for Slack messages to reach a session — without it the bridge connects but never receives messages.
 5. **Basic Information**: copy the **Client ID** and **Client Secret**.
-6. Add all three to `.env`:
+6. Add to `.env`:
    ```
    SLACK_CLIENT_ID=<client-id>
    SLACK_CLIENT_SECRET=<client-secret>
    SLACK_APP_TOKEN=xapp-<socket-mode-token>
    ```
-   (`SLACK_REDIRECT_URI` defaults to `http://localhost:3000/slack/callback`.)
-7. Reload: `make clean && make dev`, then click **Connect Slack** on the dashboard to install the bot into your workspace.
+   `SLACK_REDIRECT_URI` is optional — it defaults to `http://localhost:3000/slack/callback`. Only set it if you register a different URL (e.g. an `ngrok`/`cloudflared` tunnel when you need a public HTTPS callback).
+7. `make clean && make dev`, then open the dashboard, log in, and click **Connect Slack → Allow** to install the bot. This stores the bot token on your org.
+
+### Running the Slack bridge locally
+
+The bridge (`src/slack/bridge.ts`) mirrors session activity to Slack and injects Slack replies back into sessions. It's part of `make dev` (`dev: dev-up api web daemon bridge`), but it only starts once an org is **Slack-connected** — so the first time there's a chicken-and-egg:
+
+1. `make dev` — the bridge is **skipped** ("no Slack-connected org found"), because nothing is connected yet.
+2. Complete **Connect Slack** on the dashboard (above) to link your org.
+3. Start the bridge against the now-connected org **without restarting everything**:
+   ```sh
+   make bridge          # → "Starting Slack bridge for org <id>"
+   ```
+
+After that, the Slack connection lives in Postgres and **survives `make clean`** (which keeps the volume), so subsequent `make clean && make dev` runs start the bridge **automatically** — no separate `make bridge` needed. You'd only reconnect + re-run `make bridge` if you drop the DB volume (`docker compose down -v`).
+
+Bridge logs: `/tmp/polaris-bridge.log`.
 
 ### Optional
 
