@@ -50,6 +50,11 @@ Longhouse, SessionForge, CC Replay, Blackcrab, Mantra, Nokos.
 - [x] **GitHub README as the canonical source** — rewrote intro to lead with "Gong for Claude Code sessions", added "What Polaris does" section matching LLM fan-out queries
 - [x] **npm package description** — added description, 10 keywords, homepage, and repo URL to package.json
 
+- [ ] **Comparison matrix into landing page and blog**
+  Draft in `docs/comparison-matrix.html`. Needs review on positioning,
+  competitor accuracy, and feature claims before publishing. Use as
+  a landing page section and as the basis for a comparison blog post.
+
 - [ ] **Comparison / "alternatives" blog post**
   LLMs heavily cite comparison pages. Write a post like "Polaris vs
   AgentReplay vs SessionForge — AI coding session tools compared"
