@@ -11,46 +11,21 @@
 - [x] **sitemap.xml** — lists the landing page
 - [x] **Cloudflare DNS** — domain managed on Cloudflare with MX + SPF records
 - [x] **Email routing** — `*@withpolaris.ai` forwards to `support@lightup.ai`
+- [x] **Self-host Tailwind CSS** — replaced 127KB CDN script with purged 26KB static CSS (5.5KB gzip). Production Lighthouse: score 84→99, FCP 3.4s→1.6s, page weight 175KB→77KB
+- [x] **Lighthouse performance audit** — `make perf` runs mobile+desktop against prod and local, checks Google "good" budgets (score≥90, FCP≤1.8s, LCP≤2.5s), saves JSON to `docs/audits/`
+- [x] **DataForSEO on-page audit** — `make seo` runs 20 SEO checks via DataForSEO API, saves JSON to `docs/audits/`
+- [x] **Heading hierarchy** — verified: 1×h1, 7×h2, 18×h3, proper structure (DataForSEO score 100/100)
+- [x] **Favicon** — SVG favicon (polaris-600 hub icon) with immutable cache, favicon.ico redirects to it
+- [x] **gzip/zstd compression** — enabled in Caddy, page size over the wire: 51KB→9KB
+- [x] **Schema markup (JSON-LD)** — SoftwareApplication structured data with pricing, category, platform, and organization
+- [x] **Google Analytics** — GA4 property G-N00X6NR17E, async gtag.js in layout
+- [x] **404 page** — custom error page with navigation back to home
+- [x] **Page titles** — dashboard ("Dashboard — Polaris"), setup ("Setup — Polaris"), profile ("Polaris - Profile")
+- [x] **Alt text on images** — added to all img tags on the landing page
+
+- [x] **Google Search Console** — property verified via DNS TXT record, sitemap submitted
 
 ## SEO — To Do
-
-### High Priority
-
-- [ ] **Submit sitemap to Google Search Console**
-  Register `app.withpolaris.ai` at https://search.google.com/search-console.
-  Verify ownership via Cloudflare DNS TXT record. Submit sitemap URL.
-
-- [ ] **Add analytics**
-  No traffic data currently. Options:
-  - Plausible (privacy-friendly, lightweight, ~$9/mo)
-  - Google Analytics (free, full-featured, heavier)
-  - Cloudflare Web Analytics (free, built into Cloudflare dashboard)
-  Add the tracking script to the layout.
-
-- [ ] **Self-host Tailwind CSS**
-  Currently loading Tailwind CDN (~300KB) on every page. Purge and self-host
-  to reduce to ~10KB. Improves page speed and Core Web Vitals score.
-  Affects Google ranking.
-
-### Medium Priority
-
-- [ ] **Schema markup (JSON-LD)**
-  Add structured data for SoftwareApplication and Organization.
-  Helps Google show rich results (product name, pricing, etc.).
-  ```json
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "Polaris",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "macOS, Linux",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    }
-  }
-  ```
 
 - [ ] **Blog / content marketing**
   Long-tail SEO needs content pages targeting search terms:
@@ -61,86 +36,113 @@
   - "Gong for AI coding"
   Options: simple `/blog` route with markdown rendering, or a subdomain `blog.withpolaris.ai`.
 
-- [ ] **Heading hierarchy audit**
-  Ensure proper h1 → h2 → h3 structure on the landing page.
-  Only one h1 per page. Check that section headers use correct levels.
+## GEO — To Do
 
-### Low Priority
+Generative Engine Optimization — getting Polaris cited by LLMs (ChatGPT,
+Perplexity, Gemini, Claude) when users ask about AI coding session tools.
 
-- [ ] **Favicon**
-  No favicon set. Add one for browser tabs and bookmarks.
-  Use the Polaris hub icon or a simplified version.
-
-- [ ] **404 page**
-  Custom 404 page with navigation back to the landing page.
-  Currently returns a default error.
-
-- [ ] **Page title for dashboard pages**
-  Dashboard, profile, and other authenticated pages should have
-  descriptive titles (e.g., "Dashboard — Polaris") instead of just "Polaris".
-
-- [ ] **Alt text on images**
-  The Claude Code PNG icon and any other images need alt text for
-  accessibility and SEO.
-
-## Geo — To Do
+**Baseline (2026-06-18):** Polaris is mentioned by 0/3 major LLMs for
+"Gong for AI coding" queries. Competitors cited: AgentReplay, vibe-replay,
+Longhouse, SessionForge, CC Replay, Blackcrab, Mantra, Nokos.
 
 ### High Priority
 
-- [ ] **Enable Cloudflare proxy (orange cloud)**
-  DNS records for `app.withpolaris.ai` and `api.withpolaris.ai` are
-  likely DNS-only (gray cloud). Switching to proxied gives:
-  - Free global CDN (faster loads worldwide)
-  - Automatic caching of static assets
-  - DDoS protection
-  - Web Application Firewall
-  Note: Caddy handles HTTPS on the server. Enabling Cloudflare proxy
-  means Cloudflare terminates TLS and connects to Caddy. Need to set
-  Cloudflare SSL mode to "Full (strict)" and ensure Caddy's certs
-  are valid. Test carefully.
+- [x] **GitHub README as the canonical source** — rewrote intro to lead with "Gong for Claude Code sessions", added "What Polaris does" section matching LLM fan-out queries
+- [x] **npm package description** — added description, 10 keywords, homepage, and repo URL to package.json
+
+- [ ] **Comparison matrix into landing page and blog**
+  Draft in `docs/comparison-matrix.html`. Needs review on positioning,
+  competitor accuracy, and feature claims before publishing. Use as
+  a landing page section and as the basis for a comparison blog post.
+
+- [ ] **Comparison / "alternatives" blog post**
+  LLMs heavily cite comparison pages. Write a post like "Polaris vs
+  AgentReplay vs SessionForge — AI coding session tools compared"
+  that positions Polaris and links to withpolaris.ai. Publish on the
+  blog and cross-post to dev.to / Medium.
+
+- [ ] **Reddit / Hacker News / community presence**
+  LLMs cite Reddit and HN threads. Post in:
+  - r/ClaudeAI (GPT-5.5 already cites a Claude Code replay post there)
+  - r/ChatGPTPro, r/LocalLLaMA, r/ExperiencedDevs
+  - Hacker News Show HN
+  Include link to withpolaris.ai in posts/comments.
 
 ### Medium Priority
 
-- [ ] **Check server location**
-  Verify where the Hetzner VPS is located (likely EU — Finland or Germany).
-  If most users are US-based, consider:
-  - Migrating to a US Hetzner datacenter (Ashburn, VA)
-  - Or relying on Cloudflare proxy to cache static content at edge
+- [ ] **Landing page copy matches LLM fan-out queries**
+  GPT-5.5 searches for: "Claude Code session recording sharing tools",
+  "AI coding session recording tool Claude Code terminal replay",
+  "Claude Code observability session recordings tool". Ensure the
+  landing page H1/H2/description contain these phrases naturally.
 
-- [ ] **Cache headers for static assets**
-  OG image has 24h cache. Landing page HTML has `Cache-Control: no-store`.
-  Consider adding short cache (5-10 min) for the landing page since it
-  changes infrequently. CSS/JS should have long cache with versioned URLs.
+- [ ] **Dev blog with target keyword articles**
+  Write content targeting the exact queries LLMs use:
+  - "How to record Claude Code sessions"
+  - "AI coding session recording for teams"
+  - "Multiplayer AI coding with Slack"
+  Options: `/blog` route with markdown, or subdomain `blog.withpolaris.ai`.
+
+- [ ] **GitHub Discussions / Issues as citable content**
+  LLMs scrape GitHub discussions. Active Q&A in Discussions creates
+  citable pages linking back to Polaris. Seed with FAQs and how-tos.
+
+- [ ] **Product Hunt launch**
+  Creates a high-authority page that LLMs cite. Time it with a
+  feature milestone.
 
 ### Low Priority
 
-- [ ] **Content localization**
-  Not needed yet. English only. Revisit if expanding to non-English markets.
+- [ ] **Structured data for LLM parsing**
+  Add `llms.txt` or `llms-full.txt` to the site root — an emerging
+  convention for telling LLMs about your product in a machine-friendly
+  format. See llmstxt.org.
 
-- [ ] **CDN for the npm package**
-  The CLI is published to npm. npm CDN (unpkg, jsdelivr) handles global
-  distribution automatically. No action needed.
+- [ ] **Monitor GEO position over time**
+  Set up periodic DataForSEO `ai_optimization_llm_response` queries
+  for target keywords across ChatGPT/Perplexity/Gemini. Track whether
+  Polaris starts appearing in responses. Requires DFS subscription
+  for `ai_opt_llm_ment_search`.
+
+## GEO — Competitors
+
+Tools cited by LLMs for "Gong for AI coding" (as of 2026-06-18):
+
+| Tool | Cited by | Positioning |
+|---|---|---|
+| AgentReplay | ChatGPT | "Loom for your AI coding agent" |
+| vibe-replay | ChatGPT | Analytics + replay across tools |
+| Longhouse | ChatGPT | Mission control for AI coding sessions |
+| SessionForge | ChatGPT | Team visibility / RBAC / remote sessions |
+| CC Replay | ChatGPT | Claude Code-specific local replay |
+| Blackcrab | ChatGPT | Claude Code GUI |
+| Multiplayer.app | Perplexity | AI dev workflow capture |
+| Mantra | Gemini | Unified AI session manager |
+| Nokos | Gemini | Cross-tool conversation capture |
+| claude-devtools | Gemini | JSONL transcript viewer |
 
 ## Target Keywords
 
-Primary:
+Primary (match LLM fan-out queries):
 - "AI coding session recording"
-- "Claude Code collaboration"
-- "AI agent observability"
-- "Slack integration for AI coding"
+- "Claude Code session recording"
 - "Gong for AI coding"
+- "Claude Code collaboration"
+- "AI coding session tools"
 
 Secondary:
 - "AI session capture tool"
 - "multiplayer AI coding"
-- "AI coding agent memory"
-- "context graph for AI agents"
+- "Slack integration for AI coding"
+- "AI agent observability"
 - "engineering knowledge capture AI"
 
 ## Useful Links
 
 - Google Search Console: https://search.google.com/search-console
+- Google Analytics: https://analytics.google.com (property 542281886)
 - OG image tester: https://www.opengraph.xyz/
 - Twitter card validator: https://cards-dev.twitter.com/validator
 - PageSpeed Insights: https://pagespeed.web.dev/
 - Cloudflare dashboard: https://dash.cloudflare.com/
+- DataForSEO: https://app.dataforseo.com/

@@ -156,6 +156,24 @@ export function createApp(sql: Sql) {
   // Start hourly signup rollup
   startSignupRollup(sql);
 
+  // --- Static assets ---
+
+  app.get("/styles.css", async (c) => {
+    const file = Bun.file(new URL("./styles/output.css", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "text/css", "Cache-Control": "public, max-age=31536000, immutable" },
+    });
+  });
+
+  app.get("/favicon.svg", async (c) => {
+    const file = Bun.file(new URL("../../favicon.svg", import.meta.url).pathname);
+    return new Response(await file.arrayBuffer(), {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=31536000, immutable" },
+    });
+  });
+
+  app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 301));
+
   // --- SEO ---
 
   app.get("/og-image.png", async (c) => {
@@ -382,9 +400,9 @@ export function createApp(sql: Sql) {
     };
 
     if (hasConnectedSession) {
-      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Polaris");
+      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Dashboard — Polaris");
     }
-    return layout(renderSetupView(ctx, devices), "Polaris");
+    return layout(renderSetupView(ctx, devices), "Setup — Polaris");
   });
 
   // --- Profile ---
@@ -1053,6 +1071,12 @@ export function createApp(sql: Sql) {
     const payload = await verifyToken(token);
     if (!payload) return c.json({ error: "Invalid token" }, 401);
     return c.json(payload);
+  });
+
+  // --- 404 ---
+
+  app.notFound((c) => {
+    return layout(renderErrorView("Page not found.", "Back to home", "/"), "Not Found — Polaris");
   });
 
   return app;

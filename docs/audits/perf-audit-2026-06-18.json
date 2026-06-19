@@ -1,0 +1,22 @@
+{
+  "url": "https://app.withpolaris.ai",
+  "timestamp": "2026-06-18T20:25:07.614Z",
+  "mobile": {
+    "score": 99,
+    "fcp": 1548.719,
+    "lcp": 1548.719,
+    "tbt": 0,
+    "cls": 0,
+    "si": 2085.526104013538,
+    "weight": 78524
+  },
+  "desktop": {
+    "score": 100,
+    "fcp": 500.655,
+    "lcp": 500.655,
+    "tbt": 0,
+    "cls": 0,
+    "si": 843.4371999583243,
+    "weight": 78533
+  }
+}

@@ -1,0 +1,366 @@
+<!-- ============================================================
+     POLARIS - FEATURE COMPARISON MATRIX
+     Self-contained. No external dependencies, no JS required.
+     All styles are namespaced under .plrs-compare so they
+     won't collide with the rest of the site.
+     Paste this whole block wherever you want it to appear.
+     To recolor, edit the CSS variables in the :root-like block
+     at the top of <style> (under .plrs-compare).
+     ============================================================ -->
+<section class="plrs-compare" aria-labelledby="plrs-compare-title">
+  <style>
+    .plrs-compare{
+      /* --- theme tokens: edit these to match the site exactly --- */
+      --plrs-ink:#0a0e1a;          /* section background (deep night) */
+      --plrs-surface:#111726;      /* table surface */
+      --plrs-surface-2:#0e1422;    /* zebra row */
+      --plrs-line:#222c44;         /* hairlines */
+      --plrs-text:#e8edf7;         /* primary text */
+      --plrs-muted:#8794ad;        /* secondary text / "no" cells */
+      --plrs-star:#7cc4ff;         /* the accent - Polaris blue */
+      --plrs-star-soft:rgba(124,196,255,.14);
+      --plrs-radius:16px;
+
+      box-sizing:border-box;
+      background:
+        radial-gradient(1100px 380px at 78% -8%, rgba(124,196,255,.10), transparent 60%),
+        var(--plrs-ink);
+      color:var(--plrs-text);
+      font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      font-feature-settings:'tnum' 1,'cv05' 1;
+      padding:clamp(40px,6vw,84px) clamp(18px,5vw,48px);
+      -webkit-font-smoothing:antialiased;
+    }
+    .plrs-compare *{box-sizing:border-box}
+
+    .plrs-compare .plrs-head{max-width:760px;margin:0 0 clamp(24px,4vw,40px)}
+    .plrs-compare .plrs-eyebrow{
+      display:inline-flex;align-items:center;gap:8px;
+      font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+      color:var(--plrs-star);font-weight:600;margin:0 0 16px;
+    }
+    .plrs-compare .plrs-eyebrow::before{
+      content:"";width:6px;height:6px;border-radius:50%;
+      background:var(--plrs-star);box-shadow:0 0 12px 2px var(--plrs-star);
+    }
+    .plrs-compare h2{
+      font-size:clamp(26px,4.4vw,42px);line-height:1.05;letter-spacing:-.02em;
+      font-weight:680;margin:0 0 14px;
+    }
+    .plrs-compare h2 em{font-style:normal;color:var(--plrs-star)}
+    .plrs-compare .plrs-sub{
+      font-size:clamp(15px,1.6vw,17px);line-height:1.5;color:var(--plrs-muted);margin:0;max-width:60ch;
+    }
+
+    /* scroll wrapper for small screens */
+    .plrs-compare .plrs-scroll{
+      overflow-x:auto;-webkit-overflow-scrolling:touch;
+      border:1px solid var(--plrs-line);border-radius:var(--plrs-radius);
+      background:var(--plrs-surface);
+    }
+    .plrs-compare table{
+      width:100%;border-collapse:separate;border-spacing:0;
+      min-width:1020px;font-size:14.5px;
+    }
+    .plrs-compare thead th{
+      position:sticky;top:0;z-index:3;
+      background:var(--plrs-surface);
+      vertical-align:bottom;text-align:center;
+      padding:22px 14px 18px;font-weight:600;
+      border-bottom:1px solid var(--plrs-line);
+      white-space:nowrap;
+    }
+    .plrs-compare thead th .plrs-co-name{font-size:14px;color:var(--plrs-muted);font-weight:600}
+    .plrs-compare thead th .plrs-co-tag{display:block;font-size:11.5px;color:var(--plrs-muted);opacity:.72;font-weight:500;margin-top:4px;letter-spacing:.01em}
+
+    /* feature label column - sticky on horizontal scroll */
+    .plrs-compare th.plrs-rowhead,
+    .plrs-compare td.plrs-rowhead{
+      position:sticky;left:0;z-index:2;
+      text-align:left;font-weight:500;color:var(--plrs-text);
+      background:var(--plrs-surface);
+      min-width:240px;width:24%;
+      padding:16px 20px;border-bottom:1px solid var(--plrs-line);
+    }
+    .plrs-compare thead th.plrs-rowhead{z-index:4;color:var(--plrs-muted);font-weight:600}
+    .plrs-compare tbody tr:nth-child(even) td,
+    .plrs-compare tbody tr:nth-child(even) td.plrs-rowhead{background:var(--plrs-surface-2)}
+
+    .plrs-compare tbody td{
+      text-align:center;padding:16px 14px;
+      border-bottom:1px solid var(--plrs-line);color:var(--plrs-muted);
+    }
+    .plrs-compare tbody tr:last-child td{border-bottom:0}
+
+    /* section divider rows */
+    .plrs-compare .plrs-section-row td{
+      padding:12px 20px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+      font-weight:700;color:var(--plrs-muted);opacity:.7;
+      border-bottom:1px solid var(--plrs-line);
+      background:var(--plrs-ink)!important;
+    }
+
+    /* the Polaris column - the fixed point everything is measured against */
+    .plrs-compare .plrs-col-polaris{
+      background:var(--plrs-star-soft)!important;
+      border-left:1px solid rgba(124,196,255,.45);
+      border-right:1px solid rgba(124,196,255,.45);
+      color:var(--plrs-text);
+    }
+    .plrs-compare thead th.plrs-col-polaris{
+      background:linear-gradient(180deg,rgba(124,196,255,.22),var(--plrs-star-soft))!important;
+      border-top:1px solid rgba(124,196,255,.55);
+      border-top-left-radius:12px;border-top-right-radius:12px;
+    }
+    .plrs-compare thead th.plrs-col-polaris .plrs-co-name{
+      color:var(--plrs-text);font-weight:720;font-size:16px;
+      display:inline-flex;align-items:center;gap:7px;
+    }
+    .plrs-compare thead th.plrs-col-polaris .plrs-co-tag{color:var(--plrs-star);opacity:.95}
+
+    /* yes / no / partial marks */
+    .plrs-compare .yes{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:24px;height:24px;border-radius:50%;
+      background:rgba(124,196,255,.16);
+    }
+    .plrs-compare .yes svg{width:13px;height:13px;stroke:var(--plrs-star);stroke-width:2.6;fill:none}
+    .plrs-compare .plrs-col-polaris .yes{background:var(--plrs-star);box-shadow:0 0 14px rgba(124,196,255,.5)}
+    .plrs-compare .plrs-col-polaris .yes svg{stroke:#06101f}
+    .plrs-compare .no{display:inline-block;width:14px;height:2px;border-radius:2px;background:var(--plrs-line)}
+    .plrs-compare .partial{font-size:12px;color:var(--plrs-muted);font-weight:500}
+    .plrs-compare .plrs-col-polaris .partial{color:var(--plrs-star)}
+    .plrs-compare .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+    .plrs-compare .plrs-foot{
+      margin:22px 2px 0;font-size:13px;line-height:1.55;color:var(--plrs-muted);max-width:74ch;
+    }
+    .plrs-compare .plrs-foot strong{color:var(--plrs-text);font-weight:600}
+
+    @media (max-width:560px){
+      .plrs-compare th.plrs-rowhead,.plrs-compare td.plrs-rowhead{min-width:180px;width:auto;padding:14px 14px}
+      .plrs-compare table{font-size:13px}
+    }
+  </style>
+
+  <div class="plrs-head">
+    <p class="plrs-eyebrow">How Polaris compares</p>
+    <h2 id="plrs-compare-title">Every tool records. <em>Polaris connects your team.</em></h2>
+    <p class="plrs-sub">Most AI coding session tools are built for one developer replaying their own work. Polaris is the live, shared layer your whole team works in &mdash; and the memory that outlasts the session.</p>
+  </div>
+
+  <div class="plrs-scroll" role="region" aria-label="Feature comparison: Polaris versus other AI coding session tools" tabindex="0">
+    <table>
+      <thead>
+        <tr>
+          <th class="plrs-rowhead" scope="col">Capability</th>
+          <th class="plrs-col-polaris" scope="col">
+            <span class="plrs-co-name">Polaris</span>
+            <span class="plrs-co-tag">Live team layer</span>
+          </th>
+          <th scope="col"><span class="plrs-co-name">AgentReplay</span><span class="plrs-co-tag">Shareable replays</span></th>
+          <th scope="col"><span class="plrs-co-name">SessionForge</span><span class="plrs-co-tag">Remote sessions</span></th>
+          <th scope="col"><span class="plrs-co-name">vibe-replay</span><span class="plrs-co-tag">Replay + analytics</span></th>
+          <th scope="col"><span class="plrs-co-name">Longhouse</span><span class="plrs-co-tag">Mission control</span></th>
+          <th scope="col"><span class="plrs-co-name">Mantra</span><span class="plrs-co-tag">Session manager</span></th>
+          <th scope="col"><span class="plrs-co-name">claude-devtools</span><span class="plrs-co-tag">Session inspector</span></th>
+          <th scope="col"><span class="plrs-co-name">SessionBase</span><span class="plrs-co-tag">Save &amp; share</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- ── SECTION: TABLE STAKES ── -->
+        <tr class="plrs-section-row"><td colspan="9">Record &amp; replay</td></tr>
+
+        <tr>
+          <td class="plrs-rowhead" scope="row">Captures prompts, responses &amp; tool calls</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Replay &amp; audit after the fact</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Shareable session links</td>
+          <td class="plrs-col-polaris"><span class="partial">via Slack</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Multi-tool (Claude Code + Cursor + more)</td>
+          <td class="plrs-col-polaris"><span class="partial">Claude Code</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="partial">Claude Code</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="partial">Claude Code</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="partial">Claude Code</span></td>
+          <td><span class="partial">Claude Code</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Analytics &amp; cost tracking</td>
+          <td class="plrs-col-polaris"><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="partial">Metrics</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Cross-session search</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+
+        <!-- ── SECTION: TEAM ── -->
+        <tr class="plrs-section-row"><td colspan="9">Team collaboration</td></tr>
+
+        <tr>
+          <td class="plrs-rowhead" scope="row">Built for teams, not just solo</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Team dashboard &amp; RBAC</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Attach session trace to a PR</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+        </tr>
+
+        <!-- ── SECTION: ONLY POLARIS ── -->
+        <tr class="plrs-section-row"><td colspan="9">Live multiplayer</td></tr>
+
+        <tr>
+          <td class="plrs-rowhead" scope="row">Real-time streaming to your team</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="partial">Terminal</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Slack-native &mdash; no new app to learn</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Pull a teammate into a live session</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Redirect the agent mid-session</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Cross-agent shared context</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Team-wide searchable memory</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+        <tr>
+          <td class="plrs-rowhead" scope="row">Open source</td>
+          <td class="plrs-col-polaris"><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+          <td><span class="yes"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span><span class="sr-only">Yes</span></td>
+          <td><span class="no" aria-hidden="true"></span><span class="sr-only">No</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="plrs-foot"><strong>How to read this:</strong> every tool in this table is good at recording and replaying sessions. Where they differ is what happens <em>during</em> the session and <em>across</em> the team. Polaris streams every session to Slack as it happens, lets anyone step in to advise or redirect the agent, and keeps the full history as searchable team memory. We don't do analytics or cost tracking yet &mdash; use vibe-replay or Mantra for that today.</p>
+</section>
+<!-- ============================================================
+     END POLARIS COMPARISON MATRIX
+     ============================================================ -->

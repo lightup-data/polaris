@@ -711,25 +711,32 @@ export async function startServer(opts: {
         const users = await listUsers(sql, orgId);
         const org = await getOrgFn(sql, orgId);
 
-        // Resolve Slack user info if bot token available
+        // Resolve Slack user info if bot token available (paginate through all members)
         let slackMembers: Array<{ id: string; name: string; display_name: string; email: string; username: string }> = [];
         if (org?.slack_bot_token) {
           try {
-            const slackRes = await fetch("https://slack.com/api/users.list?limit=200", {
-              headers: { Authorization: `Bearer ${org.slack_bot_token}` },
-            });
-            if (slackRes.ok) {
-              const slackData = (await slackRes.json()) as { members?: Array<{ id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean }> };
-              slackMembers = (slackData.members ?? [])
-                .filter((m) => !m.deleted && !m.is_bot)
-                .map((m) => ({
+            type SlackMember = { id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean };
+            type SlackResponse = { ok?: boolean; members?: SlackMember[]; response_metadata?: { next_cursor?: string } };
+            let cursor = "";
+            do {
+              const url = `https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${cursor}` : ""}`;
+              const slackRes = await fetch(url, {
+                headers: { Authorization: `Bearer ${org.slack_bot_token}` },
+              });
+              if (!slackRes.ok) break;
+              const slackData = (await slackRes.json()) as SlackResponse;
+              for (const m of slackData.members ?? []) {
+                if (m.deleted || m.is_bot) continue;
+                slackMembers.push({
                   id: m.id,
                   name: m.real_name ?? "",
                   display_name: m.profile?.display_name ?? "",
                   email: m.profile?.email ?? "",
                   username: m.name ?? "",
-                }));
-            }
+                });
+              }
+              cursor = slackData.response_metadata?.next_cursor ?? "";
+            } while (cursor);
           } catch { /* Slack API unavailable */ }
         }
 

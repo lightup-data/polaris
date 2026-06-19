@@ -1,12 +1,24 @@
-# Polaris
+# Polaris — It's like Gong for Claude Code sessions
 
-Multiplayer collaboration for AI coding agents. Connects coding sessions (Claude Code, Cursor, etc.) to team communication channels (Slack, WhatsApp) so teammates can observe, advise, and coordinate in real time.
+Record, stream, and collaborate on AI coding sessions in real time. Polaris captures every prompt, response, and tool call from Claude Code and streams them to Slack so your team can observe, advise, and learn from each other's sessions.
+
+**AI coding session recording for teams.** Instead of AI sessions disappearing when the terminal closes, Polaris captures the full session — what was asked, what the agent did, which files it touched, and what tools it called. Every session is searchable, shareable, and streamable to Slack.
+
+## What Polaris does
+
+- **Record Claude Code sessions** — hooks capture prompts, responses, and tool calls automatically
+- **Stream to Slack in real time** — every session gets a dedicated Slack channel with live updates
+- **Multiplayer AI coding** — teammates can watch sessions, send advice from Slack, and redirect agents mid-session
+- **Session history and search** — browse past sessions, search across projects, attach context to PRs
+- **Team dashboard** — see who's working on what, active sessions, prompt activity across the org
+
+Works with Claude Code today. Designed to support Cursor, Codex, and other AI coding tools.
 
 ## Architecture
 
-- **API** (`src/service/server.ts`) — Cloud service on port 4321. REST + WebSocket for projects, sessions, events.
-- **Web** (`src/web/`) — Dashboard on port 3000. Google SSO, Slack OAuth, real-time SSE updates.
-- **Daemon** (`src/daemon/daemon.ts`) — Local daemon on port 4322. Routes hook events from coding agents to the API.
+- **API** (`src/service/server.ts`) — Cloud service. REST + WebSocket for projects, sessions, events.
+- **Web** (`src/web/`) — Dashboard and landing page. Google SSO, Slack OAuth, real-time SSE updates.
+- **Daemon** (`src/daemon/daemon.ts`) — Local daemon. Routes hook events from coding agents to the API.
 - **MCP Client** (`src/client/client.ts`) — MCP channel server for Claude Code. Provides `/polaris` commands.
 - **Slack Bridge** (`src/slack/bridge.ts`) — Bidirectional bridge between project event streams and Slack channels.
 - **Hooks** (`hooks/`) — Shell scripts that capture coding agent interactions (prompts, responses, tool calls).
@@ -201,6 +213,28 @@ tests/         Test suite (bun test)
 - [ ] Auto-update local skill/hooks — locally installed skill and hook files go stale when the repo changes. `polaris install` fixes it but there's no staleness detection or auto-update mechanism
 - [ ] Update available indicator — daemon periodically checks npm for newer version, caches the result. Status line shows "update available" when stale. `polaris update` command installs the latest version and rewrites skill/hooks.
 - [ ] Slack channel name collision — if a channel name was previously deleted, Slack reserves it. Bridge should handle `name_taken` by trying a prefix/suffix (e.g., `p-project-name`)
+
+## Testing
+
+```sh
+# Unit tests (uses polaris_test database)
+make test
+
+# Lighthouse performance audit against production
+# Runs mobile + desktop, checks budgets (score >= 90, FCP <= 1.8s, LCP <= 2.5s)
+# Saves results to docs/audits/perf-audit-YYYY-MM-DD.json
+make perf
+
+# DataForSEO on-page SEO audit against production
+# Checks meta tags, headings, social tags, content rate, technical SEO
+# Saves results to docs/audits/seo-audit-YYYY-MM-DD.json
+# Requires DataForSEO API credentials (see scripts/seo-audit.ts)
+make seo
+```
+
+All three targets exit non-zero on failure. `make perf` and `make seo` run against the live production site (`app.withpolaris.ai`) by default. Override with `make perf PERF_URL=http://localhost:3000` or `make seo SEO_URL=http://localhost:3000`.
+
+Audit results are saved as JSON in `docs/audits/` for historical tracking.
 
 ## Development
 

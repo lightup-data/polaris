@@ -1,6 +1,24 @@
 {
   "name": "@lightupai/polaris",
   "version": "0.0.5",
+  "description": "Record and stream Claude Code sessions to Slack. Like Gong for AI coding — capture every prompt, response, and tool call. Multiplayer collaboration across AI coding agents.",
+  "keywords": [
+    "claude-code",
+    "ai-coding",
+    "session-recording",
+    "slack",
+    "gong",
+    "observability",
+    "multiplayer",
+    "collaboration",
+    "mcp",
+    "claude"
+  ],
+  "homepage": "https://app.withpolaris.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lightup-data/polaris"
+  },
   "type": "module",
   "bin": {
     "polaris": "bin/polaris",
@@ -20,6 +38,8 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@tailwindcss/cli": "^4.3.1",
+    "@types/bun": "latest",
+    "tailwindcss": "^4.3.1"
   }
 }

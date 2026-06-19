@@ -12,6 +12,7 @@ ssh "$USER@$HOST" "
   git pull --ff-only &&
   docker compose -f docker-compose.prod.yml build &&
   docker compose -f docker-compose.prod.yml up -d --remove-orphans &&
+  docker compose -f docker-compose.prod.yml restart caddy &&
   docker compose -f docker-compose.prod.yml ps
 "
 

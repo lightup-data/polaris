@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down api web daemon bridge test clean prod
+.PHONY: dev dev-up dev-down api web daemon bridge test perf seo css css-watch clean prod
 
 # Load .env if it exists
 ifneq (,$(wildcard .env))
@@ -6,8 +6,15 @@ ifneq (,$(wildcard .env))
   export
 endif
 
+# Build purged Tailwind CSS
+css:
+	@npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --minify
+
+css-watch:
+	@npx bun x tailwindcss -i src/web/styles/input.css -o src/web/styles/output.css --watch
+
 # Start everything for local development
-dev: dev-up api web daemon bridge
+dev: dev-up css api web daemon bridge
 
 # Postgres
 dev-up:
@@ -61,6 +68,18 @@ prod:
 # Run tests
 test:
 	npx bun test
+
+# Lighthouse performance audit against production and local
+perf:
+	@prod_failed=0; \
+	npx bun run scripts/perf-audit.ts https://app.withpolaris.ai || prod_failed=1; \
+	npx bun run scripts/perf-audit.ts local || exit 1; \
+	if [ "$$prod_failed" = "1" ]; then exit 1; fi
+
+# DataForSEO on-page SEO audit against production
+SEO_URL ?= https://app.withpolaris.ai
+seo:
+	@npx bun run scripts/seo-audit.ts $(SEO_URL)
 
 # Stop all background processes, tunnels, and Postgres
 clean:
