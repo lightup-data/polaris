@@ -120,11 +120,9 @@ function broadcastSse(event: PolarisEvent) {
 }
 
 // --- Realtime backbone: LISTEN/NOTIFY de-dup ---
-//
-// pushEvent NOTIFYs 'polaris_event' with the event id after every insert. Each server
-// process opens one dedicated LISTEN connection (see startServer) and broadcasts events
-// it did not already broadcast inline. Module-level (like the subscriber maps above) so
-// multiple in-process servers (tests) share one de-dup horizon and never double-send.
+// Events broadcast inline by a POST handler record their id here so the echoed NOTIFY
+// (delivered via the LISTEN connection) is skipped. Module-level so in-process test
+// servers share one de-dup horizon.
 const recentlyBroadcast = new Map<string, number>(); // event id -> recorded-at ms
 const RECENTLY_BROADCAST_TTL_MS = 30_000;
 
@@ -240,11 +238,9 @@ export async function startServer(opts: {
     // Already exists
   }
 
-  // Realtime backbone: one dedicated LISTEN connection per server process. API-origin
-  // events broadcast inline in the POST handlers (which record their ids in
-  // recentlyBroadcast, so the echoed NOTIFY is skipped here); bridge-origin events
-  // (Slack injects etc.) never broadcast inline, so this path is what delivers them to
-  // live WS/SSE subscribers — and what enables multi-replica fan-out.
+  // One dedicated LISTEN connection per process. Delivers events not already broadcast
+  // inline (e.g. bridge-origin Slack injects) to WS/SSE subscribers, and enables
+  // multi-replica fan-out.
   await sql.listen("polaris_event", (id) => {
     if (!id || recentlyBroadcast.has(id)) return;
     markBroadcast(id);
@@ -312,10 +308,9 @@ export async function startServer(opts: {
       }
 
       // --- Per-project ACL ---
-      // Members-only projects 403 for non-member participants on all project-scoped
-      // endpoints. Anonymous callers (participantId null: dev/tests) are always allowed,
-      // as are the ACL-management endpoints themselves (visibility/members), so a user
-      // who flips a project to 'members' can still add members afterwards.
+      // 403 non-members on project-scoped endpoints. Anonymous callers (null participant,
+      // dev/tests) and the ACL-admin endpoints (visibility/members) are exempt — so you
+      // can still add members after flipping a project to 'members'.
       const aclMatch = pathname.match(/^\/projects\/([^/]+)(\/.*)?$/);
       if (aclMatch && participantId) {
         const aclRest = aclMatch[2] ?? "";
@@ -501,8 +496,7 @@ export async function startServer(opts: {
           sender: parsed.data.sender,
           payload: parsed.data.payload,
         };
-        // Record before pushEvent so the echoed NOTIFY from our own LISTEN connection
-        // is de-duped; this handler broadcasts inline below.
+        // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
         markBroadcast(event.id);
         await pushEvent(sql, orgId, event);
         broadcastEvent(event);
@@ -579,8 +573,7 @@ export async function startServer(opts: {
             target: params.sess,
           },
         };
-        // Record before pushEvent so the echoed NOTIFY from our own LISTEN connection
-        // is de-duped; this handler broadcasts inline below.
+        // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
         markBroadcast(event.id);
         await pushEvent(sql, orgId, event);
         broadcastEvent(event);

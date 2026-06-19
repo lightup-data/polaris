@@ -43,11 +43,8 @@ export async function createDb(connectionString?: string): Promise<Sql> {
 const SCHEMA_LOCK_KEY = 0x504c5253; // "PLRS"
 
 export async function ensureSchema(sql: Sql): Promise<void> {
-  // API and web both call this on startup. Serialize concurrent callers with a
-  // session-level advisory lock held on a reserved (dedicated) connection, so
-  // they don't race on `CREATE TABLE IF NOT EXISTS` — which isn't concurrency
-  // safe: two connections can both pass the existence check and then collide on
-  // the underlying pg_type creation (issue #117).
+  // Serialize concurrent callers (api + web start together) with an advisory lock on a
+  // reserved connection — concurrent CREATE TABLE IF NOT EXISTS races otherwise (issue #117).
   const lock = await sql.reserve();
   try {
     await lock`SELECT pg_advisory_lock(${SCHEMA_LOCK_KEY}::bigint)`;
@@ -294,8 +291,7 @@ export async function getRecentSignups(sql: Sql, since: Date, limit = 10): Promi
 
 // --- Projects (org-scoped) ---
 
-// SELECT * / RETURNING * (not an explicit list) so project reads tolerate tables created
-// before the visibility migration (e.g. tests/helpers.ts resetTestData); visibility maps to 'org'.
+// SELECT *  (not an explicit column list) so reads tolerate pre-visibility-migration rows.
 function rowToProject(row: postgres.Row): Project {
   return {
     id: row.id,
@@ -410,8 +406,7 @@ export async function createSession(
   name: string,
   driver: ParticipantId | null
 ): Promise<Session> {
-  // RETURNING * (not an explicit list) so this tolerates session tables created
-  // before the label migration (e.g. tests/helpers.ts resetTestData); label maps to null.
+  // RETURNING * so this tolerates pre-label-migration session tables (label -> null).
   const [row] = await sql`
     INSERT INTO sessions (name, project_id, org_id, driver)
     SELECT ${name}, p.id, ${orgId}, ${driver}
@@ -429,8 +424,7 @@ export async function createSession(
 }
 
 export async function getSession(sql: Sql, orgId: string, project: string, name: string): Promise<Session | null> {
-  // s.* (not explicit s.label) so this tolerates session tables created
-  // before the label migration (e.g. tests/helpers.ts resetTestData); label maps to null.
+  // s.* so this tolerates pre-label-migration session tables (label -> null).
   const [row] = await sql`
     SELECT s.*, p.name as project
     FROM sessions s
@@ -548,9 +542,8 @@ function rowToEvent(row: postgres.Row): PolarisEvent {
   };
 }
 
-// Lookup for LISTEN('polaris_event') subscribers. The returned event additionally carries
-// org_id (a structural superset of PolarisEvent) so multi-org consumers (e.g. the Slack
-// bridge) can route to the right org without a second query.
+// Lookup for LISTEN('polaris_event') subscribers. Returns org_id too so multi-org
+// consumers (e.g. the Slack bridge) can route without a second query.
 export async function getEventById(sql: Sql, id: string): Promise<(PolarisEvent & { org_id: string }) | null> {
   // NOTIFY payloads are untyped strings; a non-UUID would fail the uuid cast, so treat it as not-found.
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
@@ -628,18 +621,16 @@ export async function getSessionEventsPage(
   return { events, nextCursor };
 }
 
-// Query-time full-text search using the explicit two-arg ('english'::regconfig) form,
-// which is immutable-safe. No index for the alpha (small data).
-// FOLLOW-UP: trigger-maintained indexed search_tsv before scale
+// Query-time full-text search (explicit 'english'::regconfig form, immutable-safe; no index yet).
+// FOLLOW-UP: trigger-maintained indexed search_tsv before scale.
 export async function searchEvents(
   sql: Sql,
   orgId: string,
   opts: { q: string; project?: string; session?: string; sender?: string; source?: string; tag?: string; limit?: number; participantId?: string | null }
 ): Promise<{ results: Array<{ event: PolarisEvent; snippet: string }> }> {
   const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 50)), 100);
-  // Restrict to projects the caller may access (default-open: 'org' visibility,
-  // or a member of a 'members'-restricted project). Without this, a search with
-  // no project filter would leak events from restricted projects.
+  // Restrict to projects the caller may access — without this an unfiltered search
+  // would leak 'members'-restricted projects. (no participant -> default-open)
   const aclFilter = opts.participantId
     ? sql`AND (COALESCE(p.visibility, 'org') <> 'members' OR EXISTS (
         SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.participant_id = ${opts.participantId}
@@ -744,9 +735,8 @@ export async function listSessionAnnotations(sql: Sql, orgId: string, project: s
 
 export async function listDecisions(sql: Sql, orgId: string, opts?: { project?: string; limit?: number; participantId?: string | null }): Promise<Annotation[]> {
   const limit = Math.min(Math.max(1, Math.floor(opts?.limit ?? 100)), 500);
-  // Exclude decisions from 'members'-restricted projects the caller isn't in.
-  // Default-open: a decision whose project has no row, is 'org' visibility, or
-  // where the caller is a member, is kept (matches userCanAccessProject).
+  // Exclude decisions from 'members'-restricted projects the caller isn't in
+  // (default-open: missing project row / 'org' visibility / member -> kept).
   const aclFilter = opts?.participantId
     ? sql`AND NOT EXISTS (
         SELECT 1 FROM projects p

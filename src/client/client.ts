@@ -9,19 +9,12 @@ import {
 
 const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4322";
 
-// Shared local secret for daemon auth (installed by `polaris install` and
-// passed via the MCP registration env). When present, every daemon request
-// carries it as x-polaris-daemon-secret; when absent, the daemon runs
-// unauthenticated (back-compat / tests).
+// Shared local daemon-auth secret (installed by `polaris install`); sent as
+// x-polaris-daemon-secret when present, else the daemon runs unauthenticated.
 const DAEMON_SECRET = process.env.POLARIS_DAEMON_SECRET || null;
 
-// Stable session ID for this MCP server instance. Preference order:
-// 1. POLARIS_CC_SESSION_ID — explicit override (wired by the CLI/hooks)
-// 2. CLAUDE_SESSION_ID / CLAUDE_CODE_SESSION_ID — read opportunistically in
-//    case Claude Code exposes its session id to MCP server processes (it
-//    does not guarantee this; when absent we keep the generated-UUID
-//    behavior and rely on the daemon's /events alias routing)
-// 3. A generated UUID (the daemon learns the hook session_id as an alias)
+// Stable session ID for this MCP instance: explicit override, else Claude Code's
+// session id if it exposes one, else a generated UUID (daemon learns the hook id as an alias).
 const CC_SESSION_ID =
   process.env.POLARIS_CC_SESSION_ID ??
   process.env.CLAUDE_SESSION_ID ??
@@ -157,16 +150,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// --- claude/channel push adapter (SCAFFOLD — disabled by default) ---
-//
-// When POLARIS_ENABLE_CHANNEL=1, an inject can be pushed to Claude Code in
-// real time as an experimental `claude/channel` MCP notification instead of
-// waiting for the next UserPromptSubmit hook. Channel push requires Claude
-// Code to allowlist the channel (or be launched with
-// --dangerously-load-development-channels), so it is OFF by default. The
-// ungated injectQueue/UserPromptSubmit-hook path in the daemon remains the
-// default and primary delivery mechanism either way; this is best-effort
-// and returns false when disabled or on any failure.
+// --- claude/channel push adapter (SCAFFOLD — off by default) ---
+// With POLARIS_ENABLE_CHANNEL=1, push an inject to Claude Code in real time via an
+// experimental claude/channel notification instead of waiting for the next
+// UserPromptSubmit hook. Off by default (needs Claude Code to allowlist the channel);
+// the hook path stays the primary delivery mechanism. Best-effort -> returns false.
 export async function deliverInjectViaChannel(
   content: string,
   meta: Record<string, unknown> = {}
