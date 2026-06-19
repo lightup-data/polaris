@@ -9,21 +9,36 @@ import {
 
 const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4322";
 
-// Generate a stable session ID for this MCP server instance
-const CC_SESSION_ID = process.env.POLARIS_CC_SESSION_ID ?? crypto.randomUUID();
+// Shared local daemon-auth secret (installed by `polaris install`); sent as
+// x-polaris-daemon-secret when present, else the daemon runs unauthenticated.
+const DAEMON_SECRET = process.env.POLARIS_DAEMON_SECRET || null;
+
+// Stable session ID for this MCP instance: explicit override, else Claude Code's
+// session id if it exposes one, else a generated UUID (daemon learns the hook id as an alias).
+const CC_SESSION_ID =
+  process.env.POLARIS_CC_SESSION_ID ??
+  process.env.CLAUDE_SESSION_ID ??
+  process.env.CLAUDE_CODE_SESSION_ID ??
+  crypto.randomUUID();
 
 // --- Daemon communication ---
+
+function daemonHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (DAEMON_SECRET) headers["x-polaris-daemon-secret"] = DAEMON_SECRET;
+  return headers;
+}
 
 async function daemonPost(path: string, body: unknown): Promise<Response> {
   return fetch(`${DAEMON_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: daemonHeaders(),
     body: JSON.stringify(body),
   });
 }
 
 async function daemonGet(path: string): Promise<Response> {
-  return fetch(`${DAEMON_URL}${path}`);
+  return fetch(`${DAEMON_URL}${path}`, { headers: daemonHeaders() });
 }
 
 // --- Current connection state ---
@@ -38,6 +53,9 @@ const mcp = new Server(
   { name: "polaris", version: "0.0.1" },
   {
     capabilities: {
+      // claude/channel push delivery is off by default — injects reach the
+      // agent via the UserPromptSubmit hook (see daemon injectQueues). See
+      // deliverInjectViaChannel below for the opt-in push scaffold.
       experimental: { "claude/channel": {} },
       tools: {},
     },
@@ -131,6 +149,27 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
   ],
 }));
+
+// --- claude/channel push adapter (SCAFFOLD — off by default) ---
+// With POLARIS_ENABLE_CHANNEL=1, push an inject to Claude Code in real time via an
+// experimental claude/channel notification instead of waiting for the next
+// UserPromptSubmit hook. Off by default (needs Claude Code to allowlist the channel);
+// the hook path stays the primary delivery mechanism. Best-effort -> returns false.
+export async function deliverInjectViaChannel(
+  content: string,
+  meta: Record<string, unknown> = {}
+): Promise<boolean> {
+  if (process.env.POLARIS_ENABLE_CHANNEL !== "1") return false;
+  try {
+    await mcp.notification({
+      method: "notifications/claude/channel",
+      params: { content, meta },
+    });
+    return true;
+  } catch {
+    return false; // hook-based delivery still applies
+  }
+}
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
@@ -325,13 +364,7 @@ async function main() {
     console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
   }
 
-  // Poll daemon for advisor messages and inject into MCP session
-  setInterval(async () => {
-    if (!currentProject) return;
-    // The daemon's cloud WS forwards inject events to the mcpCallbacks map,
-    // but since we're in a separate process, we use HTTP polling as a fallback.
-    // In production, this would use IPC (Unix socket or named pipe).
-  }, 5000);
+  // inject delivery is handled via the UserPromptSubmit hook (see daemon injectQueues); claude/channel push deferred
 
   const transport = new StdioServerTransport();
   await mcp.connect(transport);

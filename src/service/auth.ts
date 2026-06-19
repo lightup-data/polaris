@@ -1,8 +1,17 @@
 import * as jose from "jose";
 
-const JWT_SECRET = new TextEncoder().encode(process.env.POLARIS_JWT_SECRET ?? "polaris-dev-secret-change-in-prod");
+const DEV_DEFAULT_SECRET = "polaris-dev-secret-change-in-prod";
+const JWT_SECRET = new TextEncoder().encode(process.env.POLARIS_JWT_SECRET ?? DEV_DEFAULT_SECRET);
 const JWT_ISSUER = "polaris";
 const JWT_EXPIRY = "30d";
+
+// Refuse to run in production with a missing or default JWT secret.
+export function assertSecretConfigured(): void {
+  const secret = process.env.POLARIS_JWT_SECRET;
+  if (process.env.NODE_ENV === "production" && (!secret || secret === DEV_DEFAULT_SECRET)) {
+    throw new Error("POLARIS_JWT_SECRET must be set to a non-default value in production");
+  }
+}
 
 export interface TokenPayload {
   sub: string; // user ID

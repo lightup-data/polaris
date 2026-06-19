@@ -1,0 +1,77 @@
+name: CD
+
+# Continuous deployment: on every push (merge) to master, SSH to the prod
+# host and run deploy.sh (git pull + docker compose build/up).
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST     — hostname or IP of the prod box (e.g. polaris.lightup.ai)
+#   DEPLOY_SSH_KEY  — private SSH key (OpenSSH format) for the deploy user
+#
+# Optional repository secrets (deploy.sh has sensible defaults):
+#   DEPLOY_USER     — SSH user on the prod box (default: deploy)
+#   DEPLOY_DIR      — checkout directory on the prod box (default: /opt/polaris)
+#
+# If DEPLOY_HOST / DEPLOY_SSH_KEY are not configured, the deploy job is
+# skipped cleanly (check-secrets still succeeds), so this workflow is a
+# safe no-op on forks and on repos where CD has not been set up yet.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Never run two deploys at once; queue (don't cancel) an in-flight deploy.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      # Secrets are not directly readable in a job-level `if`, so expose a
+      # boolean output here and gate the deploy job on it.
+      - name: Check deploy secrets
+        id: check
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_SSH_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Deploy secrets present — deploy job will run."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "DEPLOY_HOST / DEPLOY_SSH_KEY not configured — skipping deploy."
+          fi
+
+  deploy:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          {
+            echo "Host *"
+            echo "  IdentityFile ~/.ssh/id_deploy"
+            echo "  StrictHostKeyChecking accept-new"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+        run: ./deploy.sh

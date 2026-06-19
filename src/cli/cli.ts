@@ -11,9 +11,10 @@
 //   polaris profiles     — list profiles
 //   polaris daemon       — start the local daemon
 //   polaris status       — show connection status
+//   polaris recover      — re-POST locally logged events missing upstream
 //   polaris logout       — remove credentials
 
-import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 
@@ -40,6 +41,7 @@ interface Profile {
 interface Config {
   active: string;
   profiles: Record<string, Profile>;
+  daemonSecret?: string;
 }
 
 async function loadConfig(): Promise<Config> {
@@ -104,10 +106,90 @@ function appToApi(appUrl: string): string {
   return appUrl.replace("app.", "api.");
 }
 
+// --- Daemon secret ---
+
+// Shared local secret for daemon HTTP auth. Stored in ~/.polaris/config.json
+// (`daemonSecret`); the daemon requires it as `x-polaris-daemon-secret` on all
+// of its endpoints once a secret is resolved (env POLARIS_DAEMON_SECRET takes
+// precedence over the config file). Reused across installs so previously
+// registered MCP servers and hooks stay valid.
+async function ensureDaemonSecret(): Promise<string> {
+  const config = await loadConfig();
+  const envSecret = process.env.POLARIS_DAEMON_SECRET;
+  if (envSecret) {
+    if (config.daemonSecret !== envSecret) {
+      config.daemonSecret = envSecret;
+      await saveConfig(config);
+    }
+    return envSecret;
+  }
+  if (config.daemonSecret) return config.daemonSecret;
+  const secret = crypto.randomUUID();
+  config.daemonSecret = secret;
+  await saveConfig(config);
+  return secret;
+}
+
+function resolveDaemonSecret(config: Config): string | undefined {
+  return process.env.POLARIS_DAEMON_SECRET || config.daemonSecret || undefined;
+}
+
 // --- Install ---
+
+// Wire Claude Code hooks + status line into ~/.claude/settings.json.
+// UserPromptSubmit/Stop run bun scripts (prompt-time inject delivery and full
+// Stop transcript capture); PreToolUse/PostToolUse use the plain curl relay.
+// Hooks are copied to ~/.polaris/hooks/ — a stable path that survives package
+// upgrades/relocations — and re-copied on every install so they stay fresh.
+async function wireHooks(daemonSecret?: string): Promise<void> {
+  const srcHooksDir = join(import.meta.dir, "..", "..", "hooks");
+  const hooksDir = join(POLARIS_DIR, "hooks");
+  await mkdir(hooksDir, { recursive: true });
+  for (const file of ["capture.sh", "capture-prompt.ts", "capture-stop.ts", "statusline.sh"]) {
+    await copyFile(join(srcHooksDir, file), join(hooksDir, file));
+    if (file.endsWith(".sh")) await chmod(join(hooksDir, file), 0o755);
+  }
+
+  const captureShPath = join(hooksDir, "capture.sh");
+  const capturePromptPath = join(hooksDir, "capture-prompt.ts");
+  const captureStopPath = join(hooksDir, "capture-stop.ts");
+  const statusLinePath = join(hooksDir, "statusline.sh");
+
+  // Pass the shared daemon secret to hook processes via the command env so
+  // they can authenticate with the daemon (x-polaris-daemon-secret header).
+  const env = daemonSecret ? `POLARIS_DAEMON_SECRET=${daemonSecret} ` : "";
+  const hooksConfig = {
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: `${env}npx bun "${capturePromptPath}"` }] }],
+    Stop: [{ hooks: [{ type: "command", command: `${env}npx bun "${captureStopPath}"` }] }],
+    PreToolUse: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
+    PostToolUse: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
+  };
+
+  const settingsPath = join(CLAUDE_DIR, "settings.json");
+  let existingSettings: Record<string, unknown> = {};
+  try {
+    existingSettings = JSON.parse(await readFile(settingsPath, "utf-8"));
+  } catch { /* doesn't exist yet */ }
+
+  const mergedSettings = {
+    ...existingSettings,
+    hooks: {
+      ...(existingSettings as { hooks?: Record<string, unknown> }).hooks,
+      ...hooksConfig,
+    },
+    statusLine: {
+      type: "command",
+      command: `${env}"${statusLinePath}"`,
+    },
+  };
+  await writeFile(settingsPath, JSON.stringify(mergedSettings, null, 2));
+}
 
 async function install(participantId?: string) {
   await mkdir(CLAUDE_DIR, { recursive: true });
+
+  // Shared local secret for daemon auth (generated once, reused thereafter)
+  const daemonSecret = await ensureDaemonSecret();
 
   // Install package to ~/.polaris/mcp/ (user-local, no sudo needed, persistent)
   const mcpDir = join(POLARIS_DIR, "mcp");
@@ -133,7 +215,12 @@ async function install(participantId?: string) {
     stdout: "ignore", stderr: "ignore",
   });
   const mcpAdd = Bun.spawnSync(
-    ["claude", "mcp", "add", "polaris", "-s", "user", "-e", "POLARIS_DAEMON_URL=http://127.0.0.1:4322", "--", mcpBin],
+    [
+      "claude", "mcp", "add", "polaris", "-s", "user",
+      "-e", "POLARIS_DAEMON_URL=http://127.0.0.1:4322",
+      "-e", `POLARIS_DAEMON_SECRET=${daemonSecret}`,
+      "--", mcpBin,
+    ],
     { stdout: "pipe", stderr: "pipe" }
   );
   if (mcpAdd.exitCode === 0) {
@@ -141,38 +228,11 @@ async function install(participantId?: string) {
   } else {
     console.error("  Warning: could not register MCP server with Claude Code.");
     console.error("  " + mcpAdd.stderr.toString().trim());
-    console.error(`  Run manually: claude mcp add -s user -e POLARIS_DAEMON_URL=http://127.0.0.1:4322 polaris -- ${mcpBin}`);
+    console.error(`  Run manually: claude mcp add -s user -e POLARIS_DAEMON_URL=http://127.0.0.1:4322 -e POLARIS_DAEMON_SECRET=${daemonSecret} polaris -- ${mcpBin}`);
   }
 
-  // Hooks
-  const captureShPath = join(import.meta.dir, "..", "..", "hooks", "capture.sh");
-  const hooksConfig = {
-    UserPromptSubmit: [{ hooks: [{ type: "command", command: captureShPath }] }],
-    Stop: [{ hooks: [{ type: "command", command: captureShPath }] }],
-    PreToolUse: [{ hooks: [{ type: "command", command: captureShPath }] }],
-    PostToolUse: [{ hooks: [{ type: "command", command: captureShPath }] }],
-  };
-
-  const settingsPath = join(CLAUDE_DIR, "settings.json");
-  let existingSettings: Record<string, unknown> = {};
-  try {
-    existingSettings = JSON.parse(await readFile(settingsPath, "utf-8"));
-  } catch { /* doesn't exist yet */ }
-
-  // Status line
-  const statusLinePath = join(import.meta.dir, "..", "..", "hooks", "statusline.sh");
-  const mergedSettings = {
-    ...existingSettings,
-    hooks: {
-      ...(existingSettings as { hooks?: Record<string, unknown> }).hooks,
-      ...hooksConfig,
-    },
-    statusLine: {
-      type: "command",
-      command: statusLinePath,
-    },
-  };
-  await writeFile(settingsPath, JSON.stringify(mergedSettings, null, 2));
+  // Hooks (copied to ~/.polaris/hooks/ with the daemon secret in their env)
+  await wireHooks(daemonSecret);
   console.log("  ✓ Hooks + status line config written");
 
   // /polaris skill
@@ -347,6 +407,10 @@ Based on the arguments provided, do ONE of the following:
 `;
   await writeFile(join(skillDir, "SKILL.md"), skillContent);
 
+  // Hooks (same wiring as install — keeps hook commands up to date)
+  await wireHooks(await ensureDaemonSecret());
+  console.log("  ✓ Hooks + status line config written");
+
   // Post system event (device connected)
   const apiUrl = appToApi(appUrl);
   try {
@@ -448,9 +512,13 @@ async function status() {
     console.log("Not logged in. Run: polaris login");
   }
 
-  // Daemon
+  // Daemon (send the shared local secret when configured — the daemon
+  // requires it on all endpoints once one is resolved)
   try {
-    const res = await fetch("http://127.0.0.1:4322/status");
+    const secret = resolveDaemonSecret(config);
+    const res = await fetch("http://127.0.0.1:4322/status", {
+      headers: secret ? { "x-polaris-daemon-secret": secret } : undefined,
+    });
     const data = (await res.json()) as { ok: boolean; sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string }> };
     if (data.ok) {
       console.log("\nDaemon: running");
@@ -465,6 +533,203 @@ async function status() {
     }
   } catch {
     console.log("\nDaemon: not running");
+  }
+}
+
+// --- Recover ---
+
+// Replay locally logged daemon events (~/.polaris/logs/*.jsonl) that never
+// made it upstream. Presence is determined by fetching each session's
+// messages (GET /projects/:p/sessions/:s/messages) and diffing: by event id
+// when the logged payload carries one, otherwise by the payload's identifying
+// fields (hook ids are assigned server-side at ingest, so hook log entries
+// have no id of their own). Missing events are re-POSTed via the normal
+// events ingest path. Best-effort: failures are skipped, never throws.
+
+interface RecoverRoute { project: string; session: string; user: string; agent: string }
+interface RecoverCandidate { project: string; session: string; sender: string; payload: Record<string, unknown> }
+
+function isPresentUpstream(
+  payload: Record<string, unknown>,
+  upstream: Array<{ id?: string; payload?: Record<string, unknown> }>
+): boolean {
+  const id = payload.id;
+  if (typeof id === "string" && upstream.some((e) => e.id === id)) return true;
+  const kind = payload.hook_event_name;
+  return upstream.some((e) => {
+    const p = e.payload;
+    if (!p || p.hook_event_name !== kind || p.session_id !== payload.session_id) return false;
+    switch (kind) {
+      case "UserPromptSubmit":
+        return p.prompt === payload.prompt;
+      case "Stop":
+        return (p.stop_response ?? p.last_assistant_message) === (payload.stop_response ?? payload.last_assistant_message);
+      case "PreToolUse":
+      case "PostToolUse":
+        return p.tool_name === payload.tool_name && JSON.stringify(p.tool_input) === JSON.stringify(payload.tool_input);
+      default:
+        return JSON.stringify(p) === JSON.stringify(payload);
+    }
+  });
+}
+
+async function recover() {
+  try {
+    const config = await loadConfig();
+    const profile = getActiveProfile(config);
+    if (!profile) {
+      console.log("Not logged in. Run: polaris login");
+      return;
+    }
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${profile.token}`,
+    };
+
+    const logDir = join(POLARIS_DIR, "logs");
+    let files: string[] = [];
+    try {
+      files = (await readdir(logDir)).filter((f) => f.endsWith(".jsonl")).sort();
+    } catch { /* no log dir */ }
+    if (files.length === 0) {
+      console.log("No local logs found in ~/.polaris/logs — nothing to recover.");
+      return;
+    }
+
+    // Pass 1: walk logs chronologically (files are daemon-YYYY-MM-DD.jsonl),
+    // learning session routing from /connect entries and collecting candidate
+    // events. Failed relays are logged twice (with/without a response field),
+    // so dedupe identical payloads.
+    const routes = new Map<string, RecoverRoute>(); // keyed by cc session id
+    const candidates: RecoverCandidate[] = [];
+    const seen = new Set<string>();
+    let scanned = 0;
+    let unroutable = 0;
+
+    const routeFor = (sessionId: string): RecoverRoute | undefined => {
+      // Exact match first; like the daemon, fall back to the single known
+      // session when only one mapping exists (MCP and hook session ids differ)
+      const route = routes.get(sessionId);
+      if (route) return route;
+      if (routes.size === 1) return routes.values().next().value;
+      return undefined;
+    };
+
+    for (const file of files) {
+      let text: string;
+      try {
+        text = await readFile(join(logDir, file), "utf-8");
+      } catch {
+        continue;
+      }
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        let entry: { endpoint?: string; payload?: Record<string, unknown> };
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const payload = entry.payload;
+        if (!payload || typeof payload !== "object") continue;
+
+        if (entry.endpoint === "/connect") {
+          // Routing is only learnable for explicit session names; generated
+          // names are assigned by the daemon after logging
+          const c = payload as { ccSessionId?: string; project?: string; session?: string; user?: string; agent?: string };
+          if (c.ccSessionId && c.project && c.session && c.user) {
+            routes.set(c.ccSessionId, { project: c.project, session: c.session, user: c.user, agent: c.agent || "agent:claude" });
+          }
+          continue;
+        }
+
+        if (entry.endpoint === "/events") {
+          const hookEvent = payload.hook_event_name;
+          const sessionId = payload.session_id;
+          if (typeof hookEvent !== "string" || typeof sessionId !== "string") continue;
+          const key = `events:${JSON.stringify(payload)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          scanned++;
+          const route = routeFor(sessionId);
+          if (!route) {
+            unroutable++;
+            continue;
+          }
+          const sender = hookEvent === "UserPromptSubmit" ? route.user : route.agent;
+          candidates.push({ project: route.project, session: route.session, sender, payload });
+          continue;
+        }
+
+        if (entry.endpoint === "/reply") {
+          const r = payload as { ccSessionId?: string; message?: string };
+          if (!r.ccSessionId || !r.message) continue;
+          const key = `reply:${JSON.stringify(payload)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          scanned++;
+          const route = routeFor(r.ccSessionId);
+          if (!route) {
+            unroutable++;
+            continue;
+          }
+          // Reconstruct the same Stop payload the daemon relays for replies
+          candidates.push({
+            project: route.project,
+            session: route.session,
+            sender: route.agent,
+            payload: { hook_event_name: "Stop", session_id: r.ccSessionId, stop_response: r.message },
+          });
+        }
+      }
+    }
+
+    // Pass 2: per session, fetch upstream messages and re-POST what's missing
+    const groups = new Map<string, RecoverCandidate[]>();
+    for (const c of candidates) {
+      const key = `${c.project} ${c.session}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = [];
+        groups.set(key, group);
+      }
+      group.push(c);
+    }
+
+    let missing = 0;
+    let restored = 0;
+    for (const group of groups.values()) {
+      const { project, session } = group[0];
+      let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
+      try {
+        const res = await fetch(`${profile.api}/projects/${project}/sessions/${session}/messages`, { headers });
+        if (res.ok) upstream = (await res.json()) as typeof upstream;
+      } catch { /* unreachable — treat as empty */ }
+
+      for (const c of group) {
+        if (isPresentUpstream(c.payload, upstream)) continue;
+        missing++;
+        try {
+          const res = await fetch(`${profile.api}/projects/${project}/sessions/${session}/events`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ sender: c.sender, payload: c.payload }),
+          });
+          if (res.ok) restored++;
+        } catch { /* leave as missing */ }
+      }
+    }
+
+    console.log(`Recover: ${scanned} logged events scanned, ${missing} missing upstream, ${restored} restored.`);
+    if (unroutable > 0) {
+      console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
+    }
+    if (missing > restored) {
+      console.log(`${missing - restored} event(s) could not be restored (API unreachable or rejected).`);
+    }
+  } catch (err) {
+    // Best-effort: report and exit cleanly, never throw
+    console.error(`Recover failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -557,6 +822,10 @@ switch (command) {
     await status();
     break;
 
+  case "recover":
+    await recover();
+    break;
+
   case "logout":
     await logout(hasFlag("all"));
     break;
@@ -593,6 +862,7 @@ switch (command) {
     console.log("  polaris profiles       — list all profiles");
     console.log("  polaris daemon         — start the local daemon");
     console.log("  polaris status         — show connection status");
+    console.log("  polaris recover        — re-POST locally logged events missing upstream");
     console.log("  polaris logout         — remove active profile");
     console.log("  polaris logout --all   — remove all credentials");
 }
