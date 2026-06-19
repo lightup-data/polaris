@@ -678,6 +678,7 @@ export async function startServer(opts: {
         const decisions = await listDecisions(sql, orgId, {
           project,
           limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+          participantId,
         });
         return json({ decisions });
       }
@@ -701,6 +702,7 @@ export async function startServer(opts: {
           source: url.searchParams.get("source") ?? undefined,
           tag: url.searchParams.get("tag") ?? undefined,
           limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+          participantId,
         });
         return json({ results });
       }

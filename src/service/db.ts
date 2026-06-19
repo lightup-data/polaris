@@ -634,9 +634,17 @@ export async function getSessionEventsPage(
 export async function searchEvents(
   sql: Sql,
   orgId: string,
-  opts: { q: string; project?: string; session?: string; sender?: string; source?: string; tag?: string; limit?: number }
+  opts: { q: string; project?: string; session?: string; sender?: string; source?: string; tag?: string; limit?: number; participantId?: string | null }
 ): Promise<{ results: Array<{ event: PolarisEvent; snippet: string }> }> {
   const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 50)), 100);
+  // Restrict to projects the caller may access (default-open: 'org' visibility,
+  // or a member of a 'members'-restricted project). Without this, a search with
+  // no project filter would leak events from restricted projects.
+  const aclFilter = opts.participantId
+    ? sql`AND (COALESCE(p.visibility, 'org') <> 'members' OR EXISTS (
+        SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.participant_id = ${opts.participantId}
+      ))`
+    : sql``;
   const rows = await sql`
     SELECT e.id, p.name as project, e.session, e.timestamp, e.source, e.sender, e.payload,
       ts_headline('english'::regconfig, t.text, q.query) as snippet,
@@ -658,6 +666,7 @@ export async function searchEvents(
         SELECT 1 FROM annotations a
         WHERE a.event_id = e.id AND a.org_id = ${orgId} AND a.kind = 'tag' AND a.value = ${opts.tag}
       )` : sql``}
+      ${aclFilter}
     ORDER BY score DESC, e.timestamp DESC
     LIMIT ${limit}
   `;
@@ -733,12 +742,26 @@ export async function listSessionAnnotations(sql: Sql, orgId: string, project: s
   return rows.map(rowToAnnotation);
 }
 
-export async function listDecisions(sql: Sql, orgId: string, opts?: { project?: string; limit?: number }): Promise<Annotation[]> {
+export async function listDecisions(sql: Sql, orgId: string, opts?: { project?: string; limit?: number; participantId?: string | null }): Promise<Annotation[]> {
   const limit = Math.min(Math.max(1, Math.floor(opts?.limit ?? 100)), 500);
+  // Exclude decisions from 'members'-restricted projects the caller isn't in.
+  // Default-open: a decision whose project has no row, is 'org' visibility, or
+  // where the caller is a member, is kept (matches userCanAccessProject).
+  const aclFilter = opts?.participantId
+    ? sql`AND NOT EXISTS (
+        SELECT 1 FROM projects p
+        WHERE p.org_id = annotations.org_id AND p.name = annotations.project
+          AND COALESCE(p.visibility, 'org') = 'members'
+          AND NOT EXISTS (
+            SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.participant_id = ${opts.participantId}
+          )
+      )`
+    : sql``;
   const rows = await sql`
     SELECT * FROM annotations
     WHERE org_id = ${orgId} AND kind = 'decision'
       ${opts?.project ? sql`AND project = ${opts.project}` : sql``}
+      ${aclFilter}
     ORDER BY created_at DESC
     LIMIT ${limit}
   `;
