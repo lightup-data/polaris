@@ -293,10 +293,8 @@ interface OrgBridge {
   stop: () => void;
 }
 
-// One independent bridge for one org: its own WebClient (org bot token), its own
-// SocketModeClient, its own channel cache and posted-event dedupe. Realtime delivery
-// is driven by the caller via handleEvent (fed from LISTEN 'polaris_event'); a slow
-// 30s backfill poll catches anything the LISTEN path missed (e.g. during reconnects).
+// One independent bridge per org (own WebClient, SocketModeClient, caches). Realtime
+// delivery comes via handleEvent (fed from LISTEN); a slow 30s poll backfills any misses.
 async function startOrgBridge(sql: Sql, org: Org): Promise<OrgBridge> {
   if (!org.slack_bot_token) throw new Error(`Org ${org.id} has no Slack bot token`);
 
@@ -451,11 +449,9 @@ export async function startBridge(opts: {
 // In-process guard: orgs this process is already bridging
 const startedOrgIds = new Set<string>();
 
-// Multi-org mode: discover every Slack-connected org and start one independent bridge
-// per org. Double-start is guarded twice: the in-process startedOrgIds set, plus a
-// session-scoped Postgres advisory lock (held on a reserved connection for the bridge's
-// lifetime) so two processes never bridge the same org. pg_try_advisory_lock (not the
-// blocking pg_advisory_lock) so a second process skips the org instead of hanging.
+// Discover every Slack-connected org, start one bridge each. Double-start guarded by the
+// in-process startedOrgIds set + a non-blocking Postgres advisory lock (pg_try_advisory_lock,
+// held on a reserved connection) so two processes never bridge the same org.
 export async function startAllBridges(opts: {
   databaseUrl?: string;
   apiBaseUrl?: string;
