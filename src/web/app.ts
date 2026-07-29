@@ -207,8 +207,8 @@ export function createApp(sql: Sql) {
   // --- Landing page ---
 
   app.get("/", (c) => {
-    return layout(renderLandingPage(), "Polaris — It's like Gong for Claude Code sessions", {
-      title: "Polaris — It's like Gong for Claude Code sessions",
+    return layout(renderLandingPage(), "Polaris by Lightup — It's like Gong for Claude Code sessions", {
+      title: "Polaris by Lightup — It's like Gong for Claude Code sessions",
       description: "Capture every AI coding session. Stream prompts, responses, and tool calls to Slack in real time. Collaborate across agents. Nothing is lost.",
       canonical: "https://app.withpolaris.ai",
     });
@@ -400,9 +400,9 @@ export function createApp(sql: Sql) {
     };
 
     if (hasConnectedSession) {
-      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Dashboard — Polaris");
+      return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Dashboard — Polaris by Lightup");
     }
-    return layout(renderSetupView(ctx, devices), "Setup — Polaris");
+    return layout(renderSetupView(ctx, devices), "Setup — Polaris by Lightup");
   });
 
   // --- Profile ---
@@ -429,7 +429,7 @@ export function createApp(sql: Sql) {
       totalPrompts: 0,
     };
 
-    return layout(renderProfileView(ctx, payload.participant_id), "Polaris - Profile");
+    return layout(renderProfileView(ctx, payload.participant_id), "Polaris by Lightup - Profile");
   });
 
   // --- Session transcript ---
@@ -610,7 +610,7 @@ export function createApp(sql: Sql) {
     }
 
     const ctx = { token, userName: payload.name, orgName: org.name, email: payload.email };
-    return layout(renderDecisionsView(ctx, project, decisions, decisionsError), "Polaris - Decisions");
+    return layout(renderDecisionsView(ctx, project, decisions, decisionsError), "Polaris by Lightup - Decisions");
   });
 
   // --- Project settings (visibility + members) ---
@@ -782,7 +782,7 @@ export function createApp(sql: Sql) {
     }
 
     const ctx = { token, userName: payload.name, orgName: org.name, email: payload.email };
-    return layout(renderSearchView(ctx, query, results, searchError), "Polaris - Search");
+    return layout(renderSearchView(ctx, query, results, searchError), "Polaris by Lightup - Search");
   });
 
   // --- Preview (dev only — all view states on one page) ---
@@ -899,7 +899,7 @@ export function createApp(sql: Sql) {
           </section>
         </div>
       </div>
-    `, "Polaris - Preview");
+    `, "Polaris by Lightup - Preview");
   });
 
   // --- Slack OAuth ---

@@ -14,7 +14,7 @@ export interface SeoOpts {
   canonical?: string;
 }
 
-export function layout(body: string, title = "Polaris", seo?: SeoOpts): Response {
+export function layout(body: string, title = "Polaris by Lightup", seo?: SeoOpts): Response {
   const pageTitle = seo?.title ?? title;
   const description = seo?.description ?? "It's like Gong for Claude Code sessions. Capture every prompt, response, and tool call. Stream to Slack. Collaborate in real time.";
   const canonical = seo?.canonical ?? "https://app.withpolaris.ai";
@@ -131,7 +131,10 @@ export function nav(token?: string, opts?: NavOpts): string {
   return `
     <nav class="border-b border-gray-200 bg-white">
       <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="${token ? `/dashboard?token=${token}` : "/"}" class="text-lg font-bold tracking-tight text-gray-900">Polaris</a>
+        <div class="flex items-center gap-1.5">
+          <a href="${token ? `/dashboard?token=${token}` : "/"}" class="text-lg font-bold tracking-tight text-gray-900">Polaris</a>
+          <span class="text-sm text-gray-400">by <a href="https://lightup.ai" class="hover:text-gray-600 transition">Lightup</a></span>
+        </div>
         <div class="flex items-center gap-4">${right}</div>
       </div>
     </nav>${bannerHtml}`;
