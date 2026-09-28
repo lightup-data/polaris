@@ -17,6 +17,7 @@ interface ViewContext {
   orgSlug: string | null;
   email: string;
   slackConnected: boolean;
+  floorSkipped: boolean;
   cliInstalled: boolean;
   hasConnectedSession: boolean;
   totalPrompts: number;
@@ -279,23 +280,25 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
   return sectionWrap(state, `
     <div>
       <div class="flex items-baseline gap-2 mb-3">
-        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
-        ${statusBadge("Not connected", false)}
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor <span class="text-[10px] font-normal normal-case text-gray-400">— optional</span></h2>
       </div>
-      <div class="bg-white border ${state === "active" ? cardClass("active") : "border-amber-200"} rounded-lg p-5">
+      <div class="bg-white border ${state === "active" ? cardClass("active") : "border-gray-200"} rounded-lg p-5">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
             <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
           </div>
           <div>
-            <p class="text-sm font-semibold text-gray-900">Slack</p>
-            <p class="text-sm text-gray-500 mt-0.5">Connect your Slack workspace to enable the floor for your team.</p>
+            <p class="text-sm font-semibold text-gray-900">Connect a floor</p>
+            <p class="text-sm text-gray-500 mt-0.5">Share sessions with your team in real time. Connect Slack to publish your session log to a channel.</p>
           </div>
         </div>
-        <a href="/slack/install?token=${ctx.token}" class="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-[#4A154B] text-white text-sm font-medium rounded-lg hover:bg-[#3a1039] transition">
-          ${slackIcon}
-          Connect Slack
-        </a>
+        <div class="mt-3 flex items-center gap-4">
+          <a href="/slack/install?token=${ctx.token}" class="inline-flex items-center gap-2 px-4 py-2 bg-[#4A154B] text-white text-sm font-medium rounded-lg hover:bg-[#3a1039] transition">
+            ${slackIcon}
+            Connect Slack
+          </a>
+          <a href="/skip/floor?token=${ctx.token}" class="text-sm text-gray-400 hover:text-gray-600 transition">Skip for now</a>
+        </div>
       </div>
     </div>`);
 }
@@ -474,7 +477,8 @@ function autoRefreshScript(token: string): string {
 // Same three sections, but each shows its setup prompt instead of live data.
 
 export function renderSetupView(ctx: ViewContext, devices: DeviceFixture[] = []): string {
-  const nextStep = !ctx.slackConnected ? "floor" : !ctx.cliInstalled ? "devices" : "sessions";
+  const floorDone = ctx.slackConnected || ctx.floorSkipped;
+  const nextStep = !floorDone ? "floor" : !ctx.cliInstalled ? "devices" : "sessions";
   const stepState = (step: string): "done" | "active" | "future" => {
     const order = ["floor", "devices", "sessions"];
     const nextIdx = order.indexOf(nextStep);

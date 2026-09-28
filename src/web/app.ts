@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { Google } from "arctic";
 import { createToken, verifyToken } from "../service/auth";
 import {
@@ -384,6 +385,8 @@ export function createApp(sql: Sql) {
 
     const hasConnectedSession = allSessions.length > 0;
 
+    const floorSkipped = getCookie(c, "polaris_floor_skipped") === "1";
+
     const ctx = {
       token,
       userName: payload.name,
@@ -391,6 +394,7 @@ export function createApp(sql: Sql) {
       orgSlug: org.slug,
       email: payload.email,
       slackConnected: !!org.slack_team_id,
+      floorSkipped,
       cliInstalled,
       hasConnectedSession,
       totalPrompts: Array.from(promptCounts.values()).reduce((a, b) => a + b, 0),
@@ -403,6 +407,15 @@ export function createApp(sql: Sql) {
       return layout(renderActiveView(ctx, sessionFixtures, projectFixtures, devices), "Dashboard — Polaris by Lightup");
     }
     return layout(renderSetupView(ctx, devices), "Setup — Polaris by Lightup");
+  });
+
+  // --- Skip floor setup ---
+
+  app.get("/skip/floor", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.redirect("/login");
+    setCookie(c, "polaris_floor_skipped", "1", { path: "/", maxAge: 60 * 60 * 24 * 365, httpOnly: true, sameSite: "Lax" });
+    return c.redirect(`/dashboard?token=${token}`);
   });
 
   // --- Profile ---
@@ -789,7 +802,7 @@ export function createApp(sql: Sql) {
 
   app.get("/preview", (c) => {
     const mockToken = "preview-token";
-    const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email };
+    const base = { token: mockToken, userName: mockUser.name, orgName: mockOrg.name, orgSlug: "lightup-data" as string | null, email: mockUser.email, floorSkipped: false };
 
     const mockTeam = [{ name: mockUser.name, email: mockUser.email }, { name: "Alice Chen", email: "alice@lightup.ai" }, { name: "Laura Mowry", email: "laura@lightup.ai" }];
     const mockSenders = ["user:manu.bansal", "user:alice.chen", "user:laura.mowry"];
