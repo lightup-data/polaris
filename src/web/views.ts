@@ -405,7 +405,10 @@ function renderProjectsSessionsSection(ctx: ViewContext, sessions: SessionFixtur
           : "Inside your AI agent (Claude Code, Cursor, etc.), run:"}</p>
         ${ctx.hasConnectedSession
           ? ""
-          : copyBlock("/polaris join #my-channel")}
+          : copyBlock("/polaris join #my-project")}
+        ${ctx.hasConnectedSession
+          ? ""
+          : `<p class="text-xs text-gray-400 mt-2">The name becomes your project workspace — and your Slack channel if a floor is connected.</p>`}
       </div>
     </div>`);
 }
