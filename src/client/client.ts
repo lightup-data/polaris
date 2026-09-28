@@ -71,7 +71,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          channel: { type: "string", description: "Channel name (e.g., #polaris-dev). Omit to list available channels." },
+          channel: { type: "string", description: "Project workspace to join (e.g., #my-project). Becomes the Slack channel name if a floor is connected. Omit to list existing projects." },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
@@ -97,7 +97,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "polaris_reply",
-      description: "Send a message to the project floor (visible to all advisors and the Slack/WhatsApp channel).",
+      description: "Send a message to the project floor (visible to all advisors, and to the linked Slack channel if a floor is connected).",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -108,7 +108,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "polaris_rename",
-      description: "Rename the current project. Also renames the Slack channel.",
+      description: "Rename the current project. Also renames the linked Slack channel if a floor is connected.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -184,12 +184,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (res.ok) {
           const body = await res.json() as { channels: string[] };
           if (body.channels.length === 0) {
-            return { content: [{ type: "text", text: "No channels found. Create one by joining: `/polaris join #channel-name`" }] };
+            return { content: [{ type: "text", text: "No projects found. Start one with: `/polaris join #my-project`" }] };
           }
-          return { content: [{ type: "text", text: `Available channels:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #channel-name` }] };
+          return { content: [{ type: "text", text: `Available projects:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #project-name` }] };
         }
       } catch { /* fall through */ }
-      return { content: [{ type: "text", text: "Specify a channel: `/polaris join #channel-name`" }] };
+      return { content: [{ type: "text", text: "Specify a project: `/polaris join #my-project`" }] };
     }
 
     const project = channel.replace(/^#/, ""); // strip leading # if present

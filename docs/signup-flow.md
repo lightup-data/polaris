@@ -10,9 +10,9 @@ A user who signs up should experience a smooth path from landing page to their f
 
 1. Choose a plan (or default to free)
 2. Sign up with Google
-3. Connect their Slack workspace
+3. Connect their Slack workspace *(optional — can be skipped and done later)*
 4. Install the CLI
-5. Join a channel and start their first session
+5. Start their first session (join a channel if Slack is connected)
 
 Each step should feel intentional, not accidental. The user should never be left wondering "what do I do next?"
 
@@ -34,17 +34,18 @@ After Google OAuth completes, the callback handler should route based on the use
 |---|---|
 | Existing user (login) | Dashboard |
 | New user, existing org | Dashboard (org already set up) |
-| New user, new org, no Slack | Onboarding: Connect Slack |
+| New user, new org, no Slack | Onboarding: Connect Slack (with skip option) |
 | New user, new org, Slack connected | Onboarding: Install CLI |
 
 ### Onboarding Flow
 
 A dedicated onboarding page replaces the empty dashboard for new orgs. Three steps, shown as a checklist:
 
-**Step 1: Connect Slack**
-- Large "Add to Slack" button
-- Explain: "Polaris uses Slack as the collaboration layer. Connect your workspace to get started."
-- After connecting, auto-advance to Step 2
+**Step 1: Connect Slack** *(optional)*
+- Large "Connect Slack" button
+- Explain: "Share sessions with your team in real time. Connect Slack to publish your session log to a channel."
+- "Skip for now" link lets users proceed without connecting. Skip state is stored in a browser cookie (`polaris_floor_skipped`).
+- After connecting (or skipping), advance to Step 2
 
 **Step 2: Install the CLI**
 - Show `npx @lightupai/polaris` with a copy button
@@ -120,8 +121,8 @@ When a free-tier org approaches or hits their limit:
 - [ ] **Store selected plan on org record**
   Add a `plan` column to the orgs table (free/team/enterprise, default 'free'). Populate from the `?plan` query param during signup. Show current plan on the dashboard.
 
-- [ ] **Prompt Slack connection immediately after signup**
-  For new orgs without Slack connected, route to setup view with prominent "Add to Slack" button instead of empty dashboard. Ensure the flow from signup → setup is seamless.
+- [x] **Prompt Slack connection immediately after signup**
+  Setup view shows Floor as step 1 with a "Connect Slack" button. Users can skip via "Skip for now" (cookie-based) and proceed to install the CLI and start sessions without Slack. Floor can be connected at any time from the setup or active dashboard.
 
 - [ ] **Post-signup onboarding flow**
   After a brand new org signup, redirect to onboarding page (not dashboard). Three steps: Connect Slack → Install CLI → Join a channel. Repurpose existing `renderWelcomePage`/`renderSetupView`. Auto-advance when each step is completed.
