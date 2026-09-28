@@ -812,10 +812,11 @@ export function createApp(sql: Sql) {
         return { date: d.toISOString().slice(0, 10), sender, count: Math.floor(Math.random() * 12) + 1 };
       })
     );
-    const fresh       = { ...base, orgSlug: null, slackConnected: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
-    const slackDone   = { ...base, slackConnected: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
-    const cliDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
-    const allDone     = { ...base, slackConnected: true,  cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const fresh         = { ...base, orgSlug: null, slackConnected: false, floorSkipped: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+    const floorSkipped  = { ...base, orgSlug: null, slackConnected: false, floorSkipped: true,  cliInstalled: false, hasConnectedSession: false, totalPrompts: 0 };
+    const slackDone     = { ...base, slackConnected: true,  floorSkipped: false, cliInstalled: false, hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const cliDone       = { ...base, slackConnected: true,  floorSkipped: false, cliInstalled: true,  hasConnectedSession: false, totalPrompts: 0, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
+    const allDone       = { ...base, slackConnected: true,  floorSkipped: false, cliInstalled: true,  hasConnectedSession: true,  totalPrompts: 127, teamMembers: mockTeam, dailyPrompts: mockDailyPrompts };
     const teamPlan    = { ...fresh, plan: "pro" };
 
     return layout(`
@@ -829,6 +830,14 @@ export function createApp(sql: Sql) {
             <p class="text-sm text-gray-400 mb-4">Brand new user, no steps completed.</p>
             <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
               ${renderSetupView(fresh)}
+            </div>
+          </section>
+
+          <section>
+            <h2 class="text-lg font-bold text-gray-700 mb-1">Setup: floor skipped</h2>
+            <p class="text-sm text-gray-400 mb-4">User clicked "Skip for now" — floor subdued, Devices becomes active.</p>
+            <div class="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              ${renderSetupView(floorSkipped)}
             </div>
           </section>
 

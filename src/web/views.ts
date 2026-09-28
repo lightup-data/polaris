@@ -277,6 +277,20 @@ function renderFloorSection(ctx: ViewContext, compact = false, state: StepState 
       </div>`;
   }
 
+  if (ctx.floorSkipped) {
+    return `
+      <div class="opacity-50">
+        <div class="flex items-baseline gap-2 mb-3">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Floor</h2>
+          ${statusBadge("Skipped", false)}
+        </div>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg px-5 py-3 flex items-center justify-between">
+          <p class="text-sm text-gray-400">No floor connected.</p>
+          <a href="/slack/install?token=${ctx.token}" class="text-xs text-gray-400 hover:text-gray-600 transition">Connect Slack</a>
+        </div>
+      </div>`;
+  }
+
   return sectionWrap(state, `
     <div>
       <div class="flex items-baseline gap-2 mb-3">
