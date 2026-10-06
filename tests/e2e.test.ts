@@ -56,6 +56,7 @@ describe("e2e: two drivers on same project", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     expect(manuRes.status).toBe(200);
 
@@ -65,6 +66,7 @@ describe("e2e: two drivers on same project", () => {
       project: "pj",
       session: "fxk",
       user: "user:krishna",
+      create: true,
     });
     expect(krishnaRes.status).toBe(200);
 
@@ -108,12 +110,14 @@ describe("e2e: advisor injection", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     await post(daemonUrl, "/connect", {
       ccSessionId: "cc-krishna",
       project: "pj",
       session: "fxk",
       user: "user:krishna",
+      create: true,
     });
 
     // Priya advises fxk only
@@ -141,6 +145,7 @@ describe("e2e: advisor injection", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     // Subscribe to session-level WS
@@ -171,12 +176,14 @@ describe("e2e: project-level WebSocket", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     await post(daemonUrl, "/connect", {
       ccSessionId: "cc-proj-b",
       project: "pj",
       session: "fxk",
       user: "user:krishna",
+      create: true,
     });
 
     // Subscribe to project-level WS
@@ -213,6 +220,7 @@ describe("e2e: handoff", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     // Manu works
@@ -270,6 +278,7 @@ describe("e2e: status line", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const connRes = await get(daemonUrl, "/status/cc-status-1");
@@ -290,6 +299,7 @@ describe("e2e: status line", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     await post(daemonUrl, "/disconnect", { ccSessionId: "cc-status-2" });
@@ -307,6 +317,7 @@ describe("e2e: capture.sh through daemon", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const hookPayload = JSON.stringify({
@@ -365,6 +376,7 @@ describe("e2e: session switching", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     await post(daemonUrl, "/events", {

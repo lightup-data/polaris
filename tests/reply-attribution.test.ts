@@ -63,6 +63,7 @@ describe("daemon /reply attribution", () => {
       session: "fx-reply",
       user: "user:manu",
       agent: "agent:replybot",
+      create: true,
     });
     expect(connectRes.status).toBe(200);
 
@@ -86,6 +87,7 @@ describe("daemon /reply attribution", () => {
       project: "pj-reply",
       session: "fx-reply-default",
       user: "user:krishna",
+      create: true,
     });
 
     const replyRes = await post(daemonUrl, "/reply", {

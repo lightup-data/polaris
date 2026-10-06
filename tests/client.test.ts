@@ -53,6 +53,7 @@ describe("end-to-end: daemon + cloud service", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     await post(daemonUrl, "/events", {
@@ -74,6 +75,7 @@ describe("end-to-end: daemon + cloud service", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const wsUrl = serviceUrl.replace("http", "ws");
@@ -99,12 +101,14 @@ describe("end-to-end: daemon + cloud service", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     await post(daemonUrl, "/connect", {
       ccSessionId: "multi-2",
       project: "pj",
       session: "fxk",
       user: "user:krishna",
+      create: true,
     });
 
     await post(daemonUrl, "/events", {
@@ -139,6 +143,7 @@ describe("capture.sh with daemon", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const hookPayload = JSON.stringify({
