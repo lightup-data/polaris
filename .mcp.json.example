@@ -5,6 +5,7 @@
       "args": ["bun", "src/client/client.ts"],
       "env": {
         "POLARIS_DAEMON_URL": "http://127.0.0.1:4322",
+        "POLARIS_DAEMON_SECRET": "<your daemonSecret from ~/.polaris/config.json>",
         "POLARIS_SERVICE_URL": "http://localhost:4321"
       }
     }
