@@ -884,6 +884,13 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // POST /shutdown — graceful shutdown (used by `polaris install` to replace an old daemon)
+      if (method === "POST" && pathname === "/shutdown") {
+        // Respond first, then exit after a short delay so the response is delivered
+        setTimeout(() => process.exit(0), 100);
+        return json({ status: "shutting_down" });
+      }
+
       return error("Not found", 404);
     },
   });

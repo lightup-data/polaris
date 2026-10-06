@@ -486,6 +486,23 @@ async function profiles() {
 
 // --- Daemon ---
 
+async function killExistingDaemon(): Promise<void> {
+  // Ask the running daemon to shut down gracefully via the HTTP API, then
+  // wait briefly for the port to free up. Falls back silently if no daemon
+  // is running or the port is already free.
+  try {
+    const secret = await ensureDaemonSecret();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (secret) headers["x-polaris-daemon-secret"] = secret;
+    await fetch("http://127.0.0.1:4322/shutdown", { method: "POST", headers }).catch(() => {});
+  } catch { /* no daemon running */ }
+  // Give it a moment to exit, then kill any straggler by port
+  await new Promise((r) => setTimeout(r, 500));
+  try {
+    Bun.spawnSync(["sh", "-c", "lsof -ti :4322 | xargs kill -9 2>/dev/null || true"]);
+  } catch { /* best-effort */ }
+}
+
 async function daemon() {
   const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
   console.log("Starting Polaris daemon...");
@@ -789,7 +806,8 @@ switch (command) {
     console.log("Polaris — authenticating\n");
     await login(appUrl, profileName);
     console.log("\n✓ Login complete!");
-    // Auto-start daemon in background
+    // Replace any existing daemon with the current version
+    await killExistingDaemon();
     const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
     Bun.spawn(["bun", "run", daemonPath], {
       stdout: "ignore",
@@ -839,7 +857,8 @@ switch (command) {
     console.log("[2/2] Authenticating...\n");
     await login(DEFAULT_APP_URL);
     console.log("\n✓ Polaris is set up on this machine!");
-    // Auto-start daemon in background
+    // Replace any existing daemon with the current version
+    await killExistingDaemon();
     const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
     Bun.spawn(["bun", "run", daemonPath], {
       stdout: "ignore",
