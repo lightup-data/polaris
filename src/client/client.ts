@@ -285,9 +285,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "polaris_status") {
     try {
       const res = await daemonGet(`/status/${CC_SESSION_ID}`);
-      const body = (await res.json()) as { connected: boolean; project?: string; session?: string; user?: string };
+      const body = (await res.json()) as { connected: boolean; project?: string; session?: string; user?: string; account?: string; slackChannel?: string };
       if (body.connected) {
-        return { content: [{ type: "text", text: `Connected: ${body.project}/${body.session} as ${body.user}` }] };
+        const accountTag = body.account ? ` [${body.account}]` : "";
+        const slackTag = body.slackChannel ? ` #${body.slackChannel}` : "";
+        return { content: [{ type: "text", text: `Connected: ${body.project}/${body.session} as ${body.user}${accountTag}${slackTag}` }] };
       }
       return { content: [{ type: "text", text: "Not connected to any Polaris session." }] };
     } catch {
@@ -440,7 +442,9 @@ async function main() {
         currentSession = body.session ?? saved.session;
         currentUser = saved.user;
         currentProfile = reconnectProfile;
-        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession} (${reconnectProfile || "default"})`);
+        // Show email when it looks like one; fall back to profile key or "default"
+        const accountLabel = reconnectProfile.includes("@") ? reconnectProfile : (reconnectProfile || "default");
+        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession} [${accountLabel}]`);
       } else {
         // Session or project no longer exists — clear stale state
         await clearSessionState();
