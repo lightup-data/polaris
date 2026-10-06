@@ -77,7 +77,7 @@ npm install -g @lightupai/polaris
 polaris
 
 # Or run steps independently:
-polaris install          # Install MCP server, hooks, skill, status line (no auth)
+polaris install          # Install MCP server, hooks, skill, status line + restart daemon
 polaris login            # Authenticate against production
 polaris login --local    # Authenticate against localhost (for local dev)
 
@@ -87,11 +87,21 @@ polaris use local        # Switch to local dev
 polaris use prod         # Switch to production
 
 # Other commands
-polaris daemon           # Start the local daemon
+polaris daemon           # Start the local daemon (kills any existing daemon first)
 polaris status           # Show active profile, daemon state, sessions
 polaris logout           # Remove active profile credentials
 polaris logout --all     # Remove all credentials
 ```
+
+### Upgrading
+
+Because `polaris` is a **global install**, use `npm install -g` to upgrade — not `npx`:
+
+```sh
+npm install -g @lightupai/polaris@latest
+```
+
+`npx @lightupai/polaris@latest` will work for first-time installs but won't override a global binary already in `PATH`. The CLI warns you at startup if a newer version is available.
 
 ## Configuration
 

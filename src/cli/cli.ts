@@ -778,6 +778,23 @@ async function logout(all = false) {
   console.log("MCP config and hooks are still installed — run `polaris install` to reset them.");
 }
 
+// --- Update check ---
+// Warn if a newer version is available on npm. Best-effort: never blocks startup.
+
+async function checkForUpdate(): Promise<void> {
+  try {
+    const pkgPath = join(import.meta.dir, "..", "..", "package.json");
+    const { version: current } = JSON.parse(await readFile(pkgPath, "utf-8")) as { version: string };
+    const res = await fetch("https://registry.npmjs.org/@lightupai/polaris/latest", { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const { version: latest } = await res.json() as { version: string };
+    if (latest !== current) {
+      console.error(`\n⚠  A newer version of Polaris is available: ${latest} (you have ${current})`);
+      console.error("   Run: npm install -g @lightupai/polaris@latest\n");
+    }
+  } catch { /* best-effort — network may be unavailable */ }
+}
+
 // --- Main ---
 
 const args = process.argv.slice(2);
@@ -793,10 +810,23 @@ function hasFlag(name: string): boolean {
   return args.includes(`--${name}`);
 }
 
+void checkForUpdate();
+
 switch (command) {
   case "install":
     console.log("Polaris — installing local components\n");
     await install();
+    // Restart daemon so it picks up any updates in the new package
+    await killExistingDaemon();
+    {
+      const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
+      Bun.spawn(["bun", "run", daemonPath], {
+        stdout: "ignore",
+        stderr: "ignore",
+        env: { ...process.env },
+      }).unref?.();
+    }
+    console.log("  ✓ Daemon restarted");
     console.log("\nInstall complete.");
     break;
 
@@ -833,6 +863,7 @@ switch (command) {
     break;
 
   case "daemon":
+    await killExistingDaemon();
     await daemon();
     break;
 
