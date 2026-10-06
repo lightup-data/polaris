@@ -69,6 +69,7 @@ describe("daemon /connect", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -96,6 +97,7 @@ describe("daemon /connect", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const res = await post(daemonUrl, "/connect", {
@@ -103,6 +105,7 @@ describe("daemon /connect", () => {
       project: "pj",
       session: "fxk",
       user: "user:manu",
+      create: true,
     });
     expect(res.status).toBe(200);
 
@@ -119,6 +122,7 @@ describe("daemon /disconnect", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const res = await post(daemonUrl, "/disconnect", { ccSessionId: "cc-5" });
@@ -137,6 +141,7 @@ describe("daemon /events (hook relay)", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const res = await post(daemonUrl, "/events", {
@@ -173,6 +178,7 @@ describe("daemon /status", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
 
     const res = await get(daemonUrl, "/status/cc-7");
@@ -195,12 +201,14 @@ describe("daemon /status", () => {
       project: "pj",
       session: "fxm",
       user: "user:manu",
+      create: true,
     });
     await post(daemonUrl, "/connect", {
       ccSessionId: "cc-8b",
       project: "pj",
       session: "fxk",
       user: "user:krishna",
+      create: true,
     });
 
     const res = await get(daemonUrl, "/status");

@@ -51,10 +51,10 @@ function sessionStatePath(): string {
   return `${homedir()}/.polaris/sessions/${hash}.json`;
 }
 
-async function saveSessionState(project: string, session: string, user: string): Promise<void> {
+async function saveSessionState(project: string, session: string, user: string, profile: string): Promise<void> {
   try {
     await mkdir(`${homedir()}/.polaris/sessions`, { recursive: true });
-    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, cwd: process.cwd() }));
+    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd() }));
   } catch { /* best-effort */ }
 }
 
@@ -64,12 +64,21 @@ async function clearSessionState(): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-async function loadSessionState(): Promise<{ project: string; session: string; user: string } | null> {
+async function loadSessionState(): Promise<{ project: string; session: string; user: string; profile: string } | null> {
   try {
     const data = JSON.parse(await readFile(sessionStatePath(), "utf-8"));
-    if (data.project && data.session && data.user) return data;
+    if (data.project && data.session && data.user) return { ...data, profile: data.profile ?? "" };
   } catch { /* no saved state */ }
   return null;
+}
+
+async function loadActiveProfile(): Promise<string> {
+  try {
+    const data = JSON.parse(await readFile(`${homedir()}/.polaris/config.json`, "utf-8"));
+    return data.active ?? "";
+  } catch {
+    return "";
+  }
 }
 
 // --- Current connection state ---
@@ -77,6 +86,7 @@ async function loadSessionState(): Promise<{ project: string; session: string; u
 let currentProject = "";
 let currentSession = "";
 let currentUser = "";
+let currentProfile = "";
 
 // --- MCP Server ---
 
@@ -98,14 +108,15 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "polaris_connect",
-      description: "Connect this session to a Polaris project and session. Creates the session if it doesn't exist.",
+      description: "Connect this session to an existing Polaris project. Use create:true to create a new project.",
       inputSchema: {
         type: "object" as const,
         properties: {
-          channel: { type: "string", description: "Project workspace to join (e.g., #my-project). Becomes the Slack channel name if a floor is connected. Omit to list existing projects." },
+          channel: { type: "string", description: "Project workspace to join (e.g., #my-project). Omit to list existing projects." },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
+          create: { type: "boolean", description: "Create the project if it doesn't exist (default: false). Only set true when explicitly starting a new project." },
         },
         required: ["user"],
       },
@@ -206,7 +217,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { channel, user, session, agent } = args as { channel?: string; user: string; session?: string; agent?: string };
+    const { channel, user, session, agent, create } = args as { channel?: string; user: string; session?: string; agent?: string; create?: boolean };
 
     // If no channel specified, list available channels
     if (!channel) {
@@ -215,7 +226,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (res.ok) {
           const body = await res.json() as { channels: string[] };
           if (body.channels.length === 0) {
-            return { content: [{ type: "text", text: "No projects found. Start one with: `/polaris join #my-project`" }] };
+            return { content: [{ type: "text", text: "No projects found. Create one with: `/polaris join #my-project` with create:true" }] };
           }
           return { content: [{ type: "text", text: `Available projects:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #project-name` }] };
         }
@@ -224,20 +235,31 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     const project = channel.replace(/^#/, ""); // strip leading # if present
+    const activeProfile = await loadActiveProfile();
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
         project,
         user,
+        profile: activeProfile,
         ...(session ? { session } : {}),
         ...(agent ? { agent } : {}),
+        ...(create ? { create: true } : {}),
       });
-      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string };
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[]; account?: string };
+      if (res.status === 404 && body.error === "project_not_found") {
+        const accountLine = body.account ? ` in ${body.account}` : "";
+        const list = body.existing && body.existing.length > 0
+          ? `\n\nAvailable projects:\n${body.existing.map(p => `  #${p}`).join("\n")}`
+          : "\n\nNo projects exist yet in this account.";
+        return { content: [{ type: "text", text: `Project "#${project}" not found${accountLine}.${list}\n\nTo create it: polaris_connect with create:true` }] };
+      }
       if (res.ok) {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";
         currentUser = user;
-        await saveSessionState(currentProject, currentSession, currentUser);
+        currentProfile = activeProfile;
+        await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
         return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
@@ -252,6 +274,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       currentProject = "";
       currentSession = "";
       currentUser = "";
+      currentProfile = "";
       await clearSessionState();
       return { content: [{ type: "text", text: "Disconnected from Polaris." }] };
     } catch {
@@ -390,9 +413,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Register with daemon and connect stdio ---
 
 async function main() {
+  const activeProfile = await loadActiveProfile();
+
   // Register with daemon (best-effort — daemon might not be running yet)
   try {
-    await daemonPost("/register", { ccSessionId: CC_SESSION_ID });
+    await daemonPost("/register", { ccSessionId: CC_SESSION_ID, profile: activeProfile });
   } catch {
     console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
   }
@@ -400,19 +425,22 @@ async function main() {
   // Auto-reconnect if a previous session was active in this workspace
   const saved = await loadSessionState();
   if (saved) {
+    const reconnectProfile = saved.profile || activeProfile;
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
         project: saved.project,
         session: saved.session,
         user: saved.user,
+        profile: reconnectProfile,
       });
       const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; error?: string };
       if (res.ok) {
         currentProject = body.project ?? saved.project;
         currentSession = body.session ?? saved.session;
         currentUser = saved.user;
-        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession}`);
+        currentProfile = reconnectProfile;
+        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession} (${reconnectProfile || "default"})`);
       } else {
         // Session or project no longer exists — clear stale state
         await clearSessionState();

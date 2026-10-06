@@ -13,9 +13,13 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**`/polaris join #channel-name`** — Connect to a channel:
+**`/polaris join #channel-name`** — Connect to an existing project, or create a new one:
 1. Call `polaris_connect` with the given channel and user identity `user:manu.bansal`
-2. A session name is auto-generated
+2. If the response is `project_not_found`:
+   - Show the list of existing projects from the response
+   - Ask the user: "Project '#channel-name' doesn't exist. Create it? [y/N]"
+   - If yes: call `polaris_connect` again with `create: true`
+   - If no: stop and show the existing project list so they can pick one
 3. Report the connection status including the session name
 
 **`/polaris rename <new-name>`** — Rename the current channel:

@@ -11,6 +11,7 @@ interface SessionMapping {
   session: string;
   user: string;
   agent: string;
+  profile: string; // which account profile this session is using
   slackChannel?: string;
   ws: WebSocket | null;
   pendingMapping?: boolean; // true until the first hook event from this shell claims the mapping
@@ -46,47 +47,73 @@ async function loadConfig(): Promise<PolarisConfig | null> {
   }
 }
 
-function getServiceUrl(): string {
-  // 1. Env var override (Makefile uses this for local dev)
+function getServiceUrlForProfile(profile: string): string {
+  // 1. Env var override (Makefile / tests)
   if (process.env.POLARIS_SERVICE_URL) return process.env.POLARIS_SERVICE_URL;
-  // 2. Active profile (read synchronously from cache — loaded at startup)
-  if (cachedConfig?.active && cachedConfig.profiles[cachedConfig.active]) {
+  // 2. Named profile
+  if (profile && cachedConfig?.profiles[profile]?.api) return cachedConfig.profiles[profile].api;
+  // 3. Active profile
+  if (cachedConfig?.active && cachedConfig.profiles[cachedConfig.active]?.api) {
     return cachedConfig.profiles[cachedConfig.active].api;
   }
-  // 3. Fallback
   return "https://api.withpolaris.ai";
 }
 
-let cachedToken: string | null | undefined = undefined;
-async function getAuthToken(): Promise<string | null> {
-  if (cachedToken !== undefined) return cachedToken;
-  // 1. Env var (for testing). Empty string means "no auth".
+function getServiceUrl(): string {
+  return getServiceUrlForProfile(cachedConfig?.active ?? "");
+}
+
+// Per-profile token cache. Key "" is used for env-var / test mode.
+const tokenCache = new Map<string, string | null>();
+
+async function getTokenForProfile(profile: string): Promise<string | null> {
+  // Env var always wins (test mode) — ignore profile entirely
   if (process.env.POLARIS_AUTH_TOKEN !== undefined) {
-    cachedToken = process.env.POLARIS_AUTH_TOKEN || null;
-    return cachedToken;
+    return process.env.POLARIS_AUTH_TOKEN || null;
   }
-  // 2. Active profile in config.json
+  if (tokenCache.has(profile)) return tokenCache.get(profile)!;
   const config = await loadConfig();
-  if (config?.active && config.profiles[config.active]?.token) {
-    cachedToken = config.profiles[config.active].token;
-    return cachedToken;
+  // Named profile
+  if (profile && config?.profiles[profile]?.token) {
+    tokenCache.set(profile, config.profiles[profile].token);
+    return config.profiles[profile].token;
   }
-  // 3. Legacy credentials.json
+  // Active profile fallback
+  if (config?.active && config.profiles[config.active]?.token) {
+    tokenCache.set(profile, config.profiles[config.active].token);
+    return config.profiles[config.active].token;
+  }
+  // Legacy credentials.json
   try {
     const credsPath = join(homedir(), ".polaris", "credentials.json");
     const creds = JSON.parse(await readFile(credsPath, "utf-8"));
-    cachedToken = creds.token ?? null;
-    return cachedToken;
+    tokenCache.set(profile, creds.token ?? null);
+    return creds.token ?? null;
   } catch {
-    cachedToken = null;
+    tokenCache.set(profile, null);
     return null;
   }
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAuthToken();
+function emailFromToken(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function authHeadersForProfile(profile: string): Promise<Record<string, string>> {
+  const token = await getTokenForProfile(profile);
   if (token) return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
   return { "Content-Type": "application/json" };
+}
+
+// Non-session calls (channel listing, team, etc.) use the active profile
+async function authHeaders(): Promise<Record<string, string>> {
+  return authHeadersForProfile(cachedConfig?.active ?? "");
 }
 
 // --- Daemon shared-secret auth ---
@@ -111,7 +138,7 @@ function getDaemonSecret(): string | null {
 // --- Cloud WebSocket management ---
 
 function connectCloudWs(mapping: SessionMapping) {
-  const serviceUrl = getServiceUrl();
+  const serviceUrl = getServiceUrlForProfile(mapping.profile);
   const wsUrl = serviceUrl.replace(/^http/, "ws");
   const ws = new WebSocket(`${wsUrl}/projects/${mapping.project}/sessions/${mapping.session}/ws`);
 
@@ -198,6 +225,7 @@ interface OutboxEntry {
   t: string;
   project: string;
   session: string;
+  profile: string; // which account to use when flushing
   body: unknown; // the exact { sender, payload } body for the events endpoint
 }
 
@@ -212,10 +240,10 @@ function ensureOutboxDir(): Promise<void> {
   return outboxReady;
 }
 
-async function enqueueOutbox(project: string, session: string, body: unknown): Promise<void> {
+async function enqueueOutbox(project: string, session: string, profile: string, body: unknown): Promise<void> {
   try {
     await ensureOutboxDir();
-    const entry: OutboxEntry = { t: new Date().toISOString(), project, session, body };
+    const entry: OutboxEntry = { t: new Date().toISOString(), project, session, profile, body };
     const file = join(OUTBOX_DIR, `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.json`);
     await writeFile(file, JSON.stringify(entry) + "\n");
     pendingOutbox.add(file);
@@ -234,14 +262,15 @@ function scheduleOutboxFlush(): void {
 }
 
 async function flushOutbox(): Promise<void> {
-  const serviceUrl = getServiceUrl();
   let hadFailure = false;
   for (const file of Array.from(pendingOutbox)) {
     try {
       const entry = JSON.parse(await readFile(file, "utf-8")) as OutboxEntry;
+      const profile = entry.profile ?? ""; // legacy entries without profile use active
+      const serviceUrl = getServiceUrlForProfile(profile);
       const res = await fetch(
         `${serviceUrl}/projects/${entry.project}/sessions/${entry.session}/events`,
-        { method: "POST", headers: await authHeaders(), body: JSON.stringify(entry.body) }
+        { method: "POST", headers: await authHeadersForProfile(profile), body: JSON.stringify(entry.body) }
       );
       if (res.ok || (res.status >= 400 && res.status < 500)) {
         if (!res.ok) {
@@ -306,10 +335,10 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
   } else {
     // Auto-detect: query API for most recent event, backfill from there
     try {
-      const serviceUrl = getServiceUrl();
+      const serviceUrl = getServiceUrlForProfile(mapping.profile);
       const res = await fetch(
         `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/messages`,
-        { headers: await authHeaders() }
+        { headers: await authHeadersForProfile(mapping.profile) }
       );
       if (res.ok) {
         const events = (await res.json()) as Array<{ timestamp: string }>;
@@ -362,8 +391,8 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
 
   // Replay events to the API
   let recovered = 0;
-  const serviceUrl = getServiceUrl();
-  const headers = await authHeaders();
+  const serviceUrl = getServiceUrlForProfile(mapping.profile);
+  const headers = await authHeadersForProfile(mapping.profile);
 
   for (const entry of logEntries) {
     const hookEvent = entry.payload.hook_event_name as string | undefined;
@@ -449,15 +478,49 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             session?: string;
             user: string;
             agent?: string;
+            profile?: string;
+            create?: boolean;
           };
           await logEvent("/connect", body);
           if (!body.ccSessionId || !body.project || !body.user) {
             return error("ccSessionId, project, and user are required", 400);
           }
 
+          // Resolve profile: explicit > active > ""
+          const profile = body.profile || cachedConfig?.active || "";
+          const serviceUrl = getServiceUrlForProfile(profile);
+          const headers = await authHeadersForProfile(profile);
+
           // Generate session name if not provided
           const sessionName = body.session || generateSessionName();
           const agentId = body.agent || "agent:claude";
+
+          // Check whether the project exists. If not, refuse unless create: true.
+          const checkRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers });
+          if (!checkRes.ok) {
+            if (checkRes.status === 404) {
+              // Return existing project list so the caller can show a helpful error
+              const listRes = await fetch(`${serviceUrl}/projects`, { headers });
+              const projects: string[] = listRes.ok
+                ? ((await listRes.json() as { name: string }[]).map((p) => p.name))
+                : [];
+              if (!body.create) {
+                const account = emailFromToken(await getTokenForProfile(profile));
+                return json({ error: "project_not_found", project: body.project, existing: projects, account }, 404);
+              }
+              // create: true — create the project now
+              const createRes = await fetch(`${serviceUrl}/projects`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ name: body.project }),
+              });
+              if (!createRes.ok && createRes.status !== 409) {
+                return error(`Failed to create project: ${await createRes.text()}`, 500);
+              }
+            } else {
+              return error(`Failed to verify project: ${await checkRes.text()}`, 500);
+            }
+          }
 
           // Disconnect existing cloud WS if switching sessions
           disconnectCloudWs(body.ccSessionId);
@@ -468,18 +531,11 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             session: sessionName,
             user: body.user,
             agent: agentId,
+            profile,
             ws: null,
             pendingMapping: true, // waiting for hook event to map the real CC session ID
           };
           sessions.set(body.ccSessionId, mapping);
-
-          // Ensure the project exists on the cloud service (create if not)
-          const serviceUrl = getServiceUrl();
-          await fetch(`${serviceUrl}/projects`, {
-            method: "POST",
-            headers: await authHeaders(),
-            body: JSON.stringify({ name: body.project }),
-          }); // Ignore 409 (already exists)
 
           // Ensure the session exists (create if not, claim driver)
           // Retry with new name on 409 (collision with generated name)
@@ -488,7 +544,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           while (!created && attempts < 3) {
             const sessionRes = await fetch(`${serviceUrl}/projects/${body.project}/sessions`, {
               method: "POST",
-              headers: await authHeaders(),
+              headers,
               body: JSON.stringify({ name: mapping.session, driver: body.user }),
             });
             if (sessionRes.ok) {
@@ -498,7 +554,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
                 // Explicit session name — claim driver instead of retrying
                 await fetch(`${serviceUrl}/projects/${body.project}/sessions/${mapping.session}/driver`, {
                   method: "POST",
-                  headers: await authHeaders(),
+                  headers,
                   body: JSON.stringify({ driver: body.user }),
                 });
                 created = true;
@@ -519,9 +575,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           // Fetch Slack channel name for status display
           try {
-            const projRes = await fetch(`${serviceUrl}/projects/${body.project}`, {
-              headers: await authHeaders(),
-            });
+            const projRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers });
             if (projRes.ok) {
               const projData = await projRes.json() as { slack_channel_name?: string };
               mapping.slackChannel = projData.slack_channel_name ?? undefined;
@@ -630,7 +684,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           // Relay to cloud service; on network failure or upstream 5xx,
           // persist to the write-ahead outbox instead of dropping
-          const serviceUrl = getServiceUrl();
+          const serviceUrl = getServiceUrlForProfile(mapping.profile);
           const relayBody = { sender, payload: body };
           let res: Response | null = null;
           try {
@@ -638,7 +692,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
               {
                 method: "POST",
-                headers: await authHeaders(),
+                headers: await authHeadersForProfile(mapping.profile),
                 body: JSON.stringify(relayBody),
               }
             );
@@ -649,7 +703,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (!res || res.status >= 500) {
             console.error(`polaris daemon: upstream relay failed (${res ? res.status : "network error"}) — queued to outbox`);
             await logEvent("/events", body, { status: res?.status ?? 0, body: "queued to outbox" });
-            await enqueueOutbox(mapping.project, mapping.session, relayBody);
+            await enqueueOutbox(mapping.project, mapping.session, mapping.profile, relayBody);
             // The event is durably accepted (outbox), so still drain injects
             if (hookEvent === "UserPromptSubmit") {
               const queue = injectQueues.get(mapping.ccSessionId);
@@ -684,11 +738,13 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const body = (await req.json()) as { oldName: string; newName: string };
           if (!body.oldName || !body.newName) return error("oldName and newName required", 400);
 
-          // Call cloud API to rename in DB
-          const serviceUrl = getServiceUrl();
+          // Find the profile for the session connected to this project
+          const renamingSession = Array.from(sessions.values()).find((m) => m.project === body.oldName);
+          const renameProfile = renamingSession?.profile ?? cachedConfig?.active ?? "";
+          const serviceUrl = getServiceUrlForProfile(renameProfile);
           const res = await fetch(`${serviceUrl}/projects/${body.oldName}/rename`, {
             method: "POST",
-            headers: await authHeaders(),
+            headers: await authHeadersForProfile(renameProfile),
             body: JSON.stringify({ name: body.newName }),
           });
           if (!res.ok) {
@@ -750,6 +806,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           session: mapping.session,
           user: mapping.user,
           slackChannel,
+          account: emailFromToken(await getTokenForProfile(mapping.profile)),
         });
       }
 
@@ -775,7 +832,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const mapping = sessions.get(body.ccSessionId);
           if (!mapping || !mapping.project) return error("Not connected", 400);
 
-          const serviceUrl = getServiceUrl();
+          const serviceUrl = getServiceUrlForProfile(mapping.profile);
           const relayBody = {
             // Replies come from the agent, not the human driver
             sender: mapping.agent,
@@ -791,7 +848,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
               {
                 method: "POST",
-                headers: await authHeaders(),
+                headers: await authHeadersForProfile(mapping.profile),
                 body: JSON.stringify(relayBody),
               }
             );
@@ -801,7 +858,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (!res || res.status >= 500) {
             console.error(`polaris daemon: upstream reply relay failed (${res ? res.status : "network error"}) — queued to outbox`);
             await logEvent("/reply", body, { status: res?.status ?? 0, body: "queued to outbox" });
-            await enqueueOutbox(mapping.project, mapping.session, relayBody);
+            await enqueueOutbox(mapping.project, mapping.session, mapping.profile, relayBody);
             return json({ status: "queued" });
           }
           if (!res.ok) {
@@ -823,10 +880,10 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         const mapping = sessions.get(ccSessionId);
         if (!mapping || !mapping.project) return error("Not connected", 400);
 
-        const serviceUrl = getServiceUrl();
+        const serviceUrl = getServiceUrlForProfile(mapping.profile);
         const res = await fetch(
           `${serviceUrl}/projects/${mapping.project}/sessions/${targetSession}/messages`,
-          { headers: await authHeaders() }
+          { headers: await authHeadersForProfile(mapping.profile) }
         );
         if (!res.ok) {
           const err = await res.text();

@@ -10,16 +10,7 @@ if [ -n "$POLARIS_DAEMON_SECRET" ]; then
   SECRET_HEADER="x-polaris-daemon-secret: $POLARIS_DAEMON_SECRET"
 fi
 
-# Read active profile name from ~/.polaris/config.json (best-effort)
-PROFILE=""
-CONFIG_FILE="${HOME}/.polaris/config.json"
-if [ -f "$CONFIG_FILE" ]; then
-  PROFILE=$(jq -r '.active // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
-fi
-PROFILE_TAG=""
-if [ -n "$PROFILE" ]; then
-  PROFILE_TAG="[${PROFILE}] "
-fi
+# Account is read from the per-session daemon status (set after connection)
 
 # Read stdin (session JSON from the coding agent)
 INPUT=$(cat)
@@ -38,11 +29,16 @@ if [ "$CONNECTED" = "true" ]; then
   SESSION=$(echo "$STATUS" | jq -r '.session' 2>/dev/null)
   USER=$(echo "$STATUS" | jq -r '.user' 2>/dev/null)
   SLACK=$(echo "$STATUS" | jq -r '.slackChannel // empty' 2>/dev/null)
+  ACCOUNT=$(echo "$STATUS" | jq -r '.account // empty' 2>/dev/null)
+  ACCOUNT_TAG=""
+  if [ -n "$ACCOUNT" ]; then
+    ACCOUNT_TAG="[${ACCOUNT}] "
+  fi
   if [ -n "$SLACK" ]; then
-    echo "polaris: ${PROFILE_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}"
   else
-    echo "polaris: ${PROFILE_TAG}${PROJECT}/${SESSION} (${USER})"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})"
   fi
 else
-  echo "polaris: ${PROFILE_TAG}not connected"
+  echo "polaris: not connected"
 fi
