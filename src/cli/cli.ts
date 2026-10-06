@@ -6,9 +6,9 @@
 //   polaris login        — authenticate via Google SSO (production)
 //   polaris login --local — authenticate against localhost
 //   polaris login --url <url> — authenticate against a custom URL
-//   polaris login --profile <name> — explicit profile name
-//   polaris use <profile> — switch active profile
-//   polaris profiles     — list profiles
+//   polaris login --profile <name> — explicit profile key (default: email)
+//   polaris use <email>  — switch active account (triggers login if not found)
+//   polaris profiles     — list accounts
 //   polaris daemon       — start the local daemon
 //   polaris status       — show connection status
 //   polaris recover      — re-POST locally logged events missing upstream
@@ -279,8 +279,9 @@ Based on the arguments provided, do ONE of the following:
 
 // --- Login ---
 
-async function login(appUrl: string, profileName?: string) {
-  const derivedName = profileName ?? deriveProfileName(appUrl);
+async function login(appUrl: string, profileName?: string, loginHint?: string) {
+  // Profile key is determined after auth (we use the email). profileName is an
+  // explicit override (e.g. --profile flag); otherwise we'll use userInfo.email.
 
   // Browser OAuth
   let resolveToken: (token: string) => void;
@@ -306,9 +307,10 @@ async function login(appUrl: string, profileName?: string) {
   });
 
   const callbackPort = callbackServer.port;
-  const authUrl = `${appUrl}/auth/cli?port=${callbackPort}`;
+  let authUrl = `${appUrl}/auth/cli?port=${callbackPort}`;
+  if (loginHint) authUrl += `&login_hint=${encodeURIComponent(loginHint)}`;
 
-  console.log(`  Opening browser for Google sign-in (${derivedName})...`);
+  console.log(`  Opening browser for Google sign-in...`);
   console.log(`  If the browser doesn't open, visit: ${authUrl}\n`);
 
   const proc = Bun.spawn(
@@ -344,9 +346,10 @@ async function login(appUrl: string, profileName?: string) {
   console.log(`  Organization: ${orgName}`);
   console.log(`  Participant ID: ${userInfo.participant_id}`);
 
-  // Save to profile
+  // Save to profile — keyed by email unless an explicit --profile name was given
   const config = await loadConfig();
-  config.profiles[derivedName] = {
+  const profileKey = profileName ?? userInfo.email;
+  config.profiles[profileKey] = {
     api: appToApi(appUrl),
     app: appUrl,
     token,
@@ -355,7 +358,7 @@ async function login(appUrl: string, profileName?: string) {
     org_id: userInfo.org_id,
     participant_id: userInfo.participant_id,
   };
-  config.active = derivedName;
+  config.active = profileKey;
   await saveConfig(config);
 
   // Also write legacy credentials.json for backward compat (daemon reads it)
@@ -365,7 +368,7 @@ async function login(appUrl: string, profileName?: string) {
     service_url: appUrl,
   }, null, 2));
 
-  console.log(`  ✓ Profile "${derivedName}" saved and set as active`);
+  console.log(`  ✓ Logged in as ${userInfo.email}`);
 
   // Re-install skill with personalized participant ID
   await mkdir(join(CLAUDE_DIR, "skills", "polaris"), { recursive: true });
@@ -434,54 +437,78 @@ Based on the arguments provided, do ONE of the following:
 
 // --- Use ---
 
-async function use(profileName: string) {
+// Accepts an email address or a legacy profile key. If the account isn't
+// found locally, starts the login flow (with login_hint pre-filled).
+async function use(arg: string) {
   const config = await loadConfig();
-  if (!config.profiles[profileName]) {
-    console.error(`Profile "${profileName}" not found.`);
-    const names = Object.keys(config.profiles);
-    if (names.length > 0) {
-      console.error(`Available profiles: ${names.join(", ")}`);
-    } else {
-      console.error("No profiles configured. Run: polaris login");
-    }
-    process.exit(1);
+
+  // 1. Direct key match (backward compat with old "prod" / "local" style names)
+  let matchedKey: string | undefined;
+  if (config.profiles[arg]) {
+    matchedKey = arg;
+  } else {
+    // 2. Search by email field
+    const entry = Object.entries(config.profiles).find(([, p]) => p.email === arg);
+    if (entry) matchedKey = entry[0];
   }
-  config.active = profileName;
-  await saveConfig(config);
 
-  // Update legacy credentials.json for daemon
-  const profile = config.profiles[profileName];
-  await writeFile(LEGACY_CREDENTIALS_FILE, JSON.stringify({
-    token: profile.token,
-    email: profile.email,
-    name: profile.name,
-    org_id: profile.org_id,
-    participant_id: profile.participant_id,
-    service_url: profile.app,
-  }, null, 2));
+  if (matchedKey) {
+    config.active = matchedKey;
+    await saveConfig(config);
+    const profile = config.profiles[matchedKey];
+    // Update legacy credentials.json for daemon
+    await writeFile(LEGACY_CREDENTIALS_FILE, JSON.stringify({
+      token: profile.token,
+      email: profile.email,
+      name: profile.name,
+      org_id: profile.org_id,
+      participant_id: profile.participant_id,
+      service_url: profile.app,
+    }, null, 2));
+    console.log(`Active account: ${profile.email}`);
+    console.log("Restart the daemon for this to take effect.");
+    return;
+  }
 
-  console.log(`Active profile: ${profileName} (${profile.api})`);
-  console.log("Restart the daemon for this to take effect.");
+  // 3. Not found locally — start auth (pre-fill email hint when it looks like
+  //    an email address so Google can skip account selection)
+  console.log(`Account "${arg}" not found locally. Starting authentication...\n`);
+  const isEmail = arg.includes("@");
+  await login(DEFAULT_APP_URL, undefined, isEmail ? arg : undefined);
+  console.log("\n✓ Login complete!");
+  // Replace daemon so new credentials are picked up immediately
+  await killExistingDaemon();
+  const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
+  Bun.spawn(["bun", "run", daemonPath], {
+    stdout: "ignore",
+    stderr: "ignore",
+    env: { ...process.env },
+  }).unref?.();
+  console.log("  ✓ Daemon started in background");
 }
 
 // --- Profiles ---
 
 async function profiles() {
   const config = await loadConfig();
-  const names = Object.keys(config.profiles);
-  if (names.length === 0) {
-    console.log("No profiles configured. Run: polaris login");
+  const keys = Object.keys(config.profiles);
+  if (keys.length === 0) {
+    console.log("No accounts configured. Run: polaris login");
     return;
   }
-  console.log("Profiles:\n");
-  for (const name of names) {
-    const p = config.profiles[name];
-    const active = name === config.active ? " (active)" : "";
-    console.log(`  ${name}${active}`);
-    console.log(`    API: ${p.api}`);
-    console.log(`    User: ${p.name} (${p.email})`);
+  console.log("Accounts:\n");
+  for (const key of keys) {
+    const p = config.profiles[key];
+    const active = key === config.active ? " (active)" : "";
+    // Use email as the primary label; show key only when it differs (legacy style)
+    const label = p.email || key;
+    const keyHint = p.email && key !== p.email ? ` [key: ${key}]` : "";
+    console.log(`  ${label}${active}${keyHint}`);
+    if (p.name) console.log(`    Name: ${p.name}`);
+    console.log(`    API:  ${p.api}`);
     console.log("");
   }
+  console.log(`Use \`polaris use <email>\` to switch accounts.`);
 }
 
 // --- Daemon ---
@@ -852,7 +879,7 @@ switch (command) {
 
   case "use":
     if (!args[1]) {
-      console.error("Usage: polaris use <profile>");
+      console.error("Usage: polaris use <email>");
       process.exit(1);
     }
     await use(args[1]);
@@ -908,8 +935,8 @@ switch (command) {
     console.log("  polaris install        — install local components (no auth)");
     console.log("  polaris login          — authenticate (production)");
     console.log("  polaris login --local  — authenticate (local dev)");
-    console.log("  polaris use <profile>  — switch active profile");
-    console.log("  polaris profiles       — list all profiles");
+    console.log("  polaris use <email>    — switch active account (triggers login if needed)");
+    console.log("  polaris profiles       — list all accounts");
     console.log("  polaris daemon         — start the local daemon");
     console.log("  polaris status         — show connection status");
     console.log("  polaris recover        — re-POST locally logged events missing upstream");
