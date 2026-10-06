@@ -13,7 +13,7 @@ interface SessionMapping {
   agent: string;
   slackChannel?: string;
   ws: WebSocket | null;
-  pendingMapping?: boolean; // true until a hook event maps the real CC session ID
+  pendingMapping?: boolean; // true until the first hook event from this shell claims the mapping
 }
 
 function generateSessionName(): string {
@@ -590,19 +590,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           //    MCP, connected via /connect, or a previously learned alias) —
           //    always routed by that match, regardless of how many other
           //    sessions are connected. A matchable event is never dropped.
-          // 2. No match + exactly one connected session: route to it and
-          //    remember session_id as an alias of that mapping (the MCP
-          //    client's generated UUID differs from CC's hook session_id),
-          //    so later events route by rule 1 even once more sessions join.
-          // 3. No match + multiple connected sessions: truly unmatchable —
-          //    drop, but loudly (console warning + JSONL log entry).
-          // 4. No match + nothing connected: not_connected (existing).
+          // 2. No exact match + a pending session exists: the MCP client's
+          //    generated UUID differs from CC's hook session_id. The first
+          //    hook event from the shell that ran /connect claims the pending
+          //    slot and becomes the canonical alias going forward.
+          // 3. No match + no pending session: unknown hook — the shell never
+          //    ran polaris_connect. Always returns not_connected; hooks from
+          //    unjoined shells are never auto-routed to an existing session.
           let mapping = sessions.get(ccSessionId);
           if (!mapping || !mapping.project) {
             // CC session_id doesn't match any registered MCP client. The MCP
             // server uses a different UUID than CC's session_id. Match to a
-            // session with pendingMapping (most recent first); fall back to the
-            // single-connected-session heuristic when none is pending.
+            // session with pendingMapping (most recent first).
             const pending = Array.from(sessions.values()).filter((m) => m.project && m.pendingMapping);
             if (pending.length > 0) {
               // Map the CC session ID to the most recently connected pending session
@@ -618,32 +617,10 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               injectQueues.set(mapping.ccSessionId, queue);
               injectQueues.set(ccSessionId, queue);
             } else {
-              // No pending sessions — fall back to the single-session heuristic.
-              const connectedSessions = Array.from(sessions.values()).filter((m) => m.project);
-              if (connectedSessions.length === 1) {
-                // Only one active session — route to it and remember the mapping
-                mapping = connectedSessions[0];
-                sessions.set(ccSessionId, { ...mapping, ccSessionId, slackChannel: undefined });
-                // Share the inject queue (see note above).
-                const queue = injectQueues.get(mapping.ccSessionId) ?? [];
-                injectQueues.set(mapping.ccSessionId, queue);
-                injectQueues.set(ccSessionId, queue);
-              } else if (connectedSessions.length > 1) {
-                // Multiple sessions and session_id matches none of them (nor any
-                // learned alias) — can't determine which one. Drop with a clear
-                // warning, never silently.
-                const candidates = connectedSessions.map((m) => `${m.project}/${m.session}`).join(", ");
-                console.error(
-                  `polaris daemon: dropping ${String(body.hook_event_name ?? "hook")} event — ` +
-                  `session_id ${ccSessionId} matches no known mapping and ${connectedSessions.length} ` +
-                  `sessions are connected (${candidates}). ` +
-                  `Reconnect with polaris_connect in the affected Claude session to re-establish routing.`
-                );
-                await logEvent("/events", body, { status: 0, body: `dropped: ambiguous across ${connectedSessions.length} sessions (${candidates})` });
-                return json({ status: "ambiguous" });
-              } else {
-                return json({ status: "not_connected" });
-              }
+              // No pending sessions — this hook's session_id doesn't match any
+              // known mapping. Unjoined shells are never auto-routed; the user
+              // must run polaris_connect explicitly in this Claude session.
+              return json({ status: "not_connected" });
             }
           }
 
