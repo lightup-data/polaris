@@ -113,17 +113,35 @@ polaris install          # Install MCP server, hooks, skill, status line + resta
 polaris login            # Authenticate against production
 polaris login --local    # Authenticate against localhost (for local dev)
 
-# Manage environments
-polaris profiles         # List all profiles
-polaris use local        # Switch to local dev
-polaris use prod         # Switch to production
+# Multi-account support
+polaris profiles                        # List all logged-in accounts
+polaris use you@work.com               # Switch to a work account
+polaris use you@personal.com           # Switch to a personal account (triggers login if not yet authenticated)
 
 # Other commands
 polaris daemon           # Start the local daemon (kills any existing daemon first)
-polaris status           # Show active profile, daemon state, sessions
-polaris logout           # Remove active profile credentials
+polaris status           # Show active account, daemon state, sessions
+polaris logout           # Remove active account credentials
 polaris logout --all     # Remove all credentials
 ```
+
+### Multiple accounts
+
+Polaris supports multiple accounts (work and personal) side by side. Each Claude Code session can connect to a different account independently — switching one session does not affect others.
+
+```sh
+# Log in to both accounts (one-time)
+polaris login                          # first account (stored as you@work.com)
+polaris login                          # second account (stored as you@personal.com)
+
+# Switch the active account for the daemon
+polaris use you@personal.com
+
+# Start a new session — it will use whichever account is active at connect time
+/polaris join #my-project
+```
+
+If you pass an email that isn't logged in yet, `polaris use` opens the browser to authenticate that account, then sets it as active. Google's account picker is pre-filled with the email hint.
 
 ### Upgrading
 
