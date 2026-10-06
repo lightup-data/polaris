@@ -1,11 +1,15 @@
 name: CD
 
-# Continuous deployment: on every push (merge) to master, SSH to the prod
-# host and run deploy.sh (git pull + docker compose build/up).
+# Continuous deployment: on every push (merge) to master:
+#   1. SSH to the prod host and run deploy.sh (git pull + docker compose build/up).
+#   2. Publish @lightupai/polaris to npm if the version in package.json has been
+#      bumped beyond what is already published (i.e. only when there are client-side
+#      changes that warrant a release).
 #
 # Required repository secrets (Settings → Secrets and variables → Actions):
 #   DEPLOY_HOST     — hostname or IP of the prod box (e.g. polaris.lightup.ai)
 #   DEPLOY_SSH_KEY  — private SSH key (OpenSSH format) for the deploy user
+#   NPM_TOKEN       — npm Automation token (bypasses OTP; create at npmjs.com)
 #
 # Optional repository secrets (deploy.sh has sensible defaults):
 #   DEPLOY_USER     — SSH user on the prod box (default: deploy)
@@ -75,3 +79,33 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
         run: ./deploy.sh
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Check if version needs publishing
+        id: version-check
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @lightupai/polaris version 2>/dev/null || echo "0.0.0")
+          echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL" != "$PUBLISHED" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL differs from published $PUBLISHED — will publish."
+          else
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL already published — skipping npm publish."
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          npm publish --access public
