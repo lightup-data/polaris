@@ -98,14 +98,15 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "polaris_connect",
-      description: "Connect this session to a Polaris project and session. Creates the session if it doesn't exist.",
+      description: "Connect this session to an existing Polaris project. Use create:true to create a new project.",
       inputSchema: {
         type: "object" as const,
         properties: {
-          channel: { type: "string", description: "Project workspace to join (e.g., #my-project). Becomes the Slack channel name if a floor is connected. Omit to list existing projects." },
+          channel: { type: "string", description: "Project workspace to join (e.g., #my-project). Omit to list existing projects." },
           user: { type: "string", description: "Your participant ID (e.g., user:manu)" },
           session: { type: "string", description: "Session name (optional — auto-generated if omitted)" },
           agent: { type: "string", description: "Agent identity (optional — defaults to agent:claude)" },
+          create: { type: "boolean", description: "Create the project if it doesn't exist (default: false). Only set true when explicitly starting a new project." },
         },
         required: ["user"],
       },
@@ -206,7 +207,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
   if (name === "polaris_connect") {
-    const { channel, user, session, agent } = args as { channel?: string; user: string; session?: string; agent?: string };
+    const { channel, user, session, agent, create } = args as { channel?: string; user: string; session?: string; agent?: string; create?: boolean };
 
     // If no channel specified, list available channels
     if (!channel) {
@@ -215,7 +216,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (res.ok) {
           const body = await res.json() as { channels: string[] };
           if (body.channels.length === 0) {
-            return { content: [{ type: "text", text: "No projects found. Start one with: `/polaris join #my-project`" }] };
+            return { content: [{ type: "text", text: "No projects found. Create one with: `/polaris join #my-project` with create:true" }] };
           }
           return { content: [{ type: "text", text: `Available projects:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #project-name` }] };
         }
@@ -231,8 +232,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         user,
         ...(session ? { session } : {}),
         ...(agent ? { agent } : {}),
+        ...(create ? { create: true } : {}),
       });
-      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string };
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[] };
+      if (res.status === 404 && body.error === "project_not_found") {
+        const list = body.existing && body.existing.length > 0
+          ? `\n\nAvailable projects:\n${body.existing.map(p => `  #${p}`).join("\n")}`
+          : "\n\nNo projects exist yet in this account.";
+        return { content: [{ type: "text", text: `Project "#${project}" not found.${list}\n\nTo create it: polaris_connect with create:true` }] };
+      }
       if (res.ok) {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";

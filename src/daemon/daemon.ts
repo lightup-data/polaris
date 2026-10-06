@@ -449,6 +449,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             session?: string;
             user: string;
             agent?: string;
+            create?: boolean;
           };
           await logEvent("/connect", body);
           if (!body.ccSessionId || !body.project || !body.user) {
@@ -458,6 +459,36 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // Generate session name if not provided
           const sessionName = body.session || generateSessionName();
           const agentId = body.agent || "agent:claude";
+
+          const serviceUrl = getServiceUrl();
+
+          // Check whether the project exists. If not, refuse unless create: true.
+          const checkRes = await fetch(`${serviceUrl}/projects/${body.project}`, {
+            headers: await authHeaders(),
+          });
+          if (!checkRes.ok) {
+            if (checkRes.status === 404) {
+              // Return existing project list so the caller can show a helpful error
+              const listRes = await fetch(`${serviceUrl}/projects`, { headers: await authHeaders() });
+              const projects: string[] = listRes.ok
+                ? ((await listRes.json() as { name: string }[]).map((p) => p.name))
+                : [];
+              if (!body.create) {
+                return json({ error: "project_not_found", project: body.project, existing: projects }, 404);
+              }
+              // create: true — create the project now
+              const createRes = await fetch(`${serviceUrl}/projects`, {
+                method: "POST",
+                headers: await authHeaders(),
+                body: JSON.stringify({ name: body.project }),
+              });
+              if (!createRes.ok && createRes.status !== 409) {
+                return error(`Failed to create project: ${await createRes.text()}`, 500);
+              }
+            } else {
+              return error(`Failed to verify project: ${await checkRes.text()}`, 500);
+            }
+          }
 
           // Disconnect existing cloud WS if switching sessions
           disconnectCloudWs(body.ccSessionId);
@@ -472,14 +503,6 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             pendingMapping: true, // waiting for hook event to map the real CC session ID
           };
           sessions.set(body.ccSessionId, mapping);
-
-          // Ensure the project exists on the cloud service (create if not)
-          const serviceUrl = getServiceUrl();
-          await fetch(`${serviceUrl}/projects`, {
-            method: "POST",
-            headers: await authHeaders(),
-            body: JSON.stringify({ name: body.project }),
-          }); // Ignore 409 (already exists)
 
           // Ensure the session exists (create if not, claim driver)
           // Retry with new name on 409 (collision with generated name)
