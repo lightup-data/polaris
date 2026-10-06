@@ -67,6 +67,38 @@ make test
 make clean
 ```
 
+## New Developer Setup
+
+After cloning and completing the Quick Start above, a few extra steps to get the MCP + daemon working for local development:
+
+### 1. Install the CLI
+
+```sh
+npm install -g @lightupai/polaris
+polaris login --local   # authenticates against localhost:3000
+```
+
+This generates a shared daemon secret and stores it in `~/.polaris/config.json`.
+
+### 2. Set up .mcp.json
+
+The project `.mcp.json` is gitignored (it contains your machine-specific daemon secret). Copy the example and fill it in:
+
+```sh
+cp .mcp.json.example .mcp.json
+```
+
+Then open `.mcp.json` and replace the placeholder with your `daemonSecret`:
+
+```sh
+# Print your daemon secret:
+cat ~/.polaris/config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['daemonSecret'])"
+```
+
+### 3. Restart Claude Code
+
+Restart Claude Code so it picks up the updated `.mcp.json`. The Polaris MCP tools (`polaris_connect`, `polaris_reply`, etc.) will then be available in your session.
+
 ## CLI
 
 ```sh
@@ -207,7 +239,7 @@ tests/         Test suite (bun test)
 - [ ] `POLARIS_PROMPT_STYLE` env var exists but only `color-header` mode remains — clean up dead references
 - [ ] No pagination on event queries — will be slow for projects with thousands of events
 - [ ] Bridge polls DB every 5 seconds for new events — switch to Postgres LISTEN/NOTIFY for lower latency
-- [ ] No auth on daemon HTTP endpoints — any local process can connect/disconnect sessions
+- [x] No auth on daemon HTTP endpoints — any local process can connect/disconnect sessions
 - [ ] Slack channel creation uses sanitized project name — names with special characters may collide
 - [ ] Dashboard SSE connection has no reconnect logic on the client side
 - [ ] No way to delete a project or archive old sessions
