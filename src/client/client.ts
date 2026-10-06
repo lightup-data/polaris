@@ -51,10 +51,10 @@ function sessionStatePath(): string {
   return `${homedir()}/.polaris/sessions/${hash}.json`;
 }
 
-async function saveSessionState(project: string, session: string, user: string): Promise<void> {
+async function saveSessionState(project: string, session: string, user: string, profile: string): Promise<void> {
   try {
     await mkdir(`${homedir()}/.polaris/sessions`, { recursive: true });
-    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, cwd: process.cwd() }));
+    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd() }));
   } catch { /* best-effort */ }
 }
 
@@ -64,12 +64,21 @@ async function clearSessionState(): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-async function loadSessionState(): Promise<{ project: string; session: string; user: string } | null> {
+async function loadSessionState(): Promise<{ project: string; session: string; user: string; profile: string } | null> {
   try {
     const data = JSON.parse(await readFile(sessionStatePath(), "utf-8"));
-    if (data.project && data.session && data.user) return data;
+    if (data.project && data.session && data.user) return { ...data, profile: data.profile ?? "" };
   } catch { /* no saved state */ }
   return null;
+}
+
+async function loadActiveProfile(): Promise<string> {
+  try {
+    const data = JSON.parse(await readFile(`${homedir()}/.polaris/config.json`, "utf-8"));
+    return data.active ?? "";
+  } catch {
+    return "";
+  }
 }
 
 // --- Current connection state ---
@@ -77,6 +86,7 @@ async function loadSessionState(): Promise<{ project: string; session: string; u
 let currentProject = "";
 let currentSession = "";
 let currentUser = "";
+let currentProfile = "";
 
 // --- MCP Server ---
 
@@ -225,11 +235,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     const project = channel.replace(/^#/, ""); // strip leading # if present
+    const activeProfile = await loadActiveProfile();
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
         project,
         user,
+        profile: activeProfile,
         ...(session ? { session } : {}),
         ...(agent ? { agent } : {}),
         ...(create ? { create: true } : {}),
@@ -246,7 +258,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";
         currentUser = user;
-        await saveSessionState(currentProject, currentSession, currentUser);
+        currentProfile = activeProfile;
+        await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
         return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
@@ -261,6 +274,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       currentProject = "";
       currentSession = "";
       currentUser = "";
+      currentProfile = "";
       await clearSessionState();
       return { content: [{ type: "text", text: "Disconnected from Polaris." }] };
     } catch {
@@ -399,9 +413,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Register with daemon and connect stdio ---
 
 async function main() {
+  const activeProfile = await loadActiveProfile();
+
   // Register with daemon (best-effort — daemon might not be running yet)
   try {
-    await daemonPost("/register", { ccSessionId: CC_SESSION_ID });
+    await daemonPost("/register", { ccSessionId: CC_SESSION_ID, profile: activeProfile });
   } catch {
     console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
   }
@@ -409,19 +425,22 @@ async function main() {
   // Auto-reconnect if a previous session was active in this workspace
   const saved = await loadSessionState();
   if (saved) {
+    const reconnectProfile = saved.profile || activeProfile;
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
         project: saved.project,
         session: saved.session,
         user: saved.user,
+        profile: reconnectProfile,
       });
       const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; error?: string };
       if (res.ok) {
         currentProject = body.project ?? saved.project;
         currentSession = body.session ?? saved.session;
         currentUser = saved.user;
-        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession}`);
+        currentProfile = reconnectProfile;
+        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession} (${reconnectProfile || "default"})`);
       } else {
         // Session or project no longer exists — clear stale state
         await clearSessionState();
