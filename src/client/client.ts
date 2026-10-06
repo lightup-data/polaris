@@ -4,6 +4,9 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 // --- Configuration ---
 
@@ -39,6 +42,34 @@ async function daemonPost(path: string, body: unknown): Promise<Response> {
 
 async function daemonGet(path: string): Promise<Response> {
   return fetch(`${DAEMON_URL}${path}`, { headers: daemonHeaders() });
+}
+
+// --- Session state persistence ---
+
+function sessionStatePath(): string {
+  const hash = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
+  return `${homedir()}/.polaris/sessions/${hash}.json`;
+}
+
+async function saveSessionState(project: string, session: string, user: string): Promise<void> {
+  try {
+    await mkdir(`${homedir()}/.polaris/sessions`, { recursive: true });
+    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, cwd: process.cwd() }));
+  } catch { /* best-effort */ }
+}
+
+async function clearSessionState(): Promise<void> {
+  try {
+    await rm(sessionStatePath(), { force: true });
+  } catch { /* best-effort */ }
+}
+
+async function loadSessionState(): Promise<{ project: string; session: string; user: string } | null> {
+  try {
+    const data = JSON.parse(await readFile(sessionStatePath(), "utf-8"));
+    if (data.project && data.session && data.user) return data;
+  } catch { /* no saved state */ }
+  return null;
 }
 
 // --- Current connection state ---
@@ -206,6 +237,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";
         currentUser = user;
+        await saveSessionState(currentProject, currentSession, currentUser);
         return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
@@ -220,6 +252,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       currentProject = "";
       currentSession = "";
       currentUser = "";
+      await clearSessionState();
       return { content: [{ type: "text", text: "Disconnected from Polaris." }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to disconnect — daemon may not be running." }] };
@@ -362,6 +395,31 @@ async function main() {
     await daemonPost("/register", { ccSessionId: CC_SESSION_ID });
   } catch {
     console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
+  }
+
+  // Auto-reconnect if a previous session was active in this workspace
+  const saved = await loadSessionState();
+  if (saved) {
+    try {
+      const res = await daemonPost("/connect", {
+        ccSessionId: CC_SESSION_ID,
+        project: saved.project,
+        session: saved.session,
+        user: saved.user,
+      });
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; error?: string };
+      if (res.ok) {
+        currentProject = body.project ?? saved.project;
+        currentSession = body.session ?? saved.session;
+        currentUser = saved.user;
+        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession}`);
+      } else {
+        // Session or project no longer exists — clear stale state
+        await clearSessionState();
+      }
+    } catch {
+      // Daemon not running — keep state file for next startup when daemon is available
+    }
   }
 
   // inject delivery is handled via the UserPromptSubmit hook (see daemon injectQueues); claude/channel push deferred
