@@ -111,11 +111,14 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm publish --access public || {
-            # If publish failed, check whether the version already exists (race
-            # between two concurrent CD runs). If so, treat it as success.
-            if npm view @lightupai/polaris@${{ steps.version-check.outputs.local }} version > /dev/null 2>&1; then
-              echo "Version ${{ steps.version-check.outputs.local }} already published — skipping (race condition)."
-              exit 0
-            fi
+            # If publish failed (E403 = already published, E409 = staged/in-flight),
+            # retry npm view a few times to let propagation settle, then treat as success.
+            for i in 1 2 3; do
+              sleep 5
+              if npm view @lightupai/polaris@${{ steps.version-check.outputs.local }} version > /dev/null 2>&1; then
+                echo "Version ${{ steps.version-check.outputs.local }} already published — skipping (race condition, attempt $i)."
+                exit 0
+              fi
+            done
             exit 1
           }
