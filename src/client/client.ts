@@ -234,12 +234,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         ...(agent ? { agent } : {}),
         ...(create ? { create: true } : {}),
       });
-      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[] };
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[]; account?: string };
       if (res.status === 404 && body.error === "project_not_found") {
+        const accountLine = body.account ? ` in ${body.account}` : "";
         const list = body.existing && body.existing.length > 0
           ? `\n\nAvailable projects:\n${body.existing.map(p => `  #${p}`).join("\n")}`
           : "\n\nNo projects exist yet in this account.";
-        return { content: [{ type: "text", text: `Project "#${project}" not found.${list}\n\nTo create it: polaris_connect with create:true` }] };
+        return { content: [{ type: "text", text: `Project "#${project}" not found${accountLine}.${list}\n\nTo create it: polaris_connect with create:true` }] };
       }
       if (res.ok) {
         currentProject = body.project ?? project;

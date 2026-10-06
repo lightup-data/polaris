@@ -83,6 +83,16 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
+function emailFromToken(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const token = await getAuthToken();
   if (token) return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -474,7 +484,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
                 ? ((await listRes.json() as { name: string }[]).map((p) => p.name))
                 : [];
               if (!body.create) {
-                return json({ error: "project_not_found", project: body.project, existing: projects }, 404);
+                const account = emailFromToken(await getAuthToken());
+                return json({ error: "project_not_found", project: body.project, existing: projects, account }, 404);
               }
               // create: true — create the project now
               const createRes = await fetch(`${serviceUrl}/projects`, {
