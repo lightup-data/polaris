@@ -182,6 +182,21 @@ const SYSTEMD_USER_DIR = join(homedir(), ".config", "systemd", "user");
 const SYSTEMD_SERVICE_FILE = join(SYSTEMD_USER_DIR, `${SYSTEMD_SERVICE_NAME}.service`);
 
 async function installSystemdService(daemonSecret?: string): Promise<void> {
+  // Resolve bun's absolute path at install time so systemd's minimal PATH
+  // doesn't matter. Bun.which() searches PATH; process.execPath is the
+  // interpreter we're already running under.
+  const resolvedBun = Bun.which("bun") ?? process.execPath;
+
+  // Warn when bun resolved to an npx cache directory — that path is volatile
+  // and will break the service if the cache is pruned or the hash changes.
+  const isVolatile = resolvedBun.includes("/_npx/") || resolvedBun.includes("/npx_cache/");
+  if (isVolatile) {
+    console.error(`  Warning: bun was found at a volatile npm cache path:`);
+    console.error(`    ${resolvedBun}`);
+    console.error(`  The daemon service may break if npm cleans its cache.`);
+    console.error(`  Install bun permanently for reliability: curl -fsSL https://bun.sh/install | bash`);
+  }
+
   const binDir = join(POLARIS_DIR, "bin");
   const runnerPath = join(binDir, "run-daemon.sh");
   const daemonTsPath = join(
@@ -189,15 +204,19 @@ async function installSystemdService(daemonSecret?: string): Promise<void> {
   );
 
   await mkdir(binDir, { recursive: true });
-  // Runner searches common bun install locations — systemd user units inherit a
-  // minimal PATH that may not include ~/.bun/bin
+  // Runner tries the baked-in path first (fast path), then falls back to
+  // common stable install locations, then npx as a last resort — so the
+  // service survives a cache prune or bun reinstall without needing
+  // `polaris install` to be rerun.
   const runner = [
     "#!/bin/sh",
     `# Polaris daemon — managed by systemd (${SYSTEMD_SERVICE_NAME}.service)`,
-    `for BUNPATH in "$HOME/.bun/bin/bun" /usr/local/bin/bun /usr/bin/bun; do`,
-    `  [ -x "$BUNPATH" ] && break`,
+    `DAEMONTS="${daemonTsPath}"`,
+    `for BUNPATH in "${resolvedBun}" "$HOME/.bun/bin/bun" /usr/local/bin/bun /usr/bin/bun; do`,
+    `  if [ -x "$BUNPATH" ]; then exec "$BUNPATH" run "$DAEMONTS"; fi`,
     `done`,
-    `exec "$BUNPATH" run "${daemonTsPath}"`,
+    `# npx fallback — slow but avoids exit-127 restart loops`,
+    `exec npx --yes bun run "$DAEMONTS"`,
   ].join("\n") + "\n";
   await writeFile(runnerPath, runner);
   await chmod(runnerPath, 0o755);
@@ -212,7 +231,8 @@ Type=simple
 ExecStart=${runnerPath}
 Restart=always
 RestartSec=5
-${secretLine}StandardOutput=append:/tmp/polaris-daemon.log
+${secretLine}Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+StandardOutput=append:/tmp/polaris-daemon.log
 StandardError=append:/tmp/polaris-daemon.log
 
 [Install]
@@ -222,12 +242,24 @@ WantedBy=default.target
   await mkdir(SYSTEMD_USER_DIR, { recursive: true });
   await writeFile(SYSTEMD_SERVICE_FILE, unit);
 
+  // Stop any existing manually-started daemon so it releases port 4322
+  // before systemd takes over
+  await killExistingDaemon();
+
   // Reload unit files, enable (start-at-login) and start/restart the service
   Bun.spawnSync(["systemctl", "--user", "daemon-reload"], { stdout: "ignore", stderr: "ignore" });
   Bun.spawnSync(["systemctl", "--user", "enable", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
-  const start = Bun.spawnSync(["systemctl", "--user", "restart", SYSTEMD_SERVICE_NAME], { stdout: "pipe", stderr: "pipe" });
-  if (start.exitCode !== 0) {
-    console.error(`  Warning: could not start daemon service: ${start.stderr.toString().trim()}`);
+  Bun.spawnSync(["systemctl", "--user", "restart", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
+
+  // Verify the service came up
+  const check = Bun.spawnSync(["systemctl", "--user", "is-active", SYSTEMD_SERVICE_NAME], { stdout: "pipe", stderr: "ignore" });
+  if (check.stdout.toString().trim() !== "active") {
+    console.error(`  Warning: daemon service did not start. Check logs:`);
+    const journal = Bun.spawnSync(
+      ["journalctl", "--user", "-u", SYSTEMD_SERVICE_NAME, "-n", "10", "--no-pager"],
+      { stdout: "pipe", stderr: "ignore" }
+    );
+    console.error(journal.stdout.toString().trim());
     console.error(`  Try manually: systemctl --user restart ${SYSTEMD_SERVICE_NAME}`);
   }
 
