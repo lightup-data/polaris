@@ -107,16 +107,13 @@ function appToApi(appUrl: string): string {
   return appUrl.replace("app.", "api.");
 }
 
-// --- LaunchAgent (macOS daemon auto-restart) ---
+// --- Daemon auto-restart (macOS: launchd, Linux: systemd user service) ---
 
+// macOS: LaunchAgent
 const LAUNCH_AGENT_LABEL = "ai.withpolaris.daemon";
 const LAUNCH_AGENT_PLIST = join(homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
 
-// Writes a runner script + launchd plist so the daemon survives crashes and
-// starts automatically at login. No-op on non-macOS platforms.
 async function installLaunchAgent(daemonSecret?: string): Promise<void> {
-  if (process.platform !== "darwin") return;
-
   const binDir = join(POLARIS_DIR, "bin");
   const runnerPath = join(binDir, "run-daemon.sh");
   const daemonTsPath = join(
@@ -175,9 +172,92 @@ async function installLaunchAgent(daemonSecret?: string): Promise<void> {
 }
 
 async function removeLaunchAgent(): Promise<void> {
-  if (process.platform !== "darwin") return;
   Bun.spawnSync(["launchctl", "unload", "-w", LAUNCH_AGENT_PLIST], { stdout: "ignore", stderr: "ignore" });
   try { await rm(LAUNCH_AGENT_PLIST); } catch { /* already gone */ }
+}
+
+// Linux: systemd user service
+const SYSTEMD_SERVICE_NAME = "polaris-daemon";
+const SYSTEMD_USER_DIR = join(homedir(), ".config", "systemd", "user");
+const SYSTEMD_SERVICE_FILE = join(SYSTEMD_USER_DIR, `${SYSTEMD_SERVICE_NAME}.service`);
+
+async function installSystemdService(daemonSecret?: string): Promise<void> {
+  const binDir = join(POLARIS_DIR, "bin");
+  const runnerPath = join(binDir, "run-daemon.sh");
+  const daemonTsPath = join(
+    POLARIS_DIR, "mcp", "node_modules", "@lightupai", "polaris", "src", "daemon", "daemon.ts"
+  );
+
+  await mkdir(binDir, { recursive: true });
+  // Runner searches common bun install locations — systemd user units inherit a
+  // minimal PATH that may not include ~/.bun/bin
+  const runner = [
+    "#!/bin/sh",
+    `# Polaris daemon — managed by systemd (${SYSTEMD_SERVICE_NAME}.service)`,
+    `for BUNPATH in "$HOME/.bun/bin/bun" /usr/local/bin/bun /usr/bin/bun; do`,
+    `  [ -x "$BUNPATH" ] && break`,
+    `done`,
+    `exec "$BUNPATH" run "${daemonTsPath}"`,
+  ].join("\n") + "\n";
+  await writeFile(runnerPath, runner);
+  await chmod(runnerPath, 0o755);
+
+  const secretLine = daemonSecret ? `Environment=POLARIS_DAEMON_SECRET=${daemonSecret}\n` : "";
+  const unit = `[Unit]
+Description=Polaris daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${runnerPath}
+Restart=always
+RestartSec=5
+${secretLine}StandardOutput=append:/tmp/polaris-daemon.log
+StandardError=append:/tmp/polaris-daemon.log
+
+[Install]
+WantedBy=default.target
+`;
+
+  await mkdir(SYSTEMD_USER_DIR, { recursive: true });
+  await writeFile(SYSTEMD_SERVICE_FILE, unit);
+
+  // Reload unit files, enable (start-at-login) and start/restart the service
+  Bun.spawnSync(["systemctl", "--user", "daemon-reload"], { stdout: "ignore", stderr: "ignore" });
+  Bun.spawnSync(["systemctl", "--user", "enable", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
+  const start = Bun.spawnSync(["systemctl", "--user", "restart", SYSTEMD_SERVICE_NAME], { stdout: "pipe", stderr: "pipe" });
+  if (start.exitCode !== 0) {
+    console.error(`  Warning: could not start daemon service: ${start.stderr.toString().trim()}`);
+    console.error(`  Try manually: systemctl --user restart ${SYSTEMD_SERVICE_NAME}`);
+  }
+
+  // Enable lingering so the user service survives logout and starts at boot
+  // (best-effort — requires sudo-less loginctl or appropriate privileges)
+  Bun.spawnSync(["loginctl", "enable-linger"], { stdout: "ignore", stderr: "ignore" });
+}
+
+async function removeSystemdService(): Promise<void> {
+  Bun.spawnSync(["systemctl", "--user", "disable", "--now", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
+  try { await rm(SYSTEMD_SERVICE_FILE); } catch { /* already gone */ }
+  Bun.spawnSync(["systemctl", "--user", "daemon-reload"], { stdout: "ignore", stderr: "ignore" });
+}
+
+// Platform dispatcher
+async function installDaemonService(daemonSecret?: string): Promise<void> {
+  if (process.platform === "darwin") return installLaunchAgent(daemonSecret);
+  if (process.platform === "linux") return installSystemdService(daemonSecret);
+  // Windows and others: no managed service; daemon is started manually
+}
+
+async function removeDaemonService(): Promise<void> {
+  if (process.platform === "darwin") return removeLaunchAgent();
+  if (process.platform === "linux") return removeSystemdService();
+}
+
+function daemonServiceLabel(): string {
+  if (process.platform === "darwin") return "launchd (auto-restarts on crash, starts at login)";
+  if (process.platform === "linux") return "systemd user service (auto-restarts on crash, starts at login)";
+  return "background process";
 }
 
 // --- Daemon secret ---
@@ -347,7 +427,7 @@ Based on the arguments provided, do ONE of the following:
 
 ### Daemon
 
-The Polaris daemon runs locally and is managed automatically — do NOT suggest systemd, launchd configuration, or other process managers. If the user reports the daemon is down or not starting at login, tell them to run \`polaris install\` which sets up auto-restart (launchd on macOS).
+The Polaris daemon runs locally and is managed automatically — do NOT manually configure launchd or systemd. If the user reports the daemon is down or not starting at login, tell them to run \`polaris install\` which sets up auto-restart (launchd on macOS, systemd user service on Linux).
 
 ### Arguments: $ARGUMENTS
 `;
@@ -859,7 +939,7 @@ async function recover() {
 
 async function logout(all = false) {
   if (all) {
-    await removeLaunchAgent();
+    await removeDaemonService();
     try {
       await rm(POLARIS_DIR, { recursive: true });
       console.log("All profiles and credentials removed.");
@@ -962,8 +1042,8 @@ switch (command) {
   case "install":
     console.log("Polaris — installing local components\n");
     await install();
-    await installLaunchAgent(await ensureDaemonSecret());
-    console.log("  ✓ Daemon registered with launchd (auto-restarts on crash, starts at login)");
+    await installDaemonService(await ensureDaemonSecret());
+    console.log(`  ✓ Daemon registered with ${daemonServiceLabel()}`);
     console.log("\nInstall complete.");
     break;
 
@@ -973,8 +1053,8 @@ switch (command) {
     console.log("Polaris — authenticating\n");
     await login(appUrl, profileName);
     console.log("\n✓ Login complete!");
-    await installLaunchAgent(await ensureDaemonSecret());
-    console.log("  ✓ Daemon restarted");
+    await installDaemonService(await ensureDaemonSecret());
+    console.log(`  ✓ Daemon registered with ${daemonServiceLabel()}`);
 
     console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;
@@ -1027,8 +1107,8 @@ switch (command) {
     console.log("[2/2] Authenticating...\n");
     await login(DEFAULT_APP_URL);
     console.log("\n✓ Polaris is set up on this machine!");
-    await installLaunchAgent(await ensureDaemonSecret());
-    console.log("  ✓ Daemon registered with launchd (auto-restarts on crash, starts at login)");
+    await installDaemonService(await ensureDaemonSecret());
+    console.log(`  ✓ Daemon registered with ${daemonServiceLabel()}`);
 
     console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;

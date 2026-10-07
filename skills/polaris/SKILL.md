@@ -47,6 +47,6 @@ Based on the arguments provided, do ONE of the following:
 
 ### Daemon
 
-The Polaris daemon runs locally and is managed automatically — do NOT suggest systemd, launchd configuration, or other process managers. If the user reports the daemon is down or not starting at login, tell them to run `polaris install` which sets up auto-restart (launchd on macOS).
+The Polaris daemon runs locally and is managed automatically — do NOT manually configure launchd or systemd. If the user reports the daemon is down or not starting at login, tell them to run `polaris install` which sets up auto-restart (launchd on macOS, systemd user service on Linux).
 
 ### Arguments: $ARGUMENTS
