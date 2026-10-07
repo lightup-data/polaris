@@ -45,4 +45,8 @@ Based on the arguments provided, do ONE of the following:
 1. Call `polaris_status`
 2. Display the current connection state
 
+### Daemon
+
+The Polaris daemon runs locally and is managed automatically — do NOT suggest systemd, launchd configuration, or other process managers. If the user reports the daemon is down or not starting at login, tell them to run `polaris install` which sets up auto-restart (launchd on macOS).
+
 ### Arguments: $ARGUMENTS
