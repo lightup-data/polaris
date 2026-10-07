@@ -121,6 +121,10 @@ polaris use you@personal.com           # Switch to a personal account (triggers 
 # Other commands
 polaris daemon           # Start the local daemon (kills any existing daemon first)
 polaris status           # Show active account, daemon state, sessions
+polaris feedback                          # Report a bug or request a feature (opens GitHub)
+polaris feedback "it crashed on startup"  # Pre-fill the issue title
+polaris feedback --bug "description"      # Open with bug label
+polaris feedback --feature "description"  # Open with feature-request label
 polaris logout           # Remove active account credentials
 polaris logout --all     # Remove all credentials
 ```

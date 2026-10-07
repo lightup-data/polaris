@@ -12,6 +12,7 @@
 //   polaris daemon       — start the local daemon
 //   polaris status       — show connection status
 //   polaris recover      — re-POST locally logged events missing upstream
+//   polaris feedback     — report a bug or request a feature
 //   polaris logout       — remove credentials
 
 import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:fs/promises";
@@ -805,6 +806,46 @@ async function logout(all = false) {
   console.log("MCP config and hooks are still installed — run `polaris install` to reset them.");
 }
 
+// --- Feedback ---
+
+const GITHUB_ISSUES_URL = "https://github.com/lightup-data/polaris/issues/new";
+
+function openUrl(url: string): void {
+  Bun.spawn(
+    process.platform === "darwin" ? ["open", url] :
+    process.platform === "win32" ? ["cmd", "/c", "start", url] :
+    ["xdg-open", url],
+    { stdout: "ignore", stderr: "ignore" }
+  ).unref?.();
+}
+
+async function feedback(text?: string, label?: "bug" | "enhancement") {
+  let version = "";
+  try {
+    const pkgPath = join(import.meta.dir, "..", "..", "package.json");
+    ({ version } = JSON.parse(await readFile(pkgPath, "utf-8")) as { version: string });
+  } catch { /* non-fatal */ }
+
+  const params: Record<string, string> = {};
+  if (text) {
+    params.title = text;
+    const versionLine = version ? `**polaris version:** ${version}\n\n` : "";
+    params.body = `${versionLine}${text}`;
+  }
+  if (label) params.labels = label;
+
+  const qs = new URLSearchParams(params).toString();
+  const url = qs ? `${GITHUB_ISSUES_URL}?${qs}` : GITHUB_ISSUES_URL;
+
+  openUrl(url);
+  if (text) {
+    console.log(`Opening GitHub with your feedback: "${text}"`);
+  } else {
+    console.log("Opening GitHub issues page...");
+  }
+  console.log(`\nIf the browser didn't open: ${url}`);
+}
+
 // --- Update check ---
 // Warn if a newer version is available on npm. Best-effort: never blocks startup.
 
@@ -902,6 +943,15 @@ switch (command) {
     await recover();
     break;
 
+  case "feedback": {
+    const isBug = hasFlag("bug");
+    const isFeature = hasFlag("feature");
+    const label = isBug ? "bug" : isFeature ? "enhancement" : undefined;
+    const text = args.slice(1).find(a => !a.startsWith("--"));
+    await feedback(text, label);
+    break;
+  }
+
   case "logout":
     await logout(hasFlag("all"));
     break;
@@ -940,6 +990,7 @@ switch (command) {
     console.log("  polaris daemon         — start the local daemon");
     console.log("  polaris status         — show connection status");
     console.log("  polaris recover        — re-POST locally logged events missing upstream");
+    console.log("  polaris feedback       — report a bug or request a feature");
     console.log("  polaris logout         — remove active profile");
     console.log("  polaris logout --all   — remove all credentials");
 }
