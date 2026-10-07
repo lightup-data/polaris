@@ -1,6 +1,6 @@
 {
   "name": "@lightupai/polaris",
-  "version": "0.0.93",
+  "version": "0.0.94",
   "description": "Record and stream Claude Code sessions to Slack. Like Gong for AI coding — capture every prompt, response, and tool call. Multiplayer collaboration across AI coding agents.",
   "keywords": [
     "claude-code",
