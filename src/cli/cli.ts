@@ -107,6 +107,79 @@ function appToApi(appUrl: string): string {
   return appUrl.replace("app.", "api.");
 }
 
+// --- LaunchAgent (macOS daemon auto-restart) ---
+
+const LAUNCH_AGENT_LABEL = "ai.withpolaris.daemon";
+const LAUNCH_AGENT_PLIST = join(homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+
+// Writes a runner script + launchd plist so the daemon survives crashes and
+// starts automatically at login. No-op on non-macOS platforms.
+async function installLaunchAgent(daemonSecret?: string): Promise<void> {
+  if (process.platform !== "darwin") return;
+
+  const binDir = join(POLARIS_DIR, "bin");
+  const runnerPath = join(binDir, "run-daemon.sh");
+  const daemonTsPath = join(
+    POLARIS_DIR, "mcp", "node_modules", "@lightupai", "polaris", "src", "daemon", "daemon.ts"
+  );
+
+  await mkdir(binDir, { recursive: true });
+  // Runner searches common bun locations so launchd's minimal PATH is not an issue
+  const runner = [
+    "#!/bin/sh",
+    `# Polaris daemon — managed by launchd (${LAUNCH_AGENT_LABEL})`,
+    `for BUNPATH in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do`,
+    `  [ -x "$BUNPATH" ] && break`,
+    `done`,
+    `exec "$BUNPATH" run "${daemonTsPath}"`,
+  ].join("\n") + "\n";
+  await writeFile(runnerPath, runner);
+  await chmod(runnerPath, 0o755);
+
+  const secretEnv = daemonSecret
+    ? `\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>POLARIS_DAEMON_SECRET</key>\n    <string>${daemonSecret}</string>\n  </dict>`
+    : "";
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCH_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${runnerPath}</string>
+  </array>${secretEnv}
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/polaris-daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/polaris-daemon.log</string>
+</dict>
+</plist>`;
+
+  await mkdir(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
+  await writeFile(LAUNCH_AGENT_PLIST, plist);
+
+  // Unload any existing instance, then load fresh (ignore errors if not loaded yet)
+  Bun.spawnSync(["launchctl", "unload", "-w", LAUNCH_AGENT_PLIST], { stdout: "ignore", stderr: "ignore" });
+  const load = Bun.spawnSync(["launchctl", "load", "-w", LAUNCH_AGENT_PLIST], { stdout: "pipe", stderr: "pipe" });
+  if (load.exitCode !== 0) {
+    console.error(`  Warning: could not register daemon with launchd: ${load.stderr.toString().trim()}`);
+    console.error(`  Try manually: launchctl load -w ${LAUNCH_AGENT_PLIST}`);
+  }
+}
+
+async function removeLaunchAgent(): Promise<void> {
+  if (process.platform !== "darwin") return;
+  Bun.spawnSync(["launchctl", "unload", "-w", LAUNCH_AGENT_PLIST], { stdout: "ignore", stderr: "ignore" });
+  try { await rm(LAUNCH_AGENT_PLIST); } catch { /* already gone */ }
+}
+
 // --- Daemon secret ---
 
 // Shared local secret for daemon HTTP auth. Stored in ~/.polaris/config.json
@@ -271,6 +344,10 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris\`** (no arguments) — Show status:
 1. Call \`polaris_status\`
 2. Display the current connection state
+
+### Daemon
+
+The Polaris daemon runs locally and is managed automatically — do NOT suggest systemd, launchd configuration, or other process managers. If the user reports the daemon is down or not starting at login, tell them to run \`polaris install\` which sets up auto-restart (launchd on macOS).
 
 ### Arguments: $ARGUMENTS
 `;
@@ -782,6 +859,7 @@ async function recover() {
 
 async function logout(all = false) {
   if (all) {
+    await removeLaunchAgent();
     try {
       await rm(POLARIS_DIR, { recursive: true });
       console.log("All profiles and credentials removed.");
@@ -884,17 +962,8 @@ switch (command) {
   case "install":
     console.log("Polaris — installing local components\n");
     await install();
-    // Restart daemon so it picks up any updates in the new package
-    await killExistingDaemon();
-    {
-      const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
-      Bun.spawn(["bun", "run", daemonPath], {
-        stdout: "ignore",
-        stderr: "ignore",
-        env: { ...process.env },
-      }).unref?.();
-    }
-    console.log("  ✓ Daemon restarted");
+    await installLaunchAgent(await ensureDaemonSecret());
+    console.log("  ✓ Daemon registered with launchd (auto-restarts on crash, starts at login)");
     console.log("\nInstall complete.");
     break;
 
@@ -904,15 +973,8 @@ switch (command) {
     console.log("Polaris — authenticating\n");
     await login(appUrl, profileName);
     console.log("\n✓ Login complete!");
-    // Replace any existing daemon with the current version
-    await killExistingDaemon();
-    const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
-    Bun.spawn(["bun", "run", daemonPath], {
-      stdout: "ignore",
-      stderr: "ignore",
-      env: { ...process.env },
-    }).unref?.();
-    console.log("  ✓ Daemon started in background");
+    await installLaunchAgent(await ensureDaemonSecret());
+    console.log("  ✓ Daemon restarted");
 
     console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;
@@ -965,15 +1027,8 @@ switch (command) {
     console.log("[2/2] Authenticating...\n");
     await login(DEFAULT_APP_URL);
     console.log("\n✓ Polaris is set up on this machine!");
-    // Replace any existing daemon with the current version
-    await killExistingDaemon();
-    const daemonPath = join(import.meta.dir, "..", "daemon", "daemon.ts");
-    Bun.spawn(["bun", "run", daemonPath], {
-      stdout: "ignore",
-      stderr: "ignore",
-      env: { ...process.env },
-    }).unref?.();
-    console.log("  ✓ Daemon started in background");
+    await installLaunchAgent(await ensureDaemonSecret());
+    console.log("  ✓ Daemon registered with launchd (auto-restarts on crash, starts at login)");
 
     console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
     break;
