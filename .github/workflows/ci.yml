@@ -43,32 +43,6 @@ jobs:
 
       - run: bun test
 
-  publish:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: bun install
-
-      - name: Bump version from npm registry and publish
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-          PUBLISHED=$(npm view @lightupai/polaris version 2>/dev/null || echo "0.0.0")
-          # Bump patch from the latest published version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$PUBLISHED"
-          NEW="$MAJOR.$MINOR.$((PATCH + 1))"
-          echo "Published: $PUBLISHED → Publishing: $NEW"
-          # Set version in package.json for this publish only (not committed)
-          npm version "$NEW" --no-git-tag-version
-          npm publish --access public
-
   deploy:
     needs: test
     runs-on: ubuntu-latest
