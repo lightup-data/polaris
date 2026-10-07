@@ -102,7 +102,7 @@ const mcp = new Server(
     },
     instructions: `You are connected to Polaris — a multiplayer collaboration system. Messages from advisors and teammates may arrive as <channel source="polaris" from="..."> tags. Use /polaris commands to manage your session, or call the polaris tools directly.
 
-If the user reports the Polaris daemon is not running or keeps crashing, tell them to run \`polaris install\` — it registers the daemon with launchd (macOS) for auto-restart on crash and at login. Do NOT suggest systemd, manual launchd configuration, or other process managers.`,
+If the user reports the Polaris daemon is not running or keeps crashing, tell them to run \`polaris install\` — it registers the daemon with launchd on macOS or a systemd user service on Linux for auto-restart on crash and at login. Do NOT suggest manually configuring launchd or systemd — \`polaris install\` handles it.`,
   }
 );
 
