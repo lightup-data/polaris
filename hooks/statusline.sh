@@ -57,8 +57,28 @@ if [ -f "$INSTALLED_PKG" ]; then
     ) &
   fi
 
-  if [ -n "$CACHED_LATEST" ] && [ -n "$INSTALLED_VERSION" ] && [ "$CACHED_LATEST" != "$INSTALLED_VERSION" ]; then
-    UPDATE_MSG=" [update available: v${CACHED_LATEST}]"
+  # Only notify when the registry version is strictly newer (prevents false
+  # positives when a freshly-updated client's cache still shows an older latest).
+  if [ -n "$CACHED_LATEST" ] && [ -n "$INSTALLED_VERSION" ]; then
+    _ver_gt() {
+      # Returns true (0) when $1 is semver-greater than $2
+      # Works for the "0.0.NNN" format used by polaris.
+      IFS=. read -r _a1 _a2 _a3 <<_EOF_
+$1
+_EOF_
+      IFS=. read -r _b1 _b2 _b3 <<_EOF_
+$2
+_EOF_
+      [ "${_a1:-0}" -gt "${_b1:-0}" ] && return 0
+      [ "${_a1:-0}" -lt "${_b1:-0}" ] && return 1
+      [ "${_a2:-0}" -gt "${_b2:-0}" ] && return 0
+      [ "${_a2:-0}" -lt "${_b2:-0}" ] && return 1
+      [ "${_a3:-0}" -gt "${_b3:-0}" ] && return 0
+      return 1
+    }
+    if _ver_gt "$CACHED_LATEST" "$INSTALLED_VERSION"; then
+      UPDATE_MSG=" [update available: v${CACHED_LATEST}]"
+    fi
   fi
 fi
 
