@@ -77,7 +77,7 @@ _EOF_
       return 1
     }
     if _ver_gt "$CACHED_LATEST" "$INSTALLED_VERSION"; then
-      UPDATE_MSG=" [update available: v${CACHED_LATEST}]"
+      UPDATE_MSG=" [v${INSTALLED_VERSION}, update available]"
     fi
   fi
 fi
