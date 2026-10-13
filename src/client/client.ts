@@ -192,6 +192,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           duration: { type: "string", description: "Time range to backfill (e.g., '2h', '30m', '1d'). Auto-detects if omitted." },
           from: { type: "string", description: "ISO timestamp to backfill from. Overrides duration." },
+          dry_run: { type: "boolean", description: "If true, report how many events would be sent without actually sending them." },
         },
       },
     },
@@ -397,16 +398,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!currentProject) {
       return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
     }
-    const { duration, from } = (args ?? {}) as { duration?: string; from?: string };
+    const { duration, from, dry_run } = (args ?? {}) as { duration?: string; from?: string; dry_run?: boolean };
     try {
       const res = await daemonPost("/backfill", {
         ccSessionId: CC_SESSION_ID,
         ...(duration ? { duration } : {}),
         ...(from ? { from } : {}),
+        ...(dry_run ? { dry_run: true } : {}),
       });
-      const body = await res.json() as { recovered: number; source: string; gaps: string[] };
+      const body = await res.json() as { recovered: number; would_recover?: number; source: string; gaps: string[] };
       if (res.ok) {
         const gapInfo = body.gaps.length > 0 ? `\nGaps: ${body.gaps.join(", ")}` : "";
+        if (dry_run) {
+          return { content: [{ type: "text", text: `Dry run: ${body.would_recover ?? 0} events in daemon log would be sent.${gapInfo}` }] };
+        }
         return { content: [{ type: "text", text: `Backfill complete: ${body.recovered} events recovered from ${body.source}.${gapInfo}` }] };
       }
       return { content: [{ type: "text", text: `Backfill failed: ${(body as unknown as { error?: string }).error ?? "unknown error"}` }] };
@@ -459,6 +464,34 @@ async function main() {
       // Daemon not running — keep state file for next startup when daemon is available
     }
   }
+
+  // Heartbeat: check every 60s whether the daemon still has our session mapped.
+  // If not (dropped WS, daemon restart, compaction), silently re-connect so
+  // activity reaches the channel without a manual /polaris join.
+  setInterval(async () => {
+    if (!currentProject) return; // not connected — nothing to heartbeat
+    try {
+      const res = await daemonGet(`/status/${CC_SESSION_ID}`);
+      const body = await res.json() as { connected?: boolean; project?: string; session?: string };
+      if (body.connected) return; // all good
+      // Daemon lost the mapping — attempt to reconnect to the same session
+      const reconnectRes = await daemonPost("/connect", {
+        ccSessionId: CC_SESSION_ID,
+        project: currentProject,
+        session: currentSession,
+        user: currentUser,
+        profile: currentProfile,
+      });
+      if (reconnectRes.ok) {
+        console.error(`Polaris: session dropped; auto-reconnected to #${currentProject}/${currentSession}`);
+      } else {
+        console.error(`Polaris: session dropped and reconnect failed. Run /polaris to check status.`);
+        currentProject = "";
+        currentSession = "";
+        currentUser = "";
+      }
+    } catch { /* daemon unreachable — will retry next heartbeat */ }
+  }, 60_000);
 
   // inject delivery is handled via the UserPromptSubmit hook (see daemon injectQueues); claude/channel push deferred
 
