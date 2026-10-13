@@ -402,6 +402,16 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
     }
   }
 
+  // Collect all CC session IDs that belong to this mapping (MCP UUID + any hook alias).
+  // Both the MCP client's UUID and the CC hook session_id (if they differ) must match.
+  const knownCcIds = new Set<string>();
+  knownCcIds.add(mapping.ccSessionId);
+  for (const [id, m] of sessions) {
+    if (m.project === mapping.project && m.session === mapping.session) {
+      knownCcIds.add(id);
+    }
+  }
+
   // Read daemon log files covering the time range
   const logEntries: Array<{ t: string; endpoint: string; payload: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string; response?: unknown }> = [];
   const startDate = since.toISOString().slice(0, 10);
@@ -426,14 +436,16 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
           if (entry.endpoint !== "/events") continue;
           if (new Date(entry.t) <= since) continue;
           if (new Date(entry.t) > now) continue;
-          // Filter by origin (added since v0.0.105). Old entries without these fields
-          // pass through for backwards compatibility with pre-105 logs.
-          if (entry.project !== undefined && entry.project !== mapping.project) continue;
-          if (entry.session !== undefined && entry.session !== mapping.session) continue;
-          if (entry.ccSessionId !== undefined && entry.ccSessionId !== mapping.ccSessionId) continue;
           // Skip error-response entries — they're duplicates of the primary entry
           // and would cause the same event to be replayed twice.
           if (entry.response !== undefined) continue;
+          // Filter by origin. New entries (v0.0.105+) have explicit context fields;
+          // old entries can be matched via payload.session_id. Both must belong to
+          // this mapping's known CC session IDs to prevent cross-session pollution.
+          const entrySessionId: string | undefined = entry.ccSessionId ?? entry.payload.session_id;
+          if (entrySessionId !== undefined && !knownCcIds.has(entrySessionId)) continue;
+          if (entry.project !== undefined && entry.project !== mapping.project) continue;
+          if (entry.session !== undefined && entry.session !== mapping.session) continue;
           logEntries.push(entry);
         } catch { /* skip malformed lines */ }
       }
