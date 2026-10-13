@@ -328,14 +328,99 @@ async function logSessionChange(action: "connect" | "disconnect" | "ws-drop", cc
   } catch { /* best-effort */ }
 }
 
+// --- Session persistence ---
+//
+// The daemon writes its session map to ~/.polaris/sessions/daemon-state.json
+// after every mutation, and reloads it on startup. This makes daemon restarts
+// (e.g. during `polaris update`) invisible to connected sessions: the new daemon
+// loads the map and re-opens cloud WebSocket connections before serving requests.
+//
+// Persistence is only active when the daemon is run as main (import.meta.main).
+// Tests that call startDaemon() in-process never enable it, so developer state
+// is never overwritten by the test suite.
+
+const SESSIONS_DIR = join(homedir(), ".polaris", "sessions");
+const DAEMON_STATE_FILE = join(SESSIONS_DIR, "daemon-state.json");
+let persistenceEnabled = false;
+
+interface PersistedSession {
+  ccSessionId: string;
+  project: string;
+  session: string;
+  user: string;
+  agent: string;
+  profile: string;
+  slackChannel?: string;
+}
+
+async function persistSessions(): Promise<void> {
+  if (!persistenceEnabled) return;
+  try {
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    const active: PersistedSession[] = [];
+    for (const m of sessions.values()) {
+      if (!m.project) continue; // skip empty stubs from /register
+      active.push({
+        ccSessionId: m.ccSessionId,
+        project: m.project,
+        session: m.session,
+        user: m.user,
+        agent: m.agent,
+        profile: m.profile,
+        ...(m.slackChannel ? { slackChannel: m.slackChannel } : {}),
+      });
+    }
+    await writeFile(DAEMON_STATE_FILE, JSON.stringify({ sessions: active }));
+  } catch { /* best-effort */ }
+}
+
+async function loadPersistedSessions(): Promise<void> {
+  try {
+    const data = JSON.parse(await readFile(DAEMON_STATE_FILE, "utf-8")) as { sessions: PersistedSession[] };
+    if (!Array.isArray(data.sessions)) return;
+
+    // Populate the sessions map
+    for (const s of data.sessions) {
+      if (!s.ccSessionId || !s.project || !s.session) continue;
+      sessions.set(s.ccSessionId, {
+        ccSessionId: s.ccSessionId,
+        project: s.project,
+        session: s.session,
+        user: s.user,
+        agent: s.agent,
+        profile: s.profile || "",
+        slackChannel: s.slackChannel,
+        ws: null,
+        pendingMapping: false, // aliases are already known — no claiming needed
+      });
+    }
+
+    // Open one cloud WebSocket per (project, session) pair; alias entries share it
+    const primaryForPair = new Map<string, SessionMapping>();
+    for (const mapping of sessions.values()) {
+      if (!mapping.project) continue;
+      const key = `${mapping.project}/${mapping.session}`;
+      if (!primaryForPair.has(key)) {
+        primaryForPair.set(key, mapping);
+        connectCloudWs(mapping);
+      } else {
+        mapping.ws = primaryForPair.get(key)!.ws;
+      }
+    }
+
+    const count = Array.from(sessions.values()).filter((m) => m.project).length;
+    if (count > 0) {
+      console.error(`polaris daemon: restored ${count} mapping(s) across ${primaryForPair.size} session(s)`);
+    }
+  } catch { /* no state file — fresh start */ }
+}
+
 // --- Delivery checkpoint ---
 //
 // After each successful event relay, the daemon writes a tiny checkpoint file
 // next to the session state file: ~/.polaris/sessions/{hash}-checkpoint.json
 // where {hash} is the same SHA-256 prefix used by the client. On reconnect,
 // the checkpoint is used to auto-backfill the gap without any manual action.
-
-const SESSIONS_DIR = join(homedir(), ".polaris", "sessions");
 
 function checkpointPath(ccSessionId: string): string {
   const hash = createHash("sha256").update(ccSessionId).digest("hex").slice(0, 16);
@@ -693,6 +778,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             void unlink(checkpointPath(mapping.ccSessionId)).catch(() => {});
           }
 
+          void persistSessions();
           return json({
             status: "connected",
             project: mapping.project,
@@ -722,6 +808,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           }
           // Clear checkpoint — a deliberate disconnect means there is nothing to recover
           void unlink(checkpointPath(body.ccSessionId)).catch(() => {});
+          void persistSessions();
           return json({ status: "disconnected" });
         } catch {
           return error("Invalid JSON", 400);
@@ -739,6 +826,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
         sessions.clear();
         injectQueues.clear();
+        void persistSessions();
         return json({ status: "all_disconnected" });
       }
 
@@ -773,6 +861,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               mapping.pendingMapping = false;
               // Register under the real CC session ID for future events
               sessions.set(ccSessionId, { ...mapping, ccSessionId });
+              void persistSessions();
               console.error(`[daemon] Mapped CC session ${ccSessionId.slice(0, 8)} → ${mapping.project}/${mapping.session}`);
               // Share the inject queue between the original ccSessionId (where the
               // cloud WS enqueues) and this CC hook session_id alias, so injected
@@ -880,7 +969,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               m.slackChannel = body.newName;
             }
           }
-
+          void persistSessions();
           return json({ status: "renamed", oldName: body.oldName, newName: body.newName });
         } catch {
           return error("Invalid JSON", 400);
@@ -911,6 +1000,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           const oldName = mapping.session;
           mapping.session = body.newName;
+          void persistSessions();
           return json({ status: "renamed", oldName, newName: body.newName });
         } catch {
           return error("Invalid JSON", 400);
@@ -928,6 +1018,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               m.slackChannel = body.slackChannel;
             }
           }
+          void persistSessions();
           return json({ status: "updated" });
         } catch {
           return error("Invalid JSON", 400);
@@ -1135,6 +1226,11 @@ if (import.meta.main) {
   // Load config before starting so getServiceUrl() has the active profile
   // (and getDaemonSecret() the configured daemonSecret)
   await loadConfig();
+  // Enable session persistence (only when running as main, never in tests)
+  persistenceEnabled = true;
+  // Restore sessions from disk before opening the port — new daemon is ready
+  // to serve hook events immediately, before clients notice the restart
+  await loadPersistedSessions();
   // Replay any events left in the outbox by a previous daemon run
   await scanOutbox();
   const { server } = startDaemon();
