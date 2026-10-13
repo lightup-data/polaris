@@ -9,6 +9,7 @@ import {
   listProjects,
   getProject,
   renameProject,
+  renameSession,
   createSession,
   getSession,
   setDriver,
@@ -376,6 +377,18 @@ export async function startServer(opts: {
         }
 
         return json({ status: "renamed", oldName: params.proj, newName: body.name });
+      }
+
+      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/rename", "POST");
+      if (params) {
+        const body = await req.json() as { name?: string };
+        if (!body.name) return error("name is required", 400);
+        try {
+          await renameSession(sql, orgId, params.proj, params.sess, body.name);
+        } catch (e) {
+          return error((e as Error).message, 404);
+        }
+        return json({ status: "renamed", oldName: params.sess, newName: body.name });
       }
 
       // --- Project ACL endpoints (visibility & members) ---
