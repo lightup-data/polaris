@@ -707,6 +707,17 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           };
           sessions.set(body.ccSessionId, mapping);
 
+          // Evict stale alias entries that share this (project, session) pair.
+          // After a reconnect the old CC session ID still has an entry with the
+          // same pair; leaving it allows hook events from the old shell to
+          // alias-claim a future pending session or send duplicate events.
+          for (const [id, m] of sessions) {
+            if (id !== body.ccSessionId && m.project === mapping.project && m.session === mapping.session) {
+              sessions.delete(id);
+              console.error(`[daemon] Evicted stale alias ${id.slice(0, 8)} for ${mapping.project}/${mapping.session}`);
+            }
+          }
+
           // Ensure the session exists (create if not, claim driver)
           // Retry with new name on 409 (collision with generated name)
           let attempts = 0;
@@ -850,10 +861,16 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           //    ran polaris_connect. Always returns not_connected; hooks from
           //    unjoined shells are never auto-routed to an existing session.
           let mapping = sessions.get(ccSessionId);
-          if (!mapping || !mapping.project) {
-            // CC session_id doesn't match any registered MCP client. The MCP
-            // server uses a different UUID than CC's session_id. Match to a
-            // session with pendingMapping (most recent first).
+          if (mapping && !mapping.project) {
+            // Known CC session ID but deliberately disconnected (project cleared
+            // by /disconnect). Hooks still fire after disconnect — do NOT
+            // alias-claim a pending session; the shell intentionally left.
+            return json({ status: "not_connected" });
+          }
+          if (!mapping) {
+            // Truly unknown CC session_id — the MCP client's UUID differs from
+            // CC's hook session_id. Match to a session with pendingMapping
+            // (most recent first) to learn the alias.
             const pending = Array.from(sessions.values()).filter((m) => m.project && m.pendingMapping);
             if (pending.length > 0) {
               // Map the CC session ID to the most recently connected pending session
