@@ -428,8 +428,8 @@ async function install(participantId?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session
+argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -440,13 +440,17 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join #channel-name\`** — Connect to a channel:
-1. Call \`polaris_connect\` with the given project and user identity ${identity}
-2. A session name is auto-generated
+**\`/polaris join #channel-name [session-name]\`** — Connect to a channel:
+1. Call \`polaris_connect\` with the given project, user identity ${identity}, and optional \`session\` name (e.g. \`auth-feature\`, \`bugfix-154\`)
+2. A session name is auto-generated if not provided
 3. Report the connection status including the session name
 
-**\`/polaris rename <new-name>\`** — Rename the current project:
+**\`/polaris rename <new-name>\`** — Rename the current **project** (and its Slack channel):
 1. Call \`polaris_rename\` with the new name
+2. Report the result
+
+**\`/polaris rename-session <new-name>\`** — Rename this **session thread** only (not the project):
+1. Call \`polaris_rename_session\` with the new name
 2. Report the result
 
 **\`/polaris disconnect\`** — Disconnect:
@@ -567,8 +571,8 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename
-argument-hint: [join #channel | rename <new-name> | disconnect | (no args for status)]
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session
+argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -579,13 +583,17 @@ Manage your connection to a Polaris collaboration session.
 
 Based on the arguments provided, do ONE of the following:
 
-**\`/polaris join #channel-name\`** — Connect to a channel:
-1. Call \`polaris_connect\` with the given project and user identity ${identity}
-2. A session name is auto-generated
+**\`/polaris join #channel-name [session-name]\`** — Connect to a channel:
+1. Call \`polaris_connect\` with the given project, user identity ${identity}, and optional \`session\` name (e.g. \`auth-feature\`, \`bugfix-154\`)
+2. A session name is auto-generated if not provided
 3. Report the connection status including the session name
 
-**\`/polaris rename <new-name>\`** — Rename the current project:
+**\`/polaris rename <new-name>\`** — Rename the current **project** (and its Slack channel):
 1. Call \`polaris_rename\` with the new name
+2. Report the result
+
+**\`/polaris rename-session <new-name>\`** — Rename this **session thread** only (not the project):
+1. Call \`polaris_rename_session\` with the new name
 2. Report the result
 
 **\`/polaris disconnect\`** — Disconnect:

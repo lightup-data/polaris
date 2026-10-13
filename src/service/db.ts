@@ -311,6 +311,15 @@ export async function createProject(sql: Sql, orgId: string, name: string): Prom
   return rowToProject(row);
 }
 
+export async function renameSession(sql: Sql, orgId: string, project: string, oldName: string, newName: string): Promise<void> {
+  const result = await sql`
+    UPDATE sessions SET name = ${newName}
+    WHERE org_id = ${orgId} AND name = ${oldName}
+      AND project_id = (SELECT id FROM projects WHERE org_id = ${orgId} AND name = ${project})
+  `;
+  if (result.count === 0) throw new Error(`Session not found: ${project}/${oldName}`);
+}
+
 export async function renameProject(sql: Sql, orgId: string, oldName: string, newName: string): Promise<void> {
   await sql`
     UPDATE projects SET name = ${newName}, slack_channel_name = ${newName}

@@ -777,6 +777,36 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // POST /rename-session — rename the current session (not the project)
+      if (method === "POST" && pathname === "/rename-session") {
+        try {
+          const body = (await req.json()) as { ccSessionId: string; newName: string };
+          if (!body.ccSessionId || !body.newName) return error("ccSessionId and newName required", 400);
+          const mapping = sessions.get(body.ccSessionId);
+          if (!mapping || !mapping.project) return error("Not connected", 400);
+
+          const serviceUrl = getServiceUrlForProfile(mapping.profile);
+          const res = await fetch(
+            `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/rename`,
+            {
+              method: "POST",
+              headers: await authHeadersForProfile(mapping.profile),
+              body: JSON.stringify({ name: body.newName }),
+            }
+          );
+          if (!res.ok) {
+            const err = await res.text();
+            return new Response(err, { status: res.status });
+          }
+
+          const oldName = mapping.session;
+          mapping.session = body.newName;
+          return json({ status: "renamed", oldName, newName: body.newName });
+        } catch {
+          return error("Invalid JSON", 400);
+        }
+      }
+
       // POST /channel-update — bridge pushes channel rename notifications
       if (method === "POST" && pathname === "/channel-update") {
         try {

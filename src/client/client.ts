@@ -156,11 +156,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "polaris_rename",
-      description: "Rename the current project. Also renames the linked Slack channel if a floor is connected.",
+      description: "Rename the current PROJECT (and its linked Slack channel). To rename just this session thread, use polaris_rename_session instead.",
       inputSchema: {
         type: "object" as const,
         properties: {
           name: { type: "string", description: "New project name" },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "polaris_rename_session",
+      description: "Rename this session thread (e.g. from 's-3f95' to 'auth-feature'). Does not affect the project or other sessions.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "New session name (e.g. 'auth-feature', 'bugfix-154')" },
         },
         required: ["name"],
       },
@@ -337,6 +348,26 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: `Failed to rename: ${(body as { error?: string }).error ?? "unknown error"}` }] };
     } catch {
       return { content: [{ type: "text", text: "Failed to rename — is the Polaris daemon running?" }] };
+    }
+  }
+
+  if (name === "polaris_rename_session") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const newName = (args as { name: string }).name;
+    try {
+      const res = await daemonPost("/rename-session", { ccSessionId: CC_SESSION_ID, newName });
+      const body = await res.json() as { status?: string; oldName?: string; newName?: string; error?: string };
+      if (res.ok) {
+        const oldName = currentSession;
+        currentSession = newName;
+        await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
+        return { content: [{ type: "text", text: `Renamed session "${oldName}" to "${newName}".` }] };
+      }
+      return { content: [{ type: "text", text: `Failed to rename session: ${body.error ?? "unknown error"}` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to rename session — is the Polaris daemon running?" }] };
     }
   }
 
