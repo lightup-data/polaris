@@ -15,6 +15,7 @@ interface SessionMapping {
   slackChannel?: string;
   ws: WebSocket | null;
   pendingMapping?: boolean; // true until the first hook event from this shell claims the mapping
+  closingIntentionally?: boolean; // set before deliberate ws.close() so onclose can distinguish drops
 }
 
 function generateSessionName(): string {
@@ -164,14 +165,18 @@ function connectCloudWs(mapping: SessionMapping) {
   };
 
   ws.onclose = () => {
-    // Reconnect if still registered
-    if (sessions.has(mapping.ccSessionId) && sessions.get(mapping.ccSessionId)!.project === mapping.project) {
+    const m = sessions.get(mapping.ccSessionId);
+    if (m && m.project === mapping.project && mapping.project !== "" && !m.closingIntentionally) {
+      // Unexpected cloud WS drop — log it so the user has a record
+      void logSessionChange("ws-drop", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
       setTimeout(() => {
-        if (sessions.has(mapping.ccSessionId)) {
-          connectCloudWs(sessions.get(mapping.ccSessionId)!);
+        const current = sessions.get(mapping.ccSessionId);
+        if (current && current.project) {
+          connectCloudWs(current);
         }
       }, 3000);
     }
+    if (m) m.closingIntentionally = false;
   };
 
   ws.onerror = () => {
@@ -184,6 +189,7 @@ function connectCloudWs(mapping: SessionMapping) {
 function disconnectCloudWs(ccSessionId: string) {
   const mapping = sessions.get(ccSessionId);
   if (mapping?.ws) {
+    mapping.closingIntentionally = true;
     mapping.ws.close();
     mapping.ws = null;
   }
@@ -310,7 +316,7 @@ async function scanOutbox(): Promise<void> {
 
 const SESSION_HISTORY_FILE = join(homedir(), ".polaris", "session-history.jsonl");
 
-async function logSessionChange(action: "connect" | "disconnect", ccSessionId: string, project: string, session: string, user: string, agent: string): Promise<void> {
+async function logSessionChange(action: "connect" | "disconnect" | "ws-drop", ccSessionId: string, project: string, session: string, user: string, agent: string): Promise<void> {
   try {
     await ensureLogDir();
     const entry = JSON.stringify({ t: new Date().toISOString(), action, ccSessionId, project, session, user, agent });
@@ -320,7 +326,7 @@ async function logSessionChange(action: "connect" | "disconnect", ccSessionId: s
 
 // --- Backfill: recover lost events from daemon log ---
 
-async function backfill(mapping: SessionMapping, duration?: string, from?: string): Promise<{ recovered: number; source: string; gaps: string[] }> {
+async function backfill(mapping: SessionMapping, duration?: string, from?: string, dryRun = false): Promise<{ recovered: number; would_recover?: number; source: string; gaps: string[] }> {
   const now = new Date();
   let since: Date;
 
@@ -387,6 +393,11 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
 
   if (logEntries.length === 0) {
     return { recovered: 0, source: "daemon_log", gaps: [`no log entries found since ${since.toISOString()}`] };
+  }
+
+  // Dry-run: report how many events would be sent without actually sending
+  if (dryRun) {
+    return { recovered: 0, would_recover: logEntries.length, source: "daemon_log", gaps: [] };
   }
 
   // Replay events to the API
@@ -929,12 +940,12 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
       // POST /backfill — recover lost events from daemon log
       if (method === "POST" && pathname === "/backfill") {
         try {
-          const body = (await req.json()) as { ccSessionId: string; duration?: string; from?: string };
+          const body = (await req.json()) as { ccSessionId: string; duration?: string; from?: string; dry_run?: boolean };
           if (!body.ccSessionId) return error("ccSessionId required", 400);
           const mapping = sessions.get(body.ccSessionId);
           if (!mapping || !mapping.project) return error("Not connected", 400);
 
-          const result = await backfill(mapping, body.duration, body.from);
+          const result = await backfill(mapping, body.duration, body.from, body.dry_run ?? false);
           return json(result);
         } catch {
           return error("Invalid JSON", 400);
