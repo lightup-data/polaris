@@ -41,7 +41,7 @@ if [ -f "$INSTALLED_PKG" ]; then
     NOW=$(date +%s 2>/dev/null || echo "0")
     CACHE_AGE=$(( NOW - CACHE_TS )) 2>/dev/null || CACHE_AGE=9999
     STALE=false
-    [ "$CACHE_AGE" -gt 3600 ] 2>/dev/null && STALE=true
+    [ "$CACHE_AGE" -gt 300 ] 2>/dev/null && STALE=true
   else
     STALE=true
   fi
