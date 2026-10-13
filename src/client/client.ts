@@ -47,14 +47,18 @@ async function daemonGet(path: string): Promise<Response> {
 // --- Session state persistence ---
 
 function sessionStatePath(): string {
-  const hash = createHash("sha256").update(process.cwd()).digest("hex").slice(0, 16);
+  // Keyed by CC session ID so two Claude Code sessions in the same directory
+  // get independent state files and never auto-reconnect into each other's
+  // project. Previously keyed by cwd hash, which caused unrelated sessions to
+  // silently inherit another session's project connection (#154, #153).
+  const hash = createHash("sha256").update(CC_SESSION_ID).digest("hex").slice(0, 16);
   return `${homedir()}/.polaris/sessions/${hash}.json`;
 }
 
 async function saveSessionState(project: string, session: string, user: string, profile: string): Promise<void> {
   try {
     await mkdir(`${homedir()}/.polaris/sessions`, { recursive: true });
-    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd() }));
+    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd(), ccSessionId: CC_SESSION_ID }));
   } catch { /* best-effort */ }
 }
 
