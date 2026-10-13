@@ -58,7 +58,7 @@ if [ -f "$INSTALLED_PKG" ]; then
   fi
 
   if [ -n "$CACHED_LATEST" ] && [ -n "$INSTALLED_VERSION" ] && [ "$CACHED_LATEST" != "$INSTALLED_VERSION" ]; then
-    UPDATE_MSG=" [update: v${CACHED_LATEST}]"
+    UPDATE_MSG=" [update available: v${CACHED_LATEST}]"
   fi
 fi
 
