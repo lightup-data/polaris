@@ -2,6 +2,7 @@ import type { Server, ServerWebSocket } from "bun";
 import { readFile, writeFile, appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 // --- Session registry ---
 
@@ -205,10 +206,13 @@ function ensureLogDir(): Promise<void> {
   return logReady;
 }
 
-async function logEvent(endpoint: string, payload: unknown, response?: { status: number; body?: unknown }): Promise<void> {
+async function logEvent(endpoint: string, payload: unknown, response?: { status: number; body?: unknown }, context?: { project?: string; session?: string; ccSessionId?: string }): Promise<void> {
   try {
     await ensureLogDir();
     const entry: Record<string, unknown> = { t: new Date().toISOString(), endpoint, payload };
+    if (context?.project) entry.project = context.project;
+    if (context?.session) entry.session = context.session;
+    if (context?.ccSessionId) entry.ccSessionId = context.ccSessionId;
     if (response) entry.response = response;
     const file = join(LOG_DIR, `daemon-${new Date().toISOString().slice(0, 10)}.jsonl`);
     await appendFile(file, JSON.stringify(entry) + "\n");
@@ -324,6 +328,43 @@ async function logSessionChange(action: "connect" | "disconnect" | "ws-drop", cc
   } catch { /* best-effort */ }
 }
 
+// --- Delivery checkpoint ---
+//
+// After each successful event relay, the daemon writes a tiny checkpoint file
+// next to the session state file: ~/.polaris/sessions/{hash}-checkpoint.json
+// where {hash} is the same SHA-256 prefix used by the client. On reconnect,
+// the checkpoint is used to auto-backfill the gap without any manual action.
+
+const SESSIONS_DIR = join(homedir(), ".polaris", "sessions");
+
+function checkpointPath(ccSessionId: string): string {
+  const hash = createHash("sha256").update(ccSessionId).digest("hex").slice(0, 16);
+  return join(SESSIONS_DIR, `${hash}-checkpoint.json`);
+}
+
+interface Checkpoint {
+  lastEventId: string;
+  lastEventTimestamp: string;
+  project: string;
+  session: string;
+}
+
+async function writeCheckpoint(ccSessionId: string, eventId: string, eventTimestamp: string, project: string, session: string): Promise<void> {
+  try {
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    const cp: Checkpoint = { lastEventId: eventId, lastEventTimestamp: eventTimestamp, project, session };
+    await writeFile(checkpointPath(ccSessionId), JSON.stringify(cp));
+  } catch { /* best-effort */ }
+}
+
+async function readCheckpoint(ccSessionId: string): Promise<Checkpoint | null> {
+  try {
+    const data = JSON.parse(await readFile(checkpointPath(ccSessionId), "utf-8")) as Checkpoint;
+    if (data.lastEventId && data.lastEventTimestamp) return data;
+  } catch { /* none */ }
+  return null;
+}
+
 // --- Backfill: recover lost events from daemon log ---
 
 async function backfill(mapping: SessionMapping, duration?: string, from?: string, dryRun = false): Promise<{ recovered: number; would_recover?: number; source: string; gaps: string[] }> {
@@ -362,7 +403,7 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
   }
 
   // Read daemon log files covering the time range
-  const logEntries: Array<{ t: string; endpoint: string; payload: Record<string, unknown> }> = [];
+  const logEntries: Array<{ t: string; endpoint: string; payload: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string; response?: unknown }> = [];
   const startDate = since.toISOString().slice(0, 10);
   const endDate = now.toISOString().slice(0, 10);
 
@@ -385,6 +426,14 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
           if (entry.endpoint !== "/events") continue;
           if (new Date(entry.t) <= since) continue;
           if (new Date(entry.t) > now) continue;
+          // Filter by origin (added since v0.0.105). Old entries without these fields
+          // pass through for backwards compatibility with pre-105 logs.
+          if (entry.project !== undefined && entry.project !== mapping.project) continue;
+          if (entry.session !== undefined && entry.session !== mapping.session) continue;
+          if (entry.ccSessionId !== undefined && entry.ccSessionId !== mapping.ccSessionId) continue;
+          // Skip error-response entries — they're duplicates of the primary entry
+          // and would cause the same event to be replayed twice.
+          if (entry.response !== undefined) continue;
           logEntries.push(entry);
         } catch { /* skip malformed lines */ }
       }
@@ -424,6 +473,19 @@ async function backfill(mapping: SessionMapping, duration?: string, from?: strin
 
   return { recovered, source: "daemon_log", gaps: [] };
 }
+
+// Auto-backfill from checkpoint after a reconnect. Called non-blocking (void)
+// so the /connect response is returned immediately while replay runs in background.
+async function autoBackfillAfterConnect(mapping: SessionMapping): Promise<void> {
+  const cp = await readCheckpoint(mapping.ccSessionId);
+  if (!cp) return;
+  if (cp.project !== mapping.project || cp.session !== mapping.session) return;
+  const result = await backfill(mapping, undefined, cp.lastEventTimestamp);
+  if (result.recovered > 0) {
+    console.error(`polaris daemon: gap detected — auto-backfilled ${result.recovered} events since ${cp.lastEventTimestamp}`);
+  }
+}
+
 // --- HTTP Server ---
 
 function json(data: unknown, status = 200): Response {
@@ -552,6 +614,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // Retry with new name on 409 (collision with generated name)
           let attempts = 0;
           let created = false;
+          let isReconnect = false; // true only when the session already existed (409 + explicit name)
           while (!created && attempts < 3) {
             const sessionRes = await fetch(`${serviceUrl}/projects/${body.project}/sessions`, {
               method: "POST",
@@ -569,6 +632,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
                   body: JSON.stringify({ driver: body.user }),
                 });
                 created = true;
+                isReconnect = true; // session pre-existed → this is a true reconnect
               } else {
                 // Generated name collision — retry with new name
                 mapping.session = generateSessionName();
@@ -597,12 +661,33 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           connectCloudWs(mapping);
           await logSessionChange("connect", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
 
+          // Check for a delivery gap since the last checkpoint (local-only dry run — no network).
+          // Only meaningful on a true reconnect (existing session); a brand-new session has no
+          // history to recover. Clear any stale checkpoint when starting a fresh session.
+          let gap: { events: number; since: string } | null = null;
+          if (isReconnect) {
+            const cp = await readCheckpoint(mapping.ccSessionId);
+            if (cp && cp.project === mapping.project && cp.session === mapping.session) {
+              const dryResult = await backfill(mapping, undefined, cp.lastEventTimestamp, true);
+              const count = dryResult.would_recover ?? 0;
+              if (count > 0) {
+                gap = { events: count, since: cp.lastEventTimestamp };
+                void autoBackfillAfterConnect(mapping);
+              }
+            }
+          } else {
+            // Fresh session — clear any checkpoint left over from a previous session
+            // on this CC session ID so stale data never triggers a false backfill.
+            void unlink(checkpointPath(mapping.ccSessionId)).catch(() => {});
+          }
+
           return json({
             status: "connected",
             project: mapping.project,
             session: mapping.session,
             user: mapping.user,
             agent: mapping.agent,
+            gap,
           });
         } catch {
           return error("Invalid JSON", 400);
@@ -623,6 +708,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             mapping.session = "";
             mapping.user = "";
           }
+          // Clear checkpoint — a deliberate disconnect means there is nothing to recover
+          void unlink(checkpointPath(body.ccSessionId)).catch(() => {});
           return json({ status: "disconnected" });
         } catch {
           return error("Invalid JSON", 400);
@@ -636,6 +723,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           mapping.project = "";
           mapping.session = "";
           mapping.user = "";
+          void unlink(checkpointPath(id)).catch(() => {});
         }
         sessions.clear();
         injectQueues.clear();
@@ -646,7 +734,6 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
       if (method === "POST" && pathname === "/events") {
         try {
           const body = (await req.json()) as { session_id?: string; [key: string]: unknown };
-          await logEvent("/events", body);
           const ccSessionId = body.session_id;
           if (!ccSessionId) return error("session_id required in hook payload", 400);
 
@@ -689,6 +776,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             }
           }
 
+          // Log with session context so backfill can filter by exact origin
+          await logEvent("/events", body, undefined, { project: mapping.project, session: mapping.session, ccSessionId });
+
           // Determine sender: human for prompts, agent for everything else
           const hookEvent = body.hook_event_name as string | undefined;
           const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
@@ -713,7 +803,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           if (!res || res.status >= 500) {
             console.error(`polaris daemon: upstream relay failed (${res ? res.status : "network error"}) — queued to outbox`);
-            await logEvent("/events", body, { status: res?.status ?? 0, body: "queued to outbox" });
+            await logEvent("/events", body, { status: res?.status ?? 0, body: "queued to outbox" }, { project: mapping.project, session: mapping.session, ccSessionId });
             await enqueueOutbox(mapping.project, mapping.session, mapping.profile, relayBody);
             // The event is durably accepted (outbox), so still drain injects
             if (hookEvent === "UserPromptSubmit") {
@@ -726,9 +816,17 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           if (!res.ok) {
             const err = await res.text();
-            await logEvent("/events", body, { status: res.status, body: err });
+            await logEvent("/events", body, { status: res.status, body: err }, { project: mapping.project, session: mapping.session, ccSessionId });
             return new Response(err, { status: res.status });
           }
+
+          // Write delivery checkpoint so reconnects can auto-backfill the exact gap
+          try {
+            const delivered = await res.json() as { id?: string; timestamp?: string };
+            if (delivered.id && delivered.timestamp) {
+              void writeCheckpoint(ccSessionId, delivered.id, delivered.timestamp, mapping.project, mapping.session);
+            }
+          } catch { /* best-effort — don't block the response */ }
 
           // UserPromptSubmit: drain queued advisor injects and hand them back
           // to the hook, which surfaces them via additionalContext
@@ -965,6 +1063,20 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         } catch {
           return error("API unreachable", 503);
         }
+      }
+
+      // GET /checkpoint/:ccSessionId — checkpoint state + pending count for polaris_status
+      if (method === "GET" && pathname.startsWith("/checkpoint/")) {
+        const ccSessionId = pathname.slice("/checkpoint/".length);
+        const cp = await readCheckpoint(ccSessionId);
+        if (!cp) return json({ hasCheckpoint: false });
+        const mapping = sessions.get(ccSessionId);
+        let pending = 0;
+        if (mapping?.project && cp.project === mapping.project && cp.session === mapping.session) {
+          const dryResult = await backfill(mapping, undefined, cp.lastEventTimestamp, true);
+          pending = dryResult.would_recover ?? 0;
+        }
+        return json({ hasCheckpoint: true, lastEventTimestamp: cp.lastEventTimestamp, pending });
       }
 
       // POST /backfill — recover lost events from daemon log

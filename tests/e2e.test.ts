@@ -32,6 +32,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetTestData(sql);
+  // Disconnect all daemon sessions so checkpoint files are cleared between tests
+  await fetch(`${daemonUrl}/disconnect-all`, { method: "POST", headers: { "Content-Type": "application/json" } });
 });
 
 async function post(base: string, path: string, body: unknown) {

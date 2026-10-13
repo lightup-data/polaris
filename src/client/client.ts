@@ -264,7 +264,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         ...(agent ? { agent } : {}),
         ...(create ? { create: true } : {}),
       });
-      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[]; account?: string };
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; agent?: string; error?: string; existing?: string[]; account?: string; gap?: { events: number; since: string } | null };
       if (res.status === 404 && body.error === "project_not_found") {
         const accountLine = body.account ? ` in ${body.account}` : "";
         const list = body.existing && body.existing.length > 0
@@ -278,7 +278,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentUser = user;
         currentProfile = activeProfile;
         await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
-        return { content: [{ type: "text", text: `Connected to #${currentProject}/${currentSession} as ${user}.` }] };
+        let msg = `Connected to #${currentProject}/${currentSession} as ${user}.`;
+        if (body.gap && body.gap.events > 0) {
+          msg += `\n${body.gap.events} events since ${body.gap.since} not delivered — re-sending now.`;
+        }
+        return { content: [{ type: "text", text: msg }] };
       }
       return { content: [{ type: "text", text: `Failed to connect: ${body.error ?? "unknown error"}` }] };
     } catch {
@@ -302,12 +306,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === "polaris_status") {
     try {
-      const res = await daemonGet(`/status/${CC_SESSION_ID}`);
-      const body = (await res.json()) as { connected: boolean; project?: string; session?: string; user?: string; account?: string; slackChannel?: string };
+      const [statusRes, checkpointRes] = await Promise.all([
+        daemonGet(`/status/${CC_SESSION_ID}`),
+        daemonGet(`/checkpoint/${CC_SESSION_ID}`),
+      ]);
+      const body = (await statusRes.json()) as { connected: boolean; project?: string; session?: string; user?: string; account?: string; slackChannel?: string };
       if (body.connected) {
         const accountTag = body.account ? ` [${body.account}]` : "";
         const slackTag = body.slackChannel ? ` #${body.slackChannel}` : "";
-        return { content: [{ type: "text", text: `Connected: ${body.project}/${body.session} as ${body.user}${accountTag}${slackTag}` }] };
+        let text = `Connected: ${body.project}/${body.session} as ${body.user}${accountTag}${slackTag}`;
+        try {
+          const cp = await checkpointRes.json() as { hasCheckpoint: boolean; lastEventTimestamp?: string; pending?: number };
+          if (cp.hasCheckpoint && cp.lastEventTimestamp) {
+            const ts = new Date(cp.lastEventTimestamp).toISOString().slice(11, 19) + "Z";
+            text += `\nLast delivered: ${ts}, ${cp.pending ?? 0} pending`;
+          }
+        } catch { /* best-effort */ }
+        return { content: [{ type: "text", text }] };
       }
       return { content: [{ type: "text", text: "Not connected to any Polaris session." }] };
     } catch {
@@ -478,7 +493,7 @@ async function main() {
         user: saved.user,
         profile: reconnectProfile,
       });
-      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; error?: string };
+      const body = await res.json() as { status?: string; project?: string; session?: string; user?: string; error?: string; gap?: { events: number; since: string } | null };
       if (res.ok) {
         currentProject = body.project ?? saved.project;
         currentSession = body.session ?? saved.session;
@@ -486,7 +501,11 @@ async function main() {
         currentProfile = reconnectProfile;
         // Show email when it looks like one; fall back to profile key or "default"
         const accountLabel = reconnectProfile.includes("@") ? reconnectProfile : (reconnectProfile || "default");
-        console.error(`Polaris auto-reconnected to #${currentProject}/${currentSession} [${accountLabel}]`);
+        let reconnMsg = `Polaris auto-reconnected to #${currentProject}/${currentSession} [${accountLabel}]`;
+        if (body.gap && body.gap.events > 0) {
+          reconnMsg += `; re-sending ${body.gap.events} events since ${body.gap.since}`;
+        }
+        console.error(reconnMsg);
       } else {
         // Session or project no longer exists — clear stale state
         await clearSessionState();
@@ -514,7 +533,12 @@ async function main() {
         profile: currentProfile,
       });
       if (reconnectRes.ok) {
-        console.error(`Polaris: session dropped; auto-reconnected to #${currentProject}/${currentSession}`);
+        const reconnBody = await reconnectRes.json() as { gap?: { events: number; since: string } | null };
+        let reconnMsg = `Polaris: session dropped; auto-reconnected to #${currentProject}/${currentSession}`;
+        if (reconnBody.gap && reconnBody.gap.events > 0) {
+          reconnMsg += `; re-sending ${reconnBody.gap.events} events`;
+        }
+        console.error(reconnMsg);
       } else {
         console.error(`Polaris: session dropped and reconnect failed. Run /polaris to check status.`);
         currentProject = "";
