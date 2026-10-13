@@ -495,17 +495,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: `Polaris is already up to date (v${currentVersion}).` }] };
     }
 
-    // Update global binary
-    const npmResult = Bun.spawnSync(["npm", "install", "-g", "@lightupai/polaris@latest"], { stdout: "pipe", stderr: "pipe" });
+    // Update the copy that's actually in use: ~/.polaris/mcp (no sudo required).
+    // This is the same location the version was read from, and where the daemon
+    // and MCP server binaries are resolved by run-daemon.sh and claude mcp add.
+    const mcpDir = `${homedir()}/.polaris/mcp`;
+    const npmResult = Bun.spawnSync(
+      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+      { stdout: "pipe", stderr: "pipe" }
+    );
     if (npmResult.exitCode !== 0) {
       return { content: [{ type: "text", text: `Update failed:\n${npmResult.stderr.toString().trim()}` }] };
     }
 
-    // Refresh hooks, MCP package, and daemon registration
-    const installResult = Bun.spawnSync(["polaris", "install"], { stdout: "pipe", stderr: "pipe" });
+    // Refresh hooks, migrate session state, and restart the daemon using the
+    // local polaris binary (not relying on PATH, which may not include it).
+    const polarisBin = `${mcpDir}/node_modules/.bin/polaris`;
+    const installResult = Bun.spawnSync([polarisBin, "install"], { stdout: "pipe", stderr: "pipe" });
     const msg = installResult.exitCode === 0
       ? `Updated Polaris from v${currentVersion} to v${latestVersion}.\n\nRestart Claude Code for the new MCP server to take effect.`
-      : `Updated global binary to v${latestVersion}, but \`polaris install\` failed — run it manually.\n${installResult.stderr.toString().trim()}`;
+      : `Updated package to v${latestVersion}, but \`polaris install\` failed — run it manually.\n${installResult.stderr.toString().trim()}`;
     return { content: [{ type: "text", text: msg }] };
   }
 

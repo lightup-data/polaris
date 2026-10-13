@@ -275,7 +275,52 @@ async function removeSystemdService(): Promise<void> {
 }
 
 // Platform dispatcher
+// --- Session state migration ---
+//
+// When upgrading from a pre-0.0.109 daemon (which never wrote daemon-state.json),
+// the new daemon would start with an empty session map and drop every connected
+// session. This function fetches the running daemon's session list via GET /status
+// and writes daemon-state.json before the daemon is stopped, so the new daemon
+// can restore the map and reconnect cloud WebSockets without any user action.
+// Best-effort: failures are silent (daemon may not be running, or already migrated).
+async function migrateSessionState(): Promise<void> {
+  const stateFile = join(POLARIS_DIR, "sessions", "daemon-state.json");
+  // If a 0.0.109+ daemon already wrote the file, its state is more complete
+  // (includes learned hook aliases) — don't overwrite it.
+  try { await readFile(stateFile); return; } catch { /* doesn't exist — proceed */ }
+
+  try {
+    const config = await loadConfig();
+    const secret = resolveDaemonSecret(config);
+    const headers: Record<string, string> = {};
+    if (secret) headers["x-polaris-daemon-secret"] = secret;
+    const res = await fetch("http://127.0.0.1:4322/status", {
+      headers,
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string }> };
+    if (!data.sessions || data.sessions.length === 0) return;
+
+    const activeProfile = config?.active || "";
+    const sessions = data.sessions.map((s) => ({
+      ccSessionId: s.ccSessionId,
+      project: s.project,
+      session: s.session,
+      user: s.user,
+      agent: "agent:claude",
+      profile: activeProfile,
+    }));
+
+    await mkdir(join(POLARIS_DIR, "sessions"), { recursive: true });
+    await writeFile(stateFile, JSON.stringify({ sessions }));
+    console.log(`  ✓ Migrated ${sessions.length} active session(s) to persistent state`);
+  } catch { /* best-effort — daemon not running or unreachable */ }
+}
+
 async function installDaemonService(daemonSecret?: string): Promise<void> {
+  // Migrate session state from older daemon before it is stopped
+  await migrateSessionState();
   if (process.platform === "darwin") return installLaunchAgent(daemonSecret);
   if (process.platform === "linux") return installSystemdService(daemonSecret);
   // Windows and others: no managed service; daemon is started manually
