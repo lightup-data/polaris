@@ -184,8 +184,18 @@ const SYSTEMD_SERVICE_FILE = join(SYSTEMD_USER_DIR, `${SYSTEMD_SERVICE_NAME}.ser
 async function installSystemdService(daemonSecret?: string): Promise<void> {
   // Resolve bun's absolute path at install time so systemd's minimal PATH
   // doesn't matter. Bun.which() searches PATH; process.execPath is the
-  // interpreter we're already running under — use whichever looks like bun.
-  const bunPath = Bun.which("bun") ?? process.execPath;
+  // interpreter we're already running under.
+  const resolvedBun = Bun.which("bun") ?? process.execPath;
+
+  // Warn when bun resolved to an npx cache directory — that path is volatile
+  // and will break the service if the cache is pruned or the hash changes.
+  const isVolatile = resolvedBun.includes("/_npx/") || resolvedBun.includes("/npx_cache/");
+  if (isVolatile) {
+    console.error(`  Warning: bun was found at a volatile npm cache path:`);
+    console.error(`    ${resolvedBun}`);
+    console.error(`  The daemon service may break if npm cleans its cache.`);
+    console.error(`  Install bun permanently for reliability: curl -fsSL https://bun.sh/install | bash`);
+  }
 
   const binDir = join(POLARIS_DIR, "bin");
   const runnerPath = join(binDir, "run-daemon.sh");
@@ -194,12 +204,19 @@ async function installSystemdService(daemonSecret?: string): Promise<void> {
   );
 
   await mkdir(binDir, { recursive: true });
-  // Bun path is baked in at install time — no runtime search needed
+  // Runner tries the baked-in path first (fast path), then falls back to
+  // common stable install locations, then npx as a last resort — so the
+  // service survives a cache prune or bun reinstall without needing
+  // `polaris install` to be rerun.
   const runner = [
     "#!/bin/sh",
     `# Polaris daemon — managed by systemd (${SYSTEMD_SERVICE_NAME}.service)`,
-    `# bun path resolved at install time: ${bunPath}`,
-    `exec "${bunPath}" run "${daemonTsPath}"`,
+    `DAEMONTS="${daemonTsPath}"`,
+    `for BUNPATH in "${resolvedBun}" "$HOME/.bun/bin/bun" /usr/local/bin/bun /usr/bin/bun; do`,
+    `  if [ -x "$BUNPATH" ]; then exec "$BUNPATH" run "$DAEMONTS"; fi`,
+    `done`,
+    `# npx fallback — slow but avoids exit-127 restart loops`,
+    `exec npx --yes bun run "$DAEMONTS"`,
   ].join("\n") + "\n";
   await writeFile(runnerPath, runner);
   await chmod(runnerPath, 0o755);
@@ -214,7 +231,8 @@ Type=simple
 ExecStart=${runnerPath}
 Restart=always
 RestartSec=5
-${secretLine}StandardOutput=append:/tmp/polaris-daemon.log
+${secretLine}Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+StandardOutput=append:/tmp/polaris-daemon.log
 StandardError=append:/tmp/polaris-daemon.log
 
 [Install]
