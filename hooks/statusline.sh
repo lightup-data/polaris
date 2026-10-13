@@ -86,11 +86,12 @@ if [ "$CONNECTED" = "true" ]; then
     fi
   fi
 
-  if [ -n "$SLACK" ]; then
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}${RECENCY}${UPDATE_MSG}"
-  else
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})${RECENCY}${UPDATE_MSG}"
+  # Show Slack channel only when it differs from the project name (adds info, avoids duplication)
+  SLACK_TAG=""
+  if [ -n "$SLACK" ] && [ "$SLACK" != "$PROJECT" ]; then
+    SLACK_TAG=" → #${SLACK}"
   fi
+  echo "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${UPDATE_MSG}"
 else
   echo "polaris: not connected${UPDATE_MSG}"
 fi
