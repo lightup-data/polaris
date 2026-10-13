@@ -24,6 +24,44 @@ if [ -n "$CC_SESSION_ID" ]; then
   CONNECTED=$(echo "$STATUS" | jq -r '.connected' 2>/dev/null || echo "false")
 fi
 
+# --- Update check (cached, non-blocking) ---
+# Reads installed version from the MCP package, caches the latest npm version
+# for up to 1 hour. Background curl refresh never blocks the status line.
+UPDATE_MSG=""
+INSTALLED_PKG="$HOME/.polaris/mcp/node_modules/@lightupai/polaris/package.json"
+UPDATE_CACHE="$HOME/.polaris/update-check.json"
+
+if [ -f "$INSTALLED_PKG" ]; then
+  INSTALLED_VERSION=$(jq -r '.version // ""' "$INSTALLED_PKG" 2>/dev/null || echo "")
+
+  CACHED_LATEST=""
+  if [ -f "$UPDATE_CACHE" ]; then
+    CACHED_LATEST=$(jq -r '.latest // ""' "$UPDATE_CACHE" 2>/dev/null || echo "")
+    CACHE_TS=$(jq -r '.checked // 0' "$UPDATE_CACHE" 2>/dev/null || echo "0")
+    NOW=$(date +%s 2>/dev/null || echo "0")
+    CACHE_AGE=$(( NOW - CACHE_TS )) 2>/dev/null || CACHE_AGE=9999
+    STALE=false
+    [ "$CACHE_AGE" -gt 3600 ] 2>/dev/null && STALE=true
+  else
+    STALE=true
+  fi
+
+  if [ "$STALE" = "true" ]; then
+    # Refresh in background — never blocks the status line
+    (
+      LATEST_V=$(curl -sf --max-time 5 "https://registry.npmjs.org/@lightupai/polaris/latest" 2>/dev/null \
+        | jq -r '.version // ""' 2>/dev/null)
+      if [ -n "$LATEST_V" ]; then
+        printf '{"latest":"%s","checked":%s}\n' "$LATEST_V" "$(date +%s)" > "$UPDATE_CACHE"
+      fi
+    ) &
+  fi
+
+  if [ -n "$CACHED_LATEST" ] && [ -n "$INSTALLED_VERSION" ] && [ "$CACHED_LATEST" != "$INSTALLED_VERSION" ]; then
+    UPDATE_MSG=" [update: v${CACHED_LATEST}]"
+  fi
+fi
+
 if [ "$CONNECTED" = "true" ]; then
   PROJECT=$(echo "$STATUS" | jq -r '.project' 2>/dev/null)
   SESSION=$(echo "$STATUS" | jq -r '.session' 2>/dev/null)
@@ -35,10 +73,10 @@ if [ "$CONNECTED" = "true" ]; then
     ACCOUNT_TAG="[${ACCOUNT}] "
   fi
   if [ -n "$SLACK" ]; then
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}${UPDATE_MSG}"
   else
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})${UPDATE_MSG}"
   fi
 else
-  echo "polaris: not connected"
+  echo "polaris: not connected${UPDATE_MSG}"
 fi
