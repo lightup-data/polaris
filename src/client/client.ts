@@ -196,6 +196,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "polaris_update",
+      description: "Update Polaris to the latest version. Runs npm install -g then polaris install to refresh hooks and the MCP server.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
       name: "polaris_backfill",
       description: "Recover lost events from local daemon logs. Use when events were lost due to disconnection or API downtime.",
       inputSchema: {
@@ -464,6 +472,41 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }
+  }
+
+  if (name === "polaris_update") {
+    const installedPkgPath = `${homedir()}/.polaris/mcp/node_modules/@lightupai/polaris/package.json`;
+    let currentVersion = "";
+    try {
+      const pkg = JSON.parse(await readFile(installedPkgPath, "utf-8")) as { version: string };
+      currentVersion = pkg.version ?? "";
+    } catch { /* package not installed yet */ }
+
+    let latestVersion = "";
+    try {
+      const res = await fetch("https://registry.npmjs.org/@lightupai/polaris/latest", { signal: AbortSignal.timeout(5000) });
+      if (res.ok) ({ version: latestVersion } = await res.json() as { version: string });
+    } catch { /* network unavailable */ }
+
+    if (!latestVersion) {
+      return { content: [{ type: "text", text: "Could not reach npm to check for updates. Check your network connection." }] };
+    }
+    if (latestVersion === currentVersion) {
+      return { content: [{ type: "text", text: `Polaris is already up to date (v${currentVersion}).` }] };
+    }
+
+    // Update global binary
+    const npmResult = Bun.spawnSync(["npm", "install", "-g", "@lightupai/polaris@latest"], { stdout: "pipe", stderr: "pipe" });
+    if (npmResult.exitCode !== 0) {
+      return { content: [{ type: "text", text: `Update failed:\n${npmResult.stderr.toString().trim()}` }] };
+    }
+
+    // Refresh hooks, MCP package, and daemon registration
+    const installResult = Bun.spawnSync(["polaris", "install"], { stdout: "pipe", stderr: "pipe" });
+    const msg = installResult.exitCode === 0
+      ? `Updated Polaris from v${currentVersion} to v${latestVersion}.\n\nRestart Claude Code for the new MCP server to take effect.`
+      : `Updated global binary to v${latestVersion}, but \`polaris install\` failed — run it manually.\n${installResult.stderr.toString().trim()}`;
+    return { content: [{ type: "text", text: msg }] };
   }
 
   throw new Error(`Unknown tool: ${name}`);

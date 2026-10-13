@@ -428,8 +428,8 @@ async function install(participantId?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session
-argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | (no args for status)]
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update
+argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -452,6 +452,10 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris rename-session <new-name>\`** — Rename this **session thread** only (not the project):
 1. Call \`polaris_rename_session\` with the new name
 2. Report the result
+
+**\`/polaris update\`** — Update Polaris to the latest version:
+1. Call \`polaris_update\`
+2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
 
 **\`/polaris disconnect\`** — Disconnect:
 1. Call \`polaris_disconnect\`
@@ -571,8 +575,8 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session
-argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | (no args for status)]
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update
+argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
 ## Polaris — Multiplayer Collaboration
@@ -595,6 +599,10 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris rename-session <new-name>\`** — Rename this **session thread** only (not the project):
 1. Call \`polaris_rename_session\` with the new name
 2. Report the result
+
+**\`/polaris update\`** — Update Polaris to the latest version:
+1. Call \`polaris_update\`
+2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
 
 **\`/polaris disconnect\`** — Disconnect:
 1. Call \`polaris_disconnect\`
