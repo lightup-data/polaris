@@ -18,7 +18,7 @@ dev: dev-up css api web daemon bridge
 
 # Postgres
 dev-up:
-	docker compose up -d
+	docker compose up -d --wait
 
 dev-down:
 	docker compose down

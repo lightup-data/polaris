@@ -34,8 +34,39 @@ export interface ProjectMember {
 // --- Schema ---
 
 export async function createDb(connectionString?: string): Promise<Sql> {
-  const sql = postgres(connectionString ?? process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris");
-  await ensureSchema(sql);
+  const connStr = connectionString ?? process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris";
+  const sql = postgres(connStr);
+  // Retry on transient startup errors (ECONNREFUSED, "starting up" 57P03).
+  // Fail fast on auth/role/database errors — retrying won't help.
+  const TRANSIENT_CODES = new Set(["57P03", "ECONNREFUSED"]);
+  const FATAL_CODES = new Set(["28000", "28P01", "3D000"]);
+  const MAX_ATTEMPTS = 10;
+  const RETRY_DELAY_MS = 1000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await ensureSchema(sql);
+      return sql;
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? "";
+      if (FATAL_CODES.has(code)) {
+        throw new Error(
+          `Database connection failed (${code}): ${(err as Error).message}\n` +
+          `Hint: the role/password/database may not exist. ` +
+          `Try: docker compose down -v && docker compose up -d --wait`
+        );
+      }
+      if (!TRANSIENT_CODES.has(code) && attempt === MAX_ATTEMPTS) {
+        throw err;
+      }
+      if (attempt < MAX_ATTEMPTS) {
+        console.error(`[db] connection attempt ${attempt}/${MAX_ATTEMPTS} failed (${code}), retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      } else {
+        throw err;
+      }
+    }
+  }
+  // unreachable
   return sql;
 }
 
