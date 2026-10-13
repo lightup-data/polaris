@@ -1042,6 +1042,13 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             }
           }
         }
+        // Include seconds since last delivered event so the status line can show
+        // a liveness indicator (e.g. "· 2m ago") without a second request.
+        let lastEventAge: number | null = null;
+        const cp = await readCheckpoint(ccSessionId);
+        if (cp && cp.project === mapping.project && cp.session === mapping.session) {
+          lastEventAge = Math.floor((Date.now() - new Date(cp.lastEventTimestamp).getTime()) / 1000);
+        }
         return json({
           connected: true,
           project: mapping.project,
@@ -1049,6 +1056,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           user: mapping.user,
           slackChannel,
           account: emailFromToken(await getTokenForProfile(mapping.profile)),
+          lastEventAge,
         });
       }
 

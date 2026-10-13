@@ -72,10 +72,24 @@ if [ "$CONNECTED" = "true" ]; then
   if [ -n "$ACCOUNT" ]; then
     ACCOUNT_TAG="[${ACCOUNT}] "
   fi
+
+  # Liveness indicator: seconds since last delivered event
+  RECENCY=""
+  LAST_AGE=$(echo "$STATUS" | jq -r '.lastEventAge // ""' 2>/dev/null || echo "")
+  if [ -n "$LAST_AGE" ] && [ "$LAST_AGE" != "null" ]; then
+    if [ "$LAST_AGE" -lt 60 ] 2>/dev/null; then
+      RECENCY=" · just now"
+    elif [ "$LAST_AGE" -lt 3600 ] 2>/dev/null; then
+      RECENCY=" · $(( LAST_AGE / 60 ))m ago"
+    else
+      RECENCY=" · $(( LAST_AGE / 3600 ))h ago"
+    fi
+  fi
+
   if [ -n "$SLACK" ]; then
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}${UPDATE_MSG}"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER}) #${SLACK}${RECENCY}${UPDATE_MSG}"
   else
-    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})${UPDATE_MSG}"
+    echo "polaris: ${ACCOUNT_TAG}${PROJECT}/${SESSION} (${USER})${RECENCY}${UPDATE_MSG}"
   fi
 else
   echo "polaris: not connected${UPDATE_MSG}"
