@@ -24,60 +24,63 @@ if [ -n "$CC_SESSION_ID" ]; then
   CONNECTED=$(echo "$STATUS" | jq -r '.connected' 2>/dev/null || echo "false")
 fi
 
-# --- Update check (cached, non-blocking) ---
-# Reads installed version from the MCP package, caches the latest npm version
-# for up to 1 hour. Background curl refresh never blocks the status line.
-UPDATE_MSG=""
+# --- Version / update check (cached, non-blocking) ---
+# Always shows the installed version; appends "latest" or "update available"
+# once the npm cache is populated. Background curl refresh never blocks.
+VERSION_TAG=""
 INSTALLED_PKG="$HOME/.polaris/mcp/node_modules/@lightupai/polaris/package.json"
 UPDATE_CACHE="$HOME/.polaris/update-check.json"
 
 if [ -f "$INSTALLED_PKG" ]; then
   INSTALLED_VERSION=$(jq -r '.version // ""' "$INSTALLED_PKG" 2>/dev/null || echo "")
 
-  CACHED_LATEST=""
-  if [ -f "$UPDATE_CACHE" ]; then
-    CACHED_LATEST=$(jq -r '.latest // ""' "$UPDATE_CACHE" 2>/dev/null || echo "")
-    CACHE_TS=$(jq -r '.checked // 0' "$UPDATE_CACHE" 2>/dev/null || echo "0")
-    NOW=$(date +%s 2>/dev/null || echo "0")
-    CACHE_AGE=$(( NOW - CACHE_TS )) 2>/dev/null || CACHE_AGE=9999
-    STALE=false
-    [ "$CACHE_AGE" -gt 300 ] 2>/dev/null && STALE=true
-  else
-    STALE=true
-  fi
+  if [ -n "$INSTALLED_VERSION" ]; then
+    VERSION_TAG=" [v${INSTALLED_VERSION}]"  # shown even before cache is populated
 
-  if [ "$STALE" = "true" ]; then
-    # Refresh in background — never blocks the status line
-    (
-      LATEST_V=$(curl -sf --max-time 5 "https://registry.npmjs.org/@lightupai/polaris/latest" 2>/dev/null \
-        | jq -r '.version // ""' 2>/dev/null)
-      if [ -n "$LATEST_V" ]; then
-        printf '{"latest":"%s","checked":%s}\n' "$LATEST_V" "$(date +%s)" > "$UPDATE_CACHE"
-      fi
-    ) &
-  fi
+    CACHED_LATEST=""
+    if [ -f "$UPDATE_CACHE" ]; then
+      CACHED_LATEST=$(jq -r '.latest // ""' "$UPDATE_CACHE" 2>/dev/null || echo "")
+      CACHE_TS=$(jq -r '.checked // 0' "$UPDATE_CACHE" 2>/dev/null || echo "0")
+      NOW=$(date +%s 2>/dev/null || echo "0")
+      CACHE_AGE=$(( NOW - CACHE_TS )) 2>/dev/null || CACHE_AGE=9999
+      STALE=false
+      [ "$CACHE_AGE" -gt 300 ] 2>/dev/null && STALE=true
+    else
+      STALE=true
+    fi
 
-  # Only notify when the registry version is strictly newer (prevents false
-  # positives when a freshly-updated client's cache still shows an older latest).
-  if [ -n "$CACHED_LATEST" ] && [ -n "$INSTALLED_VERSION" ]; then
-    _ver_gt() {
-      # Returns true (0) when $1 is semver-greater than $2
-      # Works for the "0.0.NNN" format used by polaris.
-      IFS=. read -r _a1 _a2 _a3 <<_EOF_
+    if [ "$STALE" = "true" ]; then
+      # Refresh in background — never blocks the status line
+      (
+        LATEST_V=$(curl -sf --max-time 5 "https://registry.npmjs.org/@lightupai/polaris/latest" 2>/dev/null \
+          | jq -r '.version // ""' 2>/dev/null)
+        if [ -n "$LATEST_V" ]; then
+          printf '{"latest":"%s","checked":%s}\n' "$LATEST_V" "$(date +%s)" > "$UPDATE_CACHE"
+        fi
+      ) &
+    fi
+
+    if [ -n "$CACHED_LATEST" ]; then
+      _ver_gt() {
+        # Returns true (0) when $1 is semver-greater than $2 ("0.0.NNN" format).
+        IFS=. read -r _a1 _a2 _a3 <<_EOF_
 $1
 _EOF_
-      IFS=. read -r _b1 _b2 _b3 <<_EOF_
+        IFS=. read -r _b1 _b2 _b3 <<_EOF_
 $2
 _EOF_
-      [ "${_a1:-0}" -gt "${_b1:-0}" ] && return 0
-      [ "${_a1:-0}" -lt "${_b1:-0}" ] && return 1
-      [ "${_a2:-0}" -gt "${_b2:-0}" ] && return 0
-      [ "${_a2:-0}" -lt "${_b2:-0}" ] && return 1
-      [ "${_a3:-0}" -gt "${_b3:-0}" ] && return 0
-      return 1
-    }
-    if _ver_gt "$CACHED_LATEST" "$INSTALLED_VERSION"; then
-      UPDATE_MSG=" [v${INSTALLED_VERSION}, update available]"
+        [ "${_a1:-0}" -gt "${_b1:-0}" ] && return 0
+        [ "${_a1:-0}" -lt "${_b1:-0}" ] && return 1
+        [ "${_a2:-0}" -gt "${_b2:-0}" ] && return 0
+        [ "${_a2:-0}" -lt "${_b2:-0}" ] && return 1
+        [ "${_a3:-0}" -gt "${_b3:-0}" ] && return 0
+        return 1
+      }
+      if _ver_gt "$CACHED_LATEST" "$INSTALLED_VERSION"; then
+        VERSION_TAG=" [v${INSTALLED_VERSION}, update available]"
+      else
+        VERSION_TAG=" [v${INSTALLED_VERSION}, latest]"
+      fi
     fi
   fi
 fi
@@ -111,7 +114,7 @@ if [ "$CONNECTED" = "true" ]; then
   if [ -n "$SLACK" ] && [ "$SLACK" != "$PROJECT" ]; then
     SLACK_TAG=" → #${SLACK}"
   fi
-  echo "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${UPDATE_MSG}"
+  echo "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${VERSION_TAG}"
 else
-  echo "polaris: not connected${UPDATE_MSG}"
+  echo "polaris: not connected${VERSION_TAG}"
 fi
