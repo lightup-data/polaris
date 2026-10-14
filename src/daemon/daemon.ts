@@ -28,6 +28,11 @@ const sessions = new Map<string, SessionMapping>(); // keyed by ccSessionId
 // Advisor injects queued for delivery via the UserPromptSubmit hook
 const injectQueues = new Map<string, Array<{ from: string; content: string; timestamp: string; type?: "direct" }>>(); // keyed by ccSessionId
 
+// Direct session-to-session messages queued for immediate claude/channel push.
+// Keyed by "project/session" so the MCP client can drain by its own session name
+// without needing to know which ccSessionId alias the daemon chose.
+const channelPushQueues = new Map<string, Array<{ from: string; content: string; timestamp: string }>>();
+
 // --- Config resolution (env var > config.json > legacy credentials.json > defaults) ---
 
 interface PolarisConfig {
@@ -1205,11 +1210,30 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           }
           queue.push({ from: `${sender.project}/${sender.session}`, content: body.message, timestamp, type: "direct" });
 
+          // Also queue for immediate claude/channel push so the MCP client can
+          // surface the message visually without waiting for a UserPromptSubmit.
+          const cpKey = `${target.project}/${target.session}`;
+          let cpQueue = channelPushQueues.get(cpKey);
+          if (!cpQueue) { cpQueue = []; channelPushQueues.set(cpKey, cpQueue); }
+          cpQueue.push({ from: `${sender.project}/${sender.session}`, content: body.message, timestamp });
+
           await logEvent("/send", body, undefined, { project: sender.project, session: sender.session, ccSessionId: body.ccSessionId });
           return json({ status: "delivered", from: sender.session, to: body.targetSession });
         } catch {
           return error("Invalid JSON", 400);
         }
+      }
+
+      // GET /channel-push/:project/:session — drain pending claude/channel pushes
+      // Called by the MCP client on a short poll; returns and clears the queue.
+      if (method === "GET" && pathname.match(/^\/channel-push\/[^/]+\/[^/]+$/)) {
+        const parts = pathname.split("/");
+        const project = decodeURIComponent(parts[2]);
+        const session = decodeURIComponent(parts[3]);
+        const key = `${project}/${session}`;
+        const pushes = channelPushQueues.get(key) ?? [];
+        channelPushQueues.delete(key);
+        return json({ pushes });
       }
 
       // GET /context/:ccSessionId/:session — proxy context fetch from cloud API

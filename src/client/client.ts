@@ -230,16 +230,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// --- claude/channel push adapter (SCAFFOLD — off by default) ---
-// With POLARIS_ENABLE_CHANNEL=1, push an inject to Claude Code in real time via an
-// experimental claude/channel notification instead of waiting for the next
-// UserPromptSubmit hook. Off by default (needs Claude Code to allowlist the channel);
-// the hook path stays the primary delivery mechanism. Best-effort -> returns false.
-export async function deliverInjectViaChannel(
+// --- claude/channel push adapter ---
+// Push content into the Claude Code agent window in real time via the
+// experimental claude/channel notification. Best-effort; falls back to the
+// UserPromptSubmit hook path if the push fails or the host doesn't support it.
+async function deliverViaChannel(
   content: string,
   meta: Record<string, unknown> = {}
 ): Promise<boolean> {
-  if (process.env.POLARIS_ENABLE_CHANNEL !== "1") return false;
   try {
     await mcp.notification({
       method: "notifications/claude/channel",
@@ -247,7 +245,7 @@ export async function deliverInjectViaChannel(
     });
     return true;
   } catch {
-    return false; // hook-based delivery still applies
+    return false;
   }
 }
 
@@ -635,7 +633,24 @@ async function main() {
     } catch { /* daemon unreachable — will retry next heartbeat */ }
   }, 60_000);
 
-  // inject delivery is handled via the UserPromptSubmit hook (see daemon injectQueues); claude/channel push deferred
+  // Poll the daemon every 3 seconds for pending direct-message channel pushes.
+  // When session A calls polaris_send → session B, the daemon queues a push for B.
+  // This loop drains it and fires a notifications/claude/channel so the message
+  // appears visibly in the agent window without waiting for a UserPromptSubmit.
+  setInterval(async () => {
+    if (!currentProject || !currentSession) return;
+    try {
+      const res = await daemonGet(`/channel-push/${encodeURIComponent(currentProject)}/${encodeURIComponent(currentSession)}`);
+      if (!res.ok) return;
+      const body = await res.json() as { pushes?: Array<{ from: string; content: string; timestamp: string }> };
+      const pushes = body.pushes ?? [];
+      const SEP = "━".repeat(48);
+      for (const p of pushes) {
+        const banner = `${SEP}\n  POLARIS — from: ${p.from}\n${SEP}\n${p.content}\n${SEP}`;
+        await deliverViaChannel(banner, { from: p.from, type: "direct", timestamp: p.timestamp });
+      }
+    } catch { /* daemon unreachable — will retry next tick */ }
+  }, 3_000);
 
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
