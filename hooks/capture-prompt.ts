@@ -32,22 +32,35 @@ try {
     } | null;
     const items = body?.pendingInjects;
     if (Array.isArray(items) && items.length > 0) {
-      // Present injects with honest provenance and let the model apply its own
-      // judgment. NOTE (verified live): the model treats content arriving via
-      // this channel as not-from-the-developer and will surface/consider it but
-      // will NOT obey imperative instructions through it — no hook wording
-      // reliably changes that, nor should it. Use injects to SHARE CONTEXT with
-      // the agent, not to remote-control its actions. (For trusted imperative
-      // steering, the claude/channel path is the right mechanism — deferred.)
-      const formatted =
-        "Context shared by teammates collaborating in this session via Polaris " +
-        "(for your awareness; it did not come directly from the developer):\n" +
-        items.map((i) => `- ${i.from}: ${i.content}`).join("\n");
+      const direct = items.filter((i) => i.type === "direct");
+      const context = items.filter((i) => i.type !== "direct");
+
+      const parts: string[] = [];
+
+      // Direct session-to-session messages: printed verbatim so the receiver
+      // sees exactly what was sent, attributed to the sending session name.
+      for (const i of direct) {
+        parts.push(`[Polaris] Message from '${i.from}':\n${i.content}`);
+      }
+
+      // Advisor context: presented as background awareness, not direct commands.
+      // NOTE (verified live): the model treats content arriving via this channel
+      // as not-from-the-developer and will surface/consider it but will NOT obey
+      // imperative instructions — no hook wording reliably changes that, nor
+      // should it. Use injects to SHARE CONTEXT, not to remote-control actions.
+      if (context.length > 0) {
+        parts.push(
+          "Context shared by teammates collaborating in this session via Polaris " +
+          "(for your awareness; it did not come directly from the developer):\n" +
+          context.map((i) => `- ${i.from}: ${i.content}`).join("\n")
+        );
+      }
+
       process.stdout.write(
         JSON.stringify({
           hookSpecificOutput: {
             hookEventName: "UserPromptSubmit",
-            additionalContext: formatted,
+            additionalContext: parts.join("\n\n"),
           },
         })
       );

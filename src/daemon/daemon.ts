@@ -26,7 +26,7 @@ function generateSessionName(): string {
 const sessions = new Map<string, SessionMapping>(); // keyed by ccSessionId
 
 // Advisor injects queued for delivery via the UserPromptSubmit hook
-const injectQueues = new Map<string, Array<{ from: string; content: string; timestamp: string }>>(); // keyed by ccSessionId
+const injectQueues = new Map<string, Array<{ from: string; content: string; timestamp: string; type?: "direct" }>>(); // keyed by ccSessionId
 
 // --- Config resolution (env var > config.json > legacy credentials.json > defaults) ---
 
@@ -1203,7 +1203,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               injectQueues.set(id, queue);
             }
           }
-          queue.push({ from: sender.session, content: body.message, timestamp });
+          queue.push({ from: sender.session, content: body.message, timestamp, type: "direct" });
 
           await logEvent("/send", body, undefined, { project: sender.project, session: sender.session, ccSessionId: body.ccSessionId });
           return json({ status: "delivered", from: sender.session, to: body.targetSession });
