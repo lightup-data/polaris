@@ -358,7 +358,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonPost("/send", { ccSessionId: CC_SESSION_ID, targetSession, message });
       if (res.ok) {
-        return { content: [{ type: "text", text: `Message sent to session '${targetSession}'.` }] };
+        const SEP = "━".repeat(48);
+        const banner = `${SEP}\n  POLARIS — sent to: ${targetSession}\n${SEP}\n${message}\n${SEP}`;
+        return { content: [{ type: "text", text: banner }] };
       }
       const body = await res.json();
       return { content: [{ type: "text", text: `Failed to send: ${(body as { error?: string }).error ?? res.status}` }] };

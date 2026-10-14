@@ -37,10 +37,11 @@ try {
 
       const parts: string[] = [];
 
-      // Direct session-to-session messages: printed verbatim so the receiver
-      // sees exactly what was sent, attributed to the sending session name.
+      // Direct session-to-session messages: printed verbatim with a loud banner
+      // so the receiver sees exactly what was sent, unambiguously attributed.
+      const SEP = "━".repeat(48);
       for (const i of direct) {
-        parts.push(`[Polaris] Message from '${i.from}':\n${i.content}`);
+        parts.push(`${SEP}\n  POLARIS — from: ${i.from}\n${SEP}\n${i.content}\n${SEP}`);
       }
 
       // Advisor context: presented as background awareness, not direct commands.
