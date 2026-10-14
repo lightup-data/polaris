@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# Polaris MCP server — runs as a child process of Claude Code
+# Polaris MCP server — runs as a child process of Claude Code.
+#
+# Restart loop: keeping this wrapper alive holds Claude Code's stdio pipes
+# open so a restart (exit code 42, triggered by polaris_update) is seamless —
+# Claude Code never sees a disconnect or needs to manually reconnect.
 SCRIPT="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 
 if command -v bun &>/dev/null; then
-  exec bun "$DIR/src/client/client.ts" "$@"
+  CMD=(bun)
 elif command -v bunx &>/dev/null; then
-  exec bunx bun "$DIR/src/client/client.ts" "$@"
+  CMD=(bunx bun)
 else
-  exec npx --yes bun "$DIR/src/client/client.ts" "$@"
+  CMD=(npx --yes bun)
 fi
+
+while true; do
+  "${CMD[@]}" "$DIR/src/client/client.ts" "$@"
+  EXIT=$?
+  # Exit code 42 = restart requested (e.g. after polaris_update installed new code).
+  # Any other exit code is passed through and terminates the wrapper.
+  [ "$EXIT" -ne 42 ] && exit "$EXIT"
+  # Brief pause to let the write pipe flush before the new process takes over.
+  sleep 0.3
+done

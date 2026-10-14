@@ -542,10 +542,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // local polaris binary (not relying on PATH, which may not include it).
     const polarisBin = `${mcpDir}/node_modules/.bin/polaris`;
     const installResult = Bun.spawnSync([polarisBin, "install"], { stdout: "pipe", stderr: "pipe" });
-    const msg = installResult.exitCode === 0
-      ? `Updated Polaris from v${currentVersion} to v${latestVersion}.\n\nRestart Claude Code for the new MCP server to take effect.`
-      : `Updated package to v${latestVersion}, but \`polaris install\` failed — run it manually.\n${installResult.stderr.toString().trim()}`;
-    return { content: [{ type: "text", text: msg }] };
+    if (installResult.exitCode !== 0) {
+      return { content: [{ type: "text", text: `Updated package to v${latestVersion}, but \`polaris install\` failed — run it manually.\n${installResult.stderr.toString().trim()}` }] };
+    }
+
+    // Exit with code 42 after the response flushes. The bin/polaris-mcp wrapper
+    // catches this code and immediately restarts the inner process with the new
+    // binary — Claude Code's stdio pipes stay open, so no manual reconnect needed.
+    setTimeout(() => process.exit(42), 500);
+    return { content: [{ type: "text", text: `Updated Polaris from v${currentVersion} to v${latestVersion}. MCP server restarting…` }] };
   }
 
   throw new Error(`Unknown tool: ${name}`);
@@ -635,6 +640,15 @@ async function main() {
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
   console.error(`Polaris MCP client started (session: ${CC_SESSION_ID})`);
+
+  // Notify the host that the tool list is ready. On a normal first start this
+  // is redundant (Claude Code fetches tools during initialize); on a hot
+  // restart via the bin/polaris-mcp wrapper (after polaris_update) this is
+  // what prompts Claude Code to re-fetch the updated tool list without a
+  // manual reconnect.
+  try {
+    await mcp.notification({ method: "notifications/tools/list_changed" });
+  } catch { /* host may not support the notification — ignore */ }
 }
 
 if (import.meta.main) {
