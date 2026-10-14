@@ -1203,7 +1203,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               injectQueues.set(id, queue);
             }
           }
-          queue.push({ from: sender.session, content: body.message, timestamp, type: "direct" });
+          queue.push({ from: `${sender.project}/${sender.session}`, content: body.message, timestamp, type: "direct" });
 
           await logEvent("/send", body, undefined, { project: sender.project, session: sender.session, ccSessionId: body.ccSessionId });
           return json({ status: "delivered", from: sender.session, to: body.targetSession });

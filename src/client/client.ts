@@ -359,7 +359,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const res = await daemonPost("/send", { ccSessionId: CC_SESSION_ID, targetSession, message });
       if (res.ok) {
         const SEP = "━".repeat(48);
-        const banner = `${SEP}\n  POLARIS — sent to: ${targetSession}\n${SEP}\n${message}\n${SEP}`;
+        const banner = `${SEP}\n  POLARIS — sent to: ${currentProject}/${targetSession}\n${SEP}\n${message}\n${SEP}`;
         return { content: [{ type: "text", text: banner }] };
       }
       const body = await res.json();
