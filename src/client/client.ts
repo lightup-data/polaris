@@ -106,6 +106,8 @@ const mcp = new Server(
     },
     instructions: `You are connected to Polaris — a multiplayer collaboration system. Messages from advisors and teammates may arrive as <channel source="polaris" from="..."> tags. Use /polaris commands to manage your session, or call the polaris tools directly.
 
+When you finish a task and would otherwise go idle — especially if you are holding a shared resource (port, file lock, etc.) that another session may need — call polaris_standby() instead of stopping. It blocks until a sibling session sends you a message, then returns it immediately so you can act without requiring a human prompt.
+
 If the user reports the Polaris daemon is not running or keeps crashing, tell them to run \`polaris install\` — it registers the daemon with launchd on macOS or a systemd user service on Linux for auto-restart on crash and at login. Do NOT suggest manually configuring launchd or systemd — \`polaris install\` handles it.`,
   }
 );
@@ -141,6 +143,17 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {},
+      },
+    },
+    {
+      name: "polaris_standby",
+      description: "Wait for an incoming message from a sibling session. Blocks until a message arrives or the timeout elapses. Use this when you are idle but must remain responsive to coordination requests (e.g. holding a resource another session needs). Returns the message immediately when it arrives — no human prompt required.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          timeout: { type: "number", description: "Seconds to wait (default 60, max 120)" },
+        },
+        required: [],
       },
     },
     {
@@ -345,6 +358,34 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: "Not connected to any Polaris session." }] };
     } catch {
       return { content: [{ type: "text", text: "Polaris daemon not reachable." }] };
+    }
+  }
+
+  if (name === "polaris_standby") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const { timeout = 60 } = (args ?? {}) as { timeout?: number };
+    const clampedTimeout = Math.min(Math.max(timeout, 1), 120);
+    try {
+      const res = await fetch(
+        `${DAEMON_URL}/standby/${encodeURIComponent(CC_SESSION_ID)}?timeout=${clampedTimeout}`,
+        {
+          headers: daemonHeaders(),
+          signal: AbortSignal.timeout((clampedTimeout + 5) * 1000),
+        }
+      );
+      const body = await res.json() as { status: string; pushes: Array<{ from: string; content: string; timestamp: string }> };
+      if (body.status === "timeout" || body.pushes.length === 0) {
+        return { content: [{ type: "text", text: `No messages received (waited ${clampedTimeout}s).` }] };
+      }
+      const SEP = "━".repeat(48);
+      const formatted = body.pushes
+        .map((p) => `${SEP}\n  POLARIS — from: ${p.from}\n${SEP}\n${p.content}\n${SEP}`)
+        .join("\n\n");
+      return { content: [{ type: "text", text: formatted }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach daemon." }] };
     }
   }
 

@@ -33,6 +33,10 @@ const injectQueues = new Map<string, Array<{ from: string; content: string; time
 // without needing to know which ccSessionId alias the daemon chose.
 const channelPushQueues = new Map<string, Array<{ from: string; content: string; timestamp: string }>>();
 
+// Long-poll standby waiters: keyed by "project/session".
+// polaris_standby registers a resolver here; polaris_send wakes it immediately.
+const standbyWaiters = new Map<string, (pushes: Array<{ from: string; content: string; timestamp: string }>) => void>();
+
 // --- Config resolution (env var > config.json > legacy credentials.json > defaults) ---
 
 interface PolarisConfig {
@@ -1213,9 +1217,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // Also queue for immediate claude/channel push so the MCP client can
           // surface the message visually without waiting for a UserPromptSubmit.
           const cpKey = `${target.project}/${target.session}`;
-          let cpQueue = channelPushQueues.get(cpKey);
-          if (!cpQueue) { cpQueue = []; channelPushQueues.set(cpKey, cpQueue); }
-          cpQueue.push({ from: `${sender.project}/${sender.session}`, content: body.message, timestamp });
+          const push = { from: `${sender.project}/${sender.session}`, content: body.message, timestamp };
+
+          // Wake a standby waiter immediately if one is registered (polaris_standby).
+          const waiter = standbyWaiters.get(cpKey);
+          if (waiter) {
+            standbyWaiters.delete(cpKey);
+            waiter([push]);
+          } else {
+            let cpQueue = channelPushQueues.get(cpKey);
+            if (!cpQueue) { cpQueue = []; channelPushQueues.set(cpKey, cpQueue); }
+            cpQueue.push(push);
+          }
 
           await logEvent("/send", body, undefined, { project: sender.project, session: sender.session, ccSessionId: body.ccSessionId });
           return json({ status: "delivered", from: sender.session, to: body.targetSession });
@@ -1234,6 +1247,42 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         const pushes = channelPushQueues.get(key) ?? [];
         channelPushQueues.delete(key);
         return json({ pushes });
+      }
+
+      // GET /standby/:ccSessionId?timeout=N — long-poll for incoming messages.
+      // Blocks until polaris_send delivers a message to this session or timeout.
+      // The receiving agent calls this via polaris_standby to remain responsive
+      // while idle, without requiring a human to prompt it.
+      if (method === "GET" && pathname.match(/^\/standby\/[^/]+$/)) {
+        const ccSessionId = decodeURIComponent(pathname.split("/")[2]);
+        const mapping = sessions.get(ccSessionId);
+        if (!mapping || !mapping.project) return error("Not connected", 400);
+
+        const timeoutMs = Math.min(
+          parseInt(new URL(req.url).searchParams.get("timeout") ?? "60") * 1000,
+          120_000
+        );
+        const key = `${mapping.project}/${mapping.session}`;
+
+        // Return any already-queued pushes immediately
+        const existing = channelPushQueues.get(key) ?? [];
+        if (existing.length > 0) {
+          channelPushQueues.delete(key);
+          return json({ status: "message", pushes: existing });
+        }
+
+        // Wait for a push or timeout
+        return new Promise<Response>((resolve) => {
+          const timer = setTimeout(() => {
+            standbyWaiters.delete(key);
+            resolve(json({ status: "timeout", pushes: [] }));
+          }, timeoutMs);
+
+          standbyWaiters.set(key, (pushes) => {
+            clearTimeout(timer);
+            resolve(json({ status: "message", pushes }));
+          });
+        });
       }
 
       // GET /context/:ccSessionId/:session — proxy context fetch from cloud API
