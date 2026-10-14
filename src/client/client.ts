@@ -144,6 +144,18 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "polaris_send",
+      description: "Send a message directly to a sibling session in the same project. The message is injected into that session's next prompt and logged in both sessions' Polaris timelines.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          session: { type: "string", description: "Target session name (e.g. 'feedback')" },
+          message: { type: "string", description: "Message to send" },
+        },
+        required: ["session", "message"],
+      },
+    },
+    {
       name: "polaris_reply",
       description: "Send a message to the project floor (visible to all advisors, and to the linked Slack channel if a floor is connected).",
       inputSchema: {
@@ -335,6 +347,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: "Not connected to any Polaris session." }] };
     } catch {
       return { content: [{ type: "text", text: "Polaris daemon not reachable." }] };
+    }
+  }
+
+  if (name === "polaris_send") {
+    if (!currentProject) {
+      return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
+    }
+    const { session: targetSession, message } = args as { session: string; message: string };
+    try {
+      const res = await daemonPost("/send", { ccSessionId: CC_SESSION_ID, targetSession, message });
+      if (res.ok) {
+        return { content: [{ type: "text", text: `Message sent to session '${targetSession}'.` }] };
+      }
+      const body = await res.json();
+      return { content: [{ type: "text", text: `Failed to send: ${(body as { error?: string }).error ?? res.status}` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }
   }
 

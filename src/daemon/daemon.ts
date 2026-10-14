@@ -1139,6 +1139,79 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // POST /send — deliver a message to a sibling session and log it on both timelines
+      if (method === "POST" && pathname === "/send") {
+        try {
+          const body = (await req.json()) as { ccSessionId: string; targetSession: string; message: string };
+          if (!body.ccSessionId || !body.targetSession || !body.message) {
+            return error("ccSessionId, targetSession, and message required", 400);
+          }
+          const sender = sessions.get(body.ccSessionId);
+          if (!sender || !sender.project) return error("Not connected", 400);
+
+          // Find the target session by name within the same project
+          const target = Array.from(sessions.values()).find(
+            (m) => m.project === sender.project && m.session === body.targetSession && m.ccSessionId !== body.ccSessionId
+          );
+          if (!target) {
+            return error(`Session '${body.targetSession}' is not connected in project '${sender.project}'`, 404);
+          }
+
+          const serviceUrl = getServiceUrlForProfile(sender.profile);
+          const headers = await authHeadersForProfile(sender.profile);
+          const timestamp = new Date().toISOString();
+
+          // 1. Log outbound event on sender's timeline
+          await fetch(`${serviceUrl}/projects/${sender.project}/sessions/${sender.session}/events`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              sender: sender.agent,
+              payload: {
+                hook_event_name: "SendMessage",
+                session_id: body.ccSessionId,
+                to: body.targetSession,
+                message: body.message,
+              },
+            }),
+          });
+
+          // 2. Log inbound event on target's timeline (attributed to the sender's session name)
+          await fetch(`${serviceUrl}/projects/${target.project}/sessions/${target.session}/events`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              sender: sender.agent,
+              payload: {
+                hook_event_name: "ReceiveMessage",
+                session_id: target.ccSessionId,
+                from: sender.session,
+                message: body.message,
+              },
+            }),
+          });
+
+          // 3. Inject into target's local queue for delivery on next UserPromptSubmit
+          let queue = injectQueues.get(target.ccSessionId);
+          if (!queue) {
+            queue = [];
+            injectQueues.set(target.ccSessionId, queue);
+          }
+          // Also register under any alias ccSessionId the target may be using
+          for (const [id, m] of sessions) {
+            if (m.project === target.project && m.session === target.session && !injectQueues.has(id)) {
+              injectQueues.set(id, queue);
+            }
+          }
+          queue.push({ from: sender.session, content: body.message, timestamp });
+
+          await logEvent("/send", body, undefined, { project: sender.project, session: sender.session, ccSessionId: body.ccSessionId });
+          return json({ status: "delivered", from: sender.session, to: body.targetSession });
+        } catch {
+          return error("Invalid JSON", 400);
+        }
+      }
+
       // GET /context/:ccSessionId/:session — proxy context fetch from cloud API
       if (method === "GET" && pathname.match(/^\/context\/[^/]+\/[^/]+$/)) {
         const parts = pathname.split("/");
