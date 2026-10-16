@@ -613,6 +613,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
+    idleTimeout: 130, // standby long-polls up to 120s; Bun's default 10s would close them early
 
     async fetch(req) {
       const url = new URL(req.url);

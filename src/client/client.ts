@@ -384,8 +384,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         .map((p) => `${SEP}\n  POLARIS — from: ${p.from}\n${SEP}\n${p.content}\n${SEP}`)
         .join("\n\n");
       return { content: [{ type: "text", text: formatted }] };
-    } catch {
-      return { content: [{ type: "text", text: "Failed to reach daemon." }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text", text: `Failed to reach daemon: ${msg}` }] };
     }
   }
 
