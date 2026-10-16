@@ -151,7 +151,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {
-          timeout: { type: "number", description: "Seconds to wait (default 60, max 120)" },
+          timeout: { type: "number", description: "Seconds to wait (default 60)" },
         },
         required: [],
       },
@@ -366,28 +366,46 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: "Not connected to a Polaris session. Use polaris_connect first." }] };
     }
     const { timeout = 60 } = (args ?? {}) as { timeout?: number };
-    const clampedTimeout = Math.min(Math.max(timeout, 1), 120);
-    try {
-      const res = await fetch(
-        `${DAEMON_URL}/standby/${encodeURIComponent(CC_SESSION_ID)}?timeout=${clampedTimeout}`,
-        {
-          headers: daemonHeaders(),
-          signal: AbortSignal.timeout((clampedTimeout + 5) * 1000),
+    const totalSec = Math.max(timeout, 1);
+    const deadline = Date.now() + totalSec * 1000;
+    const POLL_SEC = 60;       // max per sub-poll; keeps each request short-lived
+    const RETRY_DELAY_MS = 3_000; // pause before retrying after a transient failure
+
+    while (true) {
+      const remainingSec = Math.ceil((deadline - Date.now()) / 1000);
+      if (remainingSec <= 0) break;
+
+      const pollSec = Math.min(remainingSec, POLL_SEC);
+      try {
+        const res = await fetch(
+          `${DAEMON_URL}/standby/${encodeURIComponent(CC_SESSION_ID)}?timeout=${pollSec}`,
+          {
+            headers: daemonHeaders(),
+            signal: AbortSignal.timeout((pollSec + 30) * 1000),
+          }
+        );
+        if (res.status === 400) {
+          // Session no longer connected — no point retrying
+          return { content: [{ type: "text", text: "Not connected to a Polaris session." }] };
         }
-      );
-      const body = await res.json() as { status: string; pushes: Array<{ from: string; content: string; timestamp: string }> };
-      if (body.status === "timeout" || body.pushes.length === 0) {
-        return { content: [{ type: "text", text: `No messages received (waited ${clampedTimeout}s).` }] };
+        const body = await res.json() as { status: string; pushes: Array<{ from: string; content: string; timestamp: string }> };
+        if (body.pushes.length > 0) {
+          const SEP = "━".repeat(48);
+          const formatted = body.pushes
+            .map((p) => `${SEP}\n  POLARIS — from: ${p.from}\n${SEP}\n${p.content}\n${SEP}`)
+            .join("\n\n");
+          return { content: [{ type: "text", text: formatted }] };
+        }
+        // status === "timeout" — loop back if budget remains
+      } catch {
+        // Transient failure (daemon restart, network blip) — retry after a short pause
+        const retryAt = Date.now() + RETRY_DELAY_MS;
+        if (retryAt >= deadline) break;
+        await Bun.sleep(RETRY_DELAY_MS);
       }
-      const SEP = "━".repeat(48);
-      const formatted = body.pushes
-        .map((p) => `${SEP}\n  POLARIS — from: ${p.from}\n${SEP}\n${p.content}\n${SEP}`)
-        .join("\n\n");
-      return { content: [{ type: "text", text: formatted }] };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { content: [{ type: "text", text: `Failed to reach daemon: ${msg}` }] };
     }
+
+    return { content: [{ type: "text", text: `No messages received (waited ${totalSec}s).` }] };
   }
 
   if (name === "polaris_send") {

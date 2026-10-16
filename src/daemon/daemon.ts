@@ -613,9 +613,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
-    idleTimeout: 130, // standby long-polls up to 120s; Bun's default 10s would close them early
 
-    async fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url);
       const { pathname } = url;
       const method = req.method;
@@ -1259,10 +1258,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         const mapping = sessions.get(ccSessionId);
         if (!mapping || !mapping.project) return error("Not connected", 400);
 
-        const timeoutMs = Math.min(
-          parseInt(new URL(req.url).searchParams.get("timeout") ?? "60") * 1000,
-          120_000
-        );
+        const timeoutSec = parseInt(new URL(req.url).searchParams.get("timeout") ?? "60");
+        const timeoutMs = Math.max(timeoutSec, 1) * 1000;
+        server.timeout(req, 0); // disable Bun's idle timeout for this long-poll
         const key = `${mapping.project}/${mapping.session}`;
 
         // Return any already-queued pushes immediately
