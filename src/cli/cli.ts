@@ -1,19 +1,21 @@
 #!/usr/bin/env bun
 // --- Polaris CLI ---
 // Usage:
-//   polaris              — install + login (default onboarding)
-//   polaris install      — install local components (no auth)
-//   polaris login        — authenticate via Google SSO (production)
-//   polaris login --local — authenticate against localhost
-//   polaris login --url <url> — authenticate against a custom URL
+//   polaris                       — install + login (default onboarding)
+//   polaris install               — install local components (no auth)
+//   polaris login                 — authenticate via Google SSO (production)
+//   polaris login --local         — authenticate against localhost
+//   polaris login --url <url>     — authenticate against a custom URL
 //   polaris login --profile <name> — explicit profile key (default: email)
-//   polaris use <email>  — switch active account (triggers login if not found)
-//   polaris profiles     — list accounts
-//   polaris daemon       — start the local daemon
-//   polaris status       — show connection status
-//   polaris recover      — re-POST locally logged events missing upstream
-//   polaris feedback     — report a bug or request a feature
-//   polaris logout       — remove credentials
+//   polaris login --token <token> — authenticate without a browser (SSH/headless)
+//   polaris token                 — print active token for copy-paste to another machine
+//   polaris use <email>           — switch active account (triggers login if not found)
+//   polaris profiles              — list accounts
+//   polaris daemon                — start the local daemon
+//   polaris status                — show connection status
+//   polaris recover               — re-POST locally logged events missing upstream
+//   polaris feedback              — report a bug or request a feature
+//   polaris logout                — remove credentials
 
 import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
@@ -522,6 +524,56 @@ The Polaris daemon runs locally and is managed automatically — do NOT manually
 
 // --- Login ---
 
+// Validate a raw token against the server, save it to config, and write the
+// legacy credentials file. Called by both the browser OAuth flow and
+// `polaris login --token <value>`.
+async function saveAuthToken(token: string, appUrl: string, profileName?: string) {
+  const res = await fetch(`${appUrl}/auth/token?token=${token}`);
+  if (!res.ok) {
+    console.error("  ✗ Failed to validate token. Please try again.");
+    process.exit(1);
+  }
+  const userInfo = (await res.json()) as {
+    sub: string;
+    email: string;
+    name: string;
+    org_id: string;
+    participant_id: string;
+  };
+
+  let orgName = userInfo.email.split("@")[1].split(".")[0];
+  orgName = orgName.charAt(0).toUpperCase() + orgName.slice(1);
+
+  console.log(`\n  Authenticated as ${userInfo.name} (${userInfo.email})`);
+  console.log(`  Organization: ${orgName}`);
+  console.log(`  Participant ID: ${userInfo.participant_id}`);
+
+  // Save to profile — keyed by email unless an explicit --profile name was given
+  const config = await loadConfig();
+  const profileKey = profileName ?? userInfo.email;
+  config.profiles[profileKey] = {
+    api: appToApi(appUrl),
+    app: appUrl,
+    token,
+    email: userInfo.email,
+    name: userInfo.name,
+    org_id: userInfo.org_id,
+    participant_id: userInfo.participant_id,
+  };
+  config.active = profileKey;
+  await saveConfig(config);
+
+  // Also write legacy credentials.json for backward compat (daemon reads it)
+  await writeFile(LEGACY_CREDENTIALS_FILE, JSON.stringify({
+    token,
+    ...userInfo,
+    service_url: appUrl,
+  }, null, 2));
+
+  console.log(`  ✓ Logged in as ${userInfo.email}`);
+  return userInfo;
+}
+
 async function login(appUrl: string, profileName?: string, loginHint?: string) {
   // Profile key is determined after auth (we use the email). profileName is an
   // explicit override (e.g. --profile flag); otherwise we'll use userInfo.email.
@@ -568,50 +620,7 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const token = await tokenPromise;
   setTimeout(() => callbackServer.stop(true), 3000);
 
-  // Validate token
-  const res = await fetch(`${appUrl}/auth/token?token=${token}`);
-  if (!res.ok) {
-    console.error("  ✗ Failed to validate token. Please try again.");
-    process.exit(1);
-  }
-  const userInfo = (await res.json()) as {
-    sub: string;
-    email: string;
-    name: string;
-    org_id: string;
-    participant_id: string;
-  };
-
-  let orgName = userInfo.email.split("@")[1].split(".")[0];
-  orgName = orgName.charAt(0).toUpperCase() + orgName.slice(1);
-
-  console.log(`\n  Authenticated as ${userInfo.name} (${userInfo.email})`);
-  console.log(`  Organization: ${orgName}`);
-  console.log(`  Participant ID: ${userInfo.participant_id}`);
-
-  // Save to profile — keyed by email unless an explicit --profile name was given
-  const config = await loadConfig();
-  const profileKey = profileName ?? userInfo.email;
-  config.profiles[profileKey] = {
-    api: appToApi(appUrl),
-    app: appUrl,
-    token,
-    email: userInfo.email,
-    name: userInfo.name,
-    org_id: userInfo.org_id,
-    participant_id: userInfo.participant_id,
-  };
-  config.active = profileKey;
-  await saveConfig(config);
-
-  // Also write legacy credentials.json for backward compat (daemon reads it)
-  await writeFile(LEGACY_CREDENTIALS_FILE, JSON.stringify({
-    token,
-    ...userInfo,
-    service_url: appUrl,
-  }, null, 2));
-
-  console.log(`  ✓ Logged in as ${userInfo.email}`);
+  const userInfo = await saveAuthToken(token, appUrl, profileName);
 
   // Re-install skill with personalized participant ID
   await mkdir(join(CLAUDE_DIR, "skills", "polaris"), { recursive: true });
@@ -1143,13 +1152,33 @@ switch (command) {
   case "login": {
     const appUrl = hasFlag("local") ? LOCAL_APP_URL : (getFlag("url") ?? DEFAULT_APP_URL);
     const profileName = getFlag("profile");
+    const pastedToken = getFlag("token");
     console.log("Polaris — authenticating\n");
-    await login(appUrl, profileName);
+    if (pastedToken) {
+      // Headless path: token was copy-pasted from another machine via `polaris token`
+      await saveAuthToken(pastedToken, appUrl, profileName);
+    } else {
+      await login(appUrl, profileName);
+    }
     console.log("\n✓ Login complete!");
     await installDaemonService(await ensureDaemonSecret());
     console.log(`  ✓ Daemon registered with ${daemonServiceLabel()}`);
 
     console.log("\nNext: restart Claude Code, then run `/polaris join #channel-name` in your AI agent.");
+    break;
+  }
+
+  case "token": {
+    // Print the active token for copy-paste to another machine.
+    // Usage: polaris token   (on source machine)
+    //        polaris login --token <paste>  (on target machine, no browser needed)
+    const config = await loadConfig();
+    const profile = getActiveProfile(config);
+    if (!profile) {
+      console.error("Not logged in. Run: polaris login");
+      process.exit(1);
+    }
+    console.log(profile.token);
     break;
   }
 
@@ -1209,16 +1238,18 @@ switch (command) {
   default:
     console.log("Polaris CLI\n");
     console.log("Usage:");
-    console.log("  polaris                — install + login (default setup)");
-    console.log("  polaris install        — install local components (no auth)");
-    console.log("  polaris login          — authenticate (production)");
-    console.log("  polaris login --local  — authenticate (local dev)");
-    console.log("  polaris use <email>    — switch active account (triggers login if needed)");
-    console.log("  polaris profiles       — list all accounts");
-    console.log("  polaris daemon         — start the local daemon");
-    console.log("  polaris status         — show connection status");
-    console.log("  polaris recover        — re-POST locally logged events missing upstream");
-    console.log("  polaris feedback       — report a bug or request a feature");
-    console.log("  polaris logout         — remove active profile");
-    console.log("  polaris logout --all   — remove all credentials");
+    console.log("  polaris                        — install + login (default setup)");
+    console.log("  polaris install                — install local components (no auth)");
+    console.log("  polaris login                  — authenticate (production)");
+    console.log("  polaris login --local          — authenticate (local dev)");
+    console.log("  polaris login --token <token>  — authenticate without a browser (SSH/headless)");
+    console.log("  polaris token                  — print token for copy-paste to another machine");
+    console.log("  polaris use <email>            — switch active account (triggers login if needed)");
+    console.log("  polaris profiles               — list all accounts");
+    console.log("  polaris daemon                 — start the local daemon");
+    console.log("  polaris status                 — show connection status");
+    console.log("  polaris recover                — re-POST locally logged events missing upstream");
+    console.log("  polaris feedback               — report a bug or request a feature");
+    console.log("  polaris logout                 — remove active profile");
+    console.log("  polaris logout --all           — remove all credentials");
 }
