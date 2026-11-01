@@ -1425,10 +1425,19 @@ switch (command) {
   case "update": {
     console.log("Polaris — updating\n");
     const mcpDir = join(POLARIS_DIR, "mcp");
-    let currentVersion = "";
+
+    // Version of the running global binary
+    let globalVersion = "";
+    try {
+      const pkg = JSON.parse(await readFile(join(import.meta.dir, "..", "..", "package.json"), "utf-8")) as { version: string };
+      globalVersion = pkg.version ?? "";
+    } catch { /* ignore */ }
+
+    // Version installed in the local MCP dir (may differ from global binary)
+    let mcpVersion = "";
     try {
       const pkg = JSON.parse(await readFile(join(mcpDir, "node_modules", "@lightupai", "polaris", "package.json"), "utf-8")) as { version: string };
-      currentVersion = pkg.version ?? "";
+      mcpVersion = pkg.version ?? "";
     } catch { /* not installed yet */ }
 
     let latestVersion = "";
@@ -1441,19 +1450,37 @@ switch (command) {
       console.error("  ✗ Could not reach npm. Check your network connection.");
       process.exit(1);
     }
-    if (latestVersion === currentVersion) {
+
+    const currentVersion = globalVersion || mcpVersion;
+    if (latestVersion === globalVersion && latestVersion === mcpVersion) {
       console.log(`  Already up to date (v${currentVersion}).`);
       break;
     }
 
     console.log(`  Updating v${currentVersion} → v${latestVersion}...`);
-    const npmResult = Bun.spawnSync(
-      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
-      { stdout: "ignore", stderr: "pipe" }
-    );
-    if (npmResult.exitCode !== 0) {
-      console.error("  ✗ Update failed:\n" + npmResult.stderr.toString().trim());
-      process.exit(1);
+
+    // Update the global binary if it's behind
+    if (latestVersion !== globalVersion) {
+      const globalResult = Bun.spawnSync(
+        ["npm", "install", "-g", `@lightupai/polaris@${latestVersion}`],
+        { stdout: "ignore", stderr: "pipe" }
+      );
+      if (globalResult.exitCode !== 0) {
+        console.error("  ✗ Global update failed:\n" + globalResult.stderr.toString().trim());
+        process.exit(1);
+      }
+    }
+
+    // Update the local MCP install if it's behind
+    if (latestVersion !== mcpVersion) {
+      const npmResult = Bun.spawnSync(
+        ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+        { stdout: "ignore", stderr: "pipe" }
+      );
+      if (npmResult.exitCode !== 0) {
+        console.error("  ✗ MCP update failed:\n" + npmResult.stderr.toString().trim());
+        process.exit(1);
+      }
     }
 
     console.log(`  ✓ Updated to v${latestVersion}`);
