@@ -19,6 +19,7 @@
 //   polaris logout                — remove credentials
 
 import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:fs/promises";
+import { DaemonClient } from "../core/daemon-client.js";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 
@@ -111,6 +112,12 @@ async function requireProfile(): Promise<Profile> {
     process.exit(1);
   }
   return profile;
+}
+
+async function daemonClient(): Promise<DaemonClient> {
+  const config = await loadConfig();
+  const secret = resolveDaemonSecret(config);
+  return new DaemonClient({ url: "http://127.0.0.1:4322", secret });
 }
 
 function deriveProfileName(appUrl: string): string {
@@ -1324,6 +1331,134 @@ switch (command) {
     await logout(hasFlag("all"));
     break;
 
+  case "connect": {
+    const project = (args[1] ?? "").replace(/^#/, "");
+    if (!project) {
+      console.error("Usage: polaris connect <project> [session]");
+      process.exit(1);
+    }
+    const profile = await requireProfile();
+    const d = await daemonClient();
+    const session = args[2];
+    const result = await d.connect({
+      ccSessionId: "cli",
+      project,
+      user: profile.participant_id,
+      profile: profile.token,
+      ...(session ? { session } : {}),
+      ...(hasFlag("create") ? { create: true } : {}),
+    });
+    if (result.ok) {
+      console.log(`Connected to #${result.project ?? project}/${result.session ?? session ?? ""} as ${profile.participant_id}`);
+    } else if (result.httpStatus === 404 && result.error === "project_not_found") {
+      console.error(`Project "#${project}" not found. Use --create to create it.`);
+      if (result.existing?.length) console.error(`Available: ${result.existing.map(p => `#${p}`).join(", ")}`);
+    } else {
+      console.error(`Failed to connect: ${result.error ?? "unknown error"}`);
+    }
+    break;
+  }
+
+  case "disconnect": {
+    const d = await daemonClient();
+    await d.disconnect("cli");
+    console.log("Disconnected.");
+    break;
+  }
+
+  case "send": {
+    const targetSession = args[1];
+    const message = args.slice(2).join(" ");
+    if (!targetSession || !message) {
+      console.error("Usage: polaris send <session> <message>");
+      process.exit(1);
+    }
+    const d = await daemonClient();
+    const result = await d.send("cli", targetSession, message);
+    if (result.ok) {
+      console.log(`Sent to ${result.to ?? targetSession}`);
+    } else {
+      console.error(`Failed to send: ${result.error ?? result.httpStatus}`);
+    }
+    break;
+  }
+
+  case "reply": {
+    const message = args.slice(1).join(" ");
+    if (!message) {
+      console.error("Usage: polaris reply <message>");
+      process.exit(1);
+    }
+    const d = await daemonClient();
+    const ok = await d.reply("cli", message);
+    console.log(ok ? "Reply sent." : "Failed to send reply.");
+    break;
+  }
+
+  case "rename": {
+    const oldName = args[1];
+    const newName = args[2];
+    if (!oldName || !newName) {
+      console.error("Usage: polaris rename <old-name> <new-name>");
+      process.exit(1);
+    }
+    const d = await daemonClient();
+    const result = await d.rename(oldName, newName);
+    console.log(result.ok ? `Renamed "${oldName}" to "${newName}".` : `Failed: ${result.error}`);
+    break;
+  }
+
+  case "rename-session": {
+    const newName = args[1];
+    if (!newName) {
+      console.error("Usage: polaris rename-session <new-name>");
+      process.exit(1);
+    }
+    const d = await daemonClient();
+    const result = await d.renameSession("cli", newName);
+    console.log(result.ok ? `Session renamed to "${newName}".` : `Failed: ${result.error}`);
+    break;
+  }
+
+  case "context": {
+    const targetSession = args[1];
+    if (!targetSession) {
+      console.error("Usage: polaris context <session>");
+      process.exit(1);
+    }
+    const d = await daemonClient();
+    try {
+      const events = await d.context("cli", targetSession);
+      if (events.length === 0) { console.log("(no activity yet)"); break; }
+      for (const e of events) {
+        const p = e.payload as { prompt?: string; stop_response?: string; content?: string };
+        const text = p.prompt ?? p.stop_response ?? p.content ?? JSON.stringify(p);
+        console.log(`[${e.sender}] ${text}`);
+      }
+    } catch (err) {
+      console.error(`Could not fetch context: ${err instanceof Error ? err.message : err}`);
+    }
+    break;
+  }
+
+  case "team": {
+    const d = await daemonClient();
+    try {
+      const members = await d.team();
+      if (members.length === 0) { console.log("No team members found."); break; }
+      const taggable = members.filter((m) => m.slack_id && m.slack_handle);
+      for (const m of taggable) {
+        const alias = m.alias && m.alias !== m.slack_handle ? `@${m.alias} ` : "";
+        console.log(`  ${alias}@${m.slack_handle} — ${m.name}${m.polaris_user ? " ✓" : ""}`);
+      }
+      const notTaggable = members.filter((m) => !m.slack_id);
+      if (notTaggable.length) console.log(`\nNot on Slack: ${notTaggable.map(m => m.name).join(", ")}`);
+    } catch {
+      console.error("Failed to fetch team — is the daemon running?");
+    }
+    break;
+  }
+
   case undefined:
     // Default: install + login
     console.log("Polaris — setting up your machine\n");
@@ -1353,6 +1488,14 @@ switch (command) {
     console.log("  polaris profiles               — list all accounts");
     console.log("  polaris daemon                 — start the local daemon");
     console.log("  polaris status                 — show connection status");
+    console.log("  polaris connect <project> [session] [--create]  — connect to a project");
+    console.log("  polaris disconnect             — disconnect current session");
+    console.log("  polaris send <session> <msg>   — send a message to a session");
+    console.log("  polaris reply <msg>            — reply to the floor in Slack");
+    console.log("  polaris rename <old> <new>     — rename a project");
+    console.log("  polaris rename-session <name>  — rename current session");
+    console.log("  polaris context <session>      — show recent activity for a session");
+    console.log("  polaris team                   — list team members");
     console.log("  polaris recover                — re-POST locally logged events missing upstream");
     console.log("  polaris feedback               — report a bug or request a feature");
     console.log("  polaris logout                 — remove active profile");

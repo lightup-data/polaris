@@ -7,13 +7,11 @@ import {
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { DaemonClient } from "../core/daemon-client.js";
 
 // --- Configuration ---
 
 const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4322";
-
-// Shared local daemon-auth secret (installed by `polaris install`); sent as
-// x-polaris-daemon-secret when present, else the daemon runs unauthenticated.
 const DAEMON_SECRET = process.env.POLARIS_DAEMON_SECRET || null;
 
 // Stable session ID for this MCP instance: explicit override, else Claude Code's
@@ -24,22 +22,18 @@ const CC_SESSION_ID =
   process.env.CLAUDE_CODE_SESSION_ID ??
   crypto.randomUUID();
 
-// --- Daemon communication ---
+const daemon = new DaemonClient({ url: DAEMON_URL, secret: DAEMON_SECRET });
 
+// Keep raw get/post available for the standby long-poll (needs AbortSignal)
+// and any path not yet on DaemonClient.
 function daemonHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (DAEMON_SECRET) headers["x-polaris-daemon-secret"] = DAEMON_SECRET;
   return headers;
 }
-
 async function daemonPost(path: string, body: unknown): Promise<Response> {
-  return fetch(`${DAEMON_URL}${path}`, {
-    method: "POST",
-    headers: daemonHeaders(),
-    body: JSON.stringify(body),
-  });
+  return fetch(`${DAEMON_URL}${path}`, { method: "POST", headers: daemonHeaders(), body: JSON.stringify(body) });
 }
-
 async function daemonGet(path: string): Promise<Response> {
   return fetch(`${DAEMON_URL}${path}`, { headers: daemonHeaders() });
 }
@@ -238,6 +232,23 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           from: { type: "string", description: "ISO timestamp to backfill from. Overrides duration." },
           dry_run: { type: "boolean", description: "If true, report how many events would be sent without actually sending them." },
         },
+      },
+    },
+    {
+      name: "polaris_profiles",
+      description: "List all authenticated Polaris accounts on this machine and show which is active.",
+      inputSchema: { type: "object" as const, properties: {} },
+    },
+    {
+      name: "polaris_feedback",
+      description: "Submit a bug report or feature request to the Polaris team.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          message: { type: "string", description: "The feedback message." },
+          kind: { type: "string", enum: ["bug", "feature"], description: "Type of feedback (bug or feature request)." },
+        },
+        required: ["message"],
       },
     },
   ],
@@ -609,6 +620,41 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // binary — Claude Code's stdio pipes stay open, so no manual reconnect needed.
     setTimeout(() => process.exit(42), 500);
     return { content: [{ type: "text", text: `Updated Polaris from v${currentVersion} to v${latestVersion}. MCP server restarting…` }] };
+  }
+
+  if (name === "polaris_profiles") {
+    try {
+      const config = JSON.parse(await readFile(`${homedir()}/.polaris/config.json`, "utf-8")) as { active: string; profiles: Record<string, { email: string; name: string; api: string }> };
+      const keys = Object.keys(config.profiles);
+      if (keys.length === 0) return { content: [{ type: "text", text: "No accounts configured. Run: polaris login" }] };
+      const lines = keys.map((k) => {
+        const p = config.profiles[k];
+        const active = k === config.active ? " (active)" : "";
+        return `  ${p.email || k}${active} — ${p.name}`;
+      });
+      return { content: [{ type: "text", text: `Polaris accounts:\n${lines.join("\n")}\n\nSwitch with: polaris use <email>` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Not logged in. Run: polaris login" }] };
+    }
+  }
+
+  if (name === "polaris_feedback") {
+    const { message, kind } = (args ?? {}) as { message: string; kind?: "bug" | "feature" };
+    try {
+      const profile = await loadActiveProfile();
+      const label = kind === "bug" ? "bug" : kind === "feature" ? "enhancement" : undefined;
+      const body: Record<string, string> = { body: `${message}\n\n---\nSubmitted via polaris_feedback` };
+      if (label) body.label = label;
+      const res = await fetch("https://app.withpolaris.ai/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(profile ? { Authorization: `Bearer ${profile}` } : {}) },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return { content: [{ type: "text", text: "Feedback submitted. Thank you!" }] };
+      return { content: [{ type: "text", text: "Feedback could not be submitted — try again later." }] };
+    } catch {
+      return { content: [{ type: "text", text: "Feedback could not be submitted — try again later." }] };
+    }
   }
 
   throw new Error(`Unknown tool: ${name}`);
