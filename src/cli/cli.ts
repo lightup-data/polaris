@@ -1480,6 +1480,17 @@ switch (command) {
     console.log("  Re-wiring local components...\n");
     await install();
     await installDaemonService(await ensureDaemonSecret());
+
+    // If the running binary is NOT the MCP install (e.g. a legacy global npm install),
+    // tell the user to open a new shell so PATH takes effect.
+    const mcpBinPath = join(mcpDir, "node_modules", ".bin", "polaris");
+    const runningBin = process.execPath === Bun.which("bun") ? process.argv[1] : process.execPath;
+    const runningViaMcp = runningBin.includes(join(".polaris", "mcp"));
+    if (!runningViaMcp) {
+      console.log(`\n  ℹ  Open a new shell (or run: source ~/.bashrc) to switch from the`);
+      console.log(`     old global binary to the updated one at ${mcpBinPath}`);
+    }
+
     console.log(`\n✓ Polaris updated to v${latestVersion}. Restart Claude Code to use the new MCP server.`);
     break;
   }
