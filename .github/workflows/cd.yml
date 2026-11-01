@@ -94,15 +94,15 @@ jobs:
         id: version-check
         run: |
           LOCAL=$(node -p "require('./package.json').version")
-          PUBLISHED=$(npm view @lightupai/polaris version 2>/dev/null || echo "0.0.0")
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
-          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
-          if [ "$LOCAL" != "$PUBLISHED" ]; then
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
-            echo "Version $LOCAL differs from published $PUBLISHED — will publish."
-          else
+          # Check the exact version, not just the latest tag — handles the case where
+          # a version was manually published but is still staging on the registry.
+          if npm view "@lightupai/polaris@${LOCAL}" version > /dev/null 2>&1; then
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
             echo "Version $LOCAL already published — skipping npm publish."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL not yet published — will publish."
           fi
 
       - name: Publish to npm
@@ -110,13 +110,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          LOCAL=${{ steps.version-check.outputs.local }}
           npm publish --access public || {
-            # If publish failed (E403 = already published, E409 = staged/in-flight),
-            # retry npm view a few times to let propagation settle, then treat as success.
-            for i in 1 2 3; do
-              sleep 5
-              if npm view @lightupai/polaris@${{ steps.version-check.outputs.local }} version > /dev/null 2>&1; then
-                echo "Version ${{ steps.version-check.outputs.local }} already published — skipping (race condition, attempt $i)."
+            # E409 = staged/in-flight (manual publish beat us here). Retry npm view
+            # with longer backoff to let propagation settle, then treat as success.
+            for i in 1 2 3 4 5; do
+              sleep 15
+              if npm view "@lightupai/polaris@${LOCAL}" version > /dev/null 2>&1; then
+                echo "Version ${LOCAL} confirmed published — skipping (race condition, attempt $i)."
                 exit 0
               fi
             done
