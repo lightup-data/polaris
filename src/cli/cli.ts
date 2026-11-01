@@ -15,6 +15,7 @@
 //   polaris daemon                — start the local daemon
 //   polaris status                — show connection status
 //   polaris recover               — re-POST locally logged events missing upstream
+//   polaris recover --dry-run     — preview what would be restored without sending
 //   polaris feedback              — report a bug or request a feature
 //   polaris logout                — remove credentials
 
@@ -947,8 +948,21 @@ async function status() {
 // have no id of their own). Missing events are re-POSTed via the normal
 // events ingest path. Best-effort: failures are skipped, never throws.
 
-interface RecoverRoute { project: string; session: string; user: string; agent: string }
-interface RecoverCandidate { project: string; session: string; sender: string; payload: Record<string, unknown> }
+interface RecoverRoute {
+  project: string;
+  session: string;
+  user: string;
+  agent: string;
+  profileKey: string; // which account owns this session
+}
+
+interface RecoverCandidate {
+  project: string;
+  session: string;
+  profileKey: string;
+  sender: string;
+  payload: Record<string, unknown>;
+}
 
 function isPresentUpstream(
   payload: Record<string, unknown>,
@@ -974,13 +988,14 @@ function isPresentUpstream(
   });
 }
 
-async function recover() {
+async function recover(dryRun = false) {
   try {
-    const profile = await requireProfile();
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${profile.token}`,
-    };
+    // Load all profiles so we can use the right token for each session's account.
+    const config = await loadConfig();
+    const allProfiles = config.profiles ?? {} as Record<string, Profile>;
+    // Active profile is the fallback when a session's account can't be determined.
+    const activeProfile = await requireProfile();
+    const activeKey = config.active || "";
 
     const logDir = join(POLARIS_DIR, "logs");
     let files: string[] = [];
@@ -992,49 +1007,116 @@ async function recover() {
       return;
     }
 
-    // Pass 1: walk logs chronologically (files are daemon-YYYY-MM-DD.jsonl),
-    // learning session routing from /connect entries and collecting candidate
-    // events. Failed relays are logged twice (with/without a response field),
-    // so dedupe identical payloads.
-    const routes = new Map<string, RecoverRoute>(); // keyed by cc session id
+    // --- Pass 1: walk logs chronologically, learning routes and collecting candidates ---
+    //
+    // Route-learning strategy (in priority order):
+    //   1. /connect entry with explicit session name -> full route (project, session, user, agent, profile)
+    //   2. /connect entry with auto-generated session -> partial (user, agent, project, profile); session learned later
+    //   3. /events entry with explicit context fields (project, session, ccSessionId) ->
+    //      complete any matching partial route; or construct route using profile participant_id as fallback
+
+    const routes = new Map<string, RecoverRoute>(); // keyed by any known ccSessionId / hook session_id
+    const routeByPair = new Map<string, RecoverRoute>(); // secondary index keyed by "project/session"
+
+    // Partial routes from /connect entries where session was auto-generated.
+    // Keyed by MCP UUID. Session name is learned later from event context fields.
+    interface PartialRoute { user: string; agent: string; project: string; profileKey: string }
+    const partials = new Map<string, PartialRoute>(); // keyed by MCP UUID
+
+    const addRoute = (key: string, route: RecoverRoute) => {
+      routes.set(key, route);
+      routeByPair.set(`${route.project}/${route.session}`, route);
+    };
+
+    // Resolve a route for an event. entryProject/entrySession come from the daemon's
+    // explicit context fields (written since v0.0.105) and handle multi-session + auto-generated names.
+    const routeFor = (sessionId: string, entryProject?: string, entrySession?: string): RecoverRoute | undefined => {
+      // 1. Exact ccSessionId / hook session_id match
+      const exact = routes.get(sessionId);
+      if (exact) return exact;
+
+      // 2. Single-session fallback (MCP UUID != hook session_id, only one session active)
+      if (routes.size === 1 && !entryProject) return routes.values().next().value;
+
+      // 3. Context-based lookup: daemon wrote project/session into the log entry
+      if (entryProject && entrySession) {
+        const byPair = routeByPair.get(`${entryProject}/${entrySession}`);
+        if (byPair) return byPair;
+
+        // 4. Auto-generated session: find a partial /connect for this project and
+        //    construct the route using the session name from the event context.
+        for (const [, partial] of partials) {
+          if (partial.project === entryProject) {
+            const route: RecoverRoute = {
+              project: entryProject,
+              session: entrySession,
+              user: partial.user,
+              agent: partial.agent,
+              profileKey: partial.profileKey,
+            };
+            addRoute(sessionId, route);
+            return route;
+          }
+        }
+
+        // 5. Last resort: project/session are known from context but we have no /connect
+        //    entry for this session (e.g. very old logs). Use the active profile's identity.
+        const route: RecoverRoute = {
+          project: entryProject,
+          session: entrySession,
+          user: activeProfile.participant_id,
+          agent: "agent:claude",
+          profileKey: activeKey,
+        };
+        addRoute(sessionId, route);
+        return route;
+      }
+
+      return undefined;
+    };
+
     const candidates: RecoverCandidate[] = [];
     const seen = new Set<string>();
     let scanned = 0;
     let unroutable = 0;
 
-    const routeFor = (sessionId: string): RecoverRoute | undefined => {
-      // Exact match first; like the daemon, fall back to the single known
-      // session when only one mapping exists (MCP and hook session ids differ)
-      const route = routes.get(sessionId);
-      if (route) return route;
-      if (routes.size === 1) return routes.values().next().value;
-      return undefined;
-    };
-
     for (const file of files) {
       let text: string;
       try {
         text = await readFile(join(logDir, file), "utf-8");
-      } catch {
-        continue;
-      }
+      } catch { continue; }
+
       for (const line of text.split("\n")) {
         if (!line.trim()) continue;
-        let entry: { endpoint?: string; payload?: Record<string, unknown> };
-        try {
-          entry = JSON.parse(line);
-        } catch {
-          continue;
-        }
+        let entry: { endpoint?: string; payload?: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string };
+        try { entry = JSON.parse(line); } catch { continue; }
         const payload = entry.payload;
         if (!payload || typeof payload !== "object") continue;
 
         if (entry.endpoint === "/connect") {
-          // Routing is only learnable for explicit session names; generated
-          // names are assigned by the daemon after logging
-          const c = payload as { ccSessionId?: string; project?: string; session?: string; user?: string; agent?: string };
-          if (c.ccSessionId && c.project && c.session && c.user) {
-            routes.set(c.ccSessionId, { project: c.project, session: c.session, user: c.user, agent: c.agent || "agent:claude" });
+          const c = payload as { ccSessionId?: string; project?: string; session?: string; user?: string; agent?: string; profile?: string };
+          if (!c.ccSessionId || !c.project || !c.user) continue;
+          // profile in /connect body is the profile key (email / active name)
+          const profileKey = c.profile && allProfiles[c.profile] ? c.profile : activeKey;
+          if (c.session) {
+            // Explicit session name -- full route learned immediately
+            addRoute(c.ccSessionId, {
+              project: c.project,
+              session: c.session,
+              user: c.user,
+              agent: c.agent || "agent:claude",
+              profileKey,
+            });
+          } else {
+            // Auto-generated session -- session name is assigned by the daemon after
+            // this log entry is written. Save partial info; session is learned from
+            // the first event entry that carries explicit context fields.
+            partials.set(c.ccSessionId, {
+              user: c.user,
+              agent: c.agent || "agent:claude",
+              project: c.project,
+              profileKey,
+            });
           }
           continue;
         }
@@ -1043,17 +1125,18 @@ async function recover() {
           const hookEvent = payload.hook_event_name;
           const sessionId = payload.session_id;
           if (typeof hookEvent !== "string" || typeof sessionId !== "string") continue;
+          // Skip error-response duplicates (relay failures are logged twice)
+          if ((entry as Record<string, unknown>).response !== undefined) continue;
           const key = `events:${JSON.stringify(payload)}`;
           if (seen.has(key)) continue;
           seen.add(key);
           scanned++;
-          const route = routeFor(sessionId);
-          if (!route) {
-            unroutable++;
-            continue;
-          }
+
+          const route = routeFor(sessionId, entry.project, entry.session);
+          if (!route) { unroutable++; continue; }
+
           const sender = hookEvent === "UserPromptSubmit" ? route.user : route.agent;
-          candidates.push({ project: route.project, session: route.session, sender, payload });
+          candidates.push({ project: route.project, session: route.session, profileKey: route.profileKey, sender, payload });
           continue;
         }
 
@@ -1065,14 +1148,11 @@ async function recover() {
           seen.add(key);
           scanned++;
           const route = routeFor(r.ccSessionId);
-          if (!route) {
-            unroutable++;
-            continue;
-          }
-          // Reconstruct the same Stop payload the daemon relays for replies
+          if (!route) { unroutable++; continue; }
           candidates.push({
             project: route.project,
             session: route.session,
+            profileKey: route.profileKey,
             sender: route.agent,
             payload: { hook_event_name: "Stop", session_id: r.ccSessionId, stop_response: r.message },
           });
@@ -1080,51 +1160,74 @@ async function recover() {
       }
     }
 
-    // Pass 2: per session, fetch upstream messages and re-POST what's missing
+    // --- Pass 2: per session, fetch upstream and re-POST what's missing ---
+    // Group by (project, session, profileKey) so each group uses the right account.
     const groups = new Map<string, RecoverCandidate[]>();
     for (const c of candidates) {
-      const key = `${c.project} ${c.session}`;
-      let group = groups.get(key);
-      if (!group) {
-        group = [];
-        groups.set(key, group);
-      }
+      const key = `${c.project}\x00${c.session}\x00${c.profileKey}`;
+      const group = groups.get(key) ?? [];
+      if (!groups.has(key)) groups.set(key, group);
       group.push(c);
     }
 
-    let missing = 0;
-    let restored = 0;
+    let totalMissing = 0;
+    let totalRestored = 0;
+
+    if (dryRun) {
+      console.log(`Dry run — ${scanned} events scanned across ${groups.size} session(s):\n`);
+    }
+
     for (const group of groups.values()) {
-      const { project, session } = group[0];
+      const { project, session, profileKey } = group[0];
+      const profileData = allProfiles[profileKey] ?? activeProfile;
+      const apiHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${profileData.token}`,
+      };
+      const apiUrl = profileData.api;
+
+      if (dryRun) {
+        // In dry-run mode, count candidates without fetching upstream —
+        // show worst-case (all in log, may already be upstream).
+        console.log(`  #${project}/${session} [${profileKey}]: ${group.length} event(s) in log`);
+        totalMissing += group.length;
+        continue;
+      }
+
       let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
       try {
-        const res = await fetch(`${profile.api}/projects/${project}/sessions/${session}/messages`, { headers });
+        const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/messages`, { headers: apiHeaders });
         if (res.ok) upstream = (await res.json()) as typeof upstream;
-      } catch { /* unreachable — treat as empty */ }
+      } catch { /* treat as empty — will re-POST everything */ }
 
+      let sessionMissing = 0;
+      let sessionRestored = 0;
       for (const c of group) {
         if (isPresentUpstream(c.payload, upstream)) continue;
-        missing++;
+        sessionMissing++;
         try {
-          const res = await fetch(`${profile.api}/projects/${project}/sessions/${session}/events`, {
+          const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/events`, {
             method: "POST",
-            headers,
+            headers: apiHeaders,
             body: JSON.stringify({ sender: c.sender, payload: c.payload }),
           });
-          if (res.ok) restored++;
+          if (res.ok) sessionRestored++;
         } catch { /* leave as missing */ }
       }
+      totalMissing += sessionMissing;
+      totalRestored += sessionRestored;
     }
 
-    console.log(`Recover: ${scanned} logged events scanned, ${missing} missing upstream, ${restored} restored.`);
-    if (unroutable > 0) {
-      console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
-    }
-    if (missing > restored) {
-      console.log(`${missing - restored} event(s) could not be restored (API unreachable or rejected).`);
+    if (dryRun) {
+      console.log(`\nWould restore up to ${totalMissing} event(s) (events already upstream are excluded at run time).`);
+      if (unroutable > 0) console.log(`${unroutable} event(s) could not be attributed to any session.`);
+      console.log("\nRun without --dry-run to perform the restore.");
+    } else {
+      console.log(`Recover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
+      if (unroutable > 0) console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
+      if (totalMissing > totalRestored) console.log(`${totalMissing - totalRestored} event(s) could not be restored (API unreachable or rejected).`);
     }
   } catch (err) {
-    // Best-effort: report and exit cleanly, never throw
     console.error(`Recover failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -1291,7 +1394,7 @@ switch (command) {
     break;
 
   case "recover":
-    await recover();
+    await recover(hasFlag("dry-run") || hasFlag("dry"));
     break;
 
   case "update": {
@@ -1371,6 +1474,9 @@ switch (command) {
     } else if (result.httpStatus === 404 && result.error === "project_not_found") {
       console.error(`Project "#${project}" not found. Use --create to create it.`);
       if (result.existing?.length) console.error(`Available: ${result.existing.map(p => `#${p}`).join(", ")}`);
+    } else if (result.httpStatus === 409 && result.error === "session_conflict") {
+      const conflicting = (result as unknown as { conflicting?: string }).conflicting ?? "another session";
+      console.error(`Session conflict: ${conflicting} is already active on #${project}/${result.session ?? session}.\nUse a different session name or disconnect the other instance.`);
     } else {
       console.error(`Failed to connect: ${result.error ?? "unknown error"}`);
     }

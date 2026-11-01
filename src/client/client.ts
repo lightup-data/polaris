@@ -314,6 +314,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           : "\n\nNo projects exist yet in this account.";
         return { content: [{ type: "text", text: `Project "#${project}" not found${accountLine}.${list}\n\nTo create it: polaris_connect with create:true` }] };
       }
+      if (res.status === 409 && body.error === "session_conflict") {
+        const conflicting = (body as unknown as { conflicting?: string }).conflicting ?? "another session";
+        return { content: [{ type: "text", text: `Session conflict: ${conflicting} is already connected to #${project}/${body.session}.\n\nIf you have two Claude Code sessions open, only one can own a session at a time. Use a different session name or disconnect the other instance.` }] };
+      }
       if (res.ok) {
         currentProject = body.project ?? project;
         currentSession = body.session ?? session ?? "";

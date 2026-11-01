@@ -17,6 +17,7 @@ interface SessionMapping {
   ws: WebSocket | null;
   pendingMapping?: boolean; // true until the first hook event from this shell claims the mapping
   closingIntentionally?: boolean; // set before deliberate ws.close() so onclose can distinguish drops
+  connectedAt?: number; // epoch ms when /connect was called — used to detect livelock
 }
 
 function generateSessionName(): string {
@@ -152,6 +153,50 @@ function connectCloudWs(mapping: SessionMapping) {
   const serviceUrl = getServiceUrlForProfile(mapping.profile);
   const wsUrl = serviceUrl.replace(/^http/, "ws");
   const ws = new WebSocket(`${wsUrl}/projects/${mapping.project}/sessions/${mapping.session}/ws`);
+
+  // On connect: fetch any inject messages that arrived while the WS was down.
+  // Inject messages are durably persisted server-side, so we can recover them
+  // by querying the project messages API with the timestamp of the last delivered inject.
+  // Falls back to the outbound event checkpoint as a safe lower bound.
+  ws.onopen = async () => {
+    try {
+      let since = await readInjectCheckpoint(mapping.ccSessionId);
+      if (!since) {
+        // No inject checkpoint yet — fall back to the outbound delivery checkpoint.
+        // Any inject sent after the last successfully delivered hook event could be missed.
+        const cp = await readCheckpoint(mapping.ccSessionId);
+        if (!cp || cp.project !== mapping.project || cp.session !== mapping.session) return;
+        since = cp.lastEventTimestamp;
+      }
+      const headers = await authHeadersForProfile(mapping.profile);
+      const res = await fetch(
+        `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/messages?since=${encodeURIComponent(since)}`,
+        { headers }
+      );
+      if (!res.ok) return;
+      const events = await res.json() as Array<{
+        source?: string; session?: string; sender?: string;
+        payload?: { content?: string }; timestamp?: string;
+      }>;
+      const missed = events.filter(e => e.source === "inject" && e.session === mapping.session);
+      if (missed.length === 0) return;
+
+      let queue = injectQueues.get(mapping.ccSessionId);
+      if (!queue) { queue = []; injectQueues.set(mapping.ccSessionId, queue); }
+      let added = 0;
+      for (const e of missed) {
+        const ts = e.timestamp ?? "";
+        const from = e.sender ?? "";
+        // Dedup: skip if already in queue (e.g. WS dropped while message was undelivered)
+        if (queue.some(m => m.timestamp === ts && m.from === from)) continue;
+        queue.push({ from, content: e.payload?.content ?? "", timestamp: ts });
+        added++;
+      }
+      if (added > 0) {
+        console.error(`[daemon] Recovered ${added} missed inject message(s) for ${mapping.project}/${mapping.session}`);
+      }
+    } catch { /* best-effort — don't disrupt the WS connection */ }
+  };
 
   ws.onmessage = (event) => {
     try {
@@ -459,6 +504,28 @@ async function readCheckpoint(ccSessionId: string): Promise<Checkpoint | null> {
   return null;
 }
 
+// Inject delivery checkpoint: tracks the timestamp of the last advisor inject message
+// that was successfully delivered to the agent (drained by UserPromptSubmit).
+// Written after delivery; read on WS reconnect to fetch any missed injects from the API.
+function injectCheckpointPath(ccSessionId: string): string {
+  const hash = createHash("sha256").update(ccSessionId).digest("hex").slice(0, 16);
+  return join(SESSIONS_DIR, `${hash}-inject.json`);
+}
+
+async function readInjectCheckpoint(ccSessionId: string): Promise<string | null> {
+  try {
+    const data = JSON.parse(await readFile(injectCheckpointPath(ccSessionId), "utf-8")) as { ts?: string };
+    return data.ts ?? null;
+  } catch { return null; }
+}
+
+async function writeInjectCheckpoint(ccSessionId: string, timestamp: string): Promise<void> {
+  try {
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    await writeFile(injectCheckpointPath(ccSessionId), JSON.stringify({ ts: timestamp }));
+  } catch { /* best-effort */ }
+}
+
 // --- Backfill: recover lost events from daemon log ---
 
 async function backfill(mapping: SessionMapping, duration?: string, from?: string, dryRun = false): Promise<{ recovered: number; would_recover?: number; source: string; gaps: string[] }> {
@@ -704,6 +771,39 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // Disconnect existing cloud WS if switching sessions
           disconnectCloudWs(body.ccSessionId);
 
+          const nowMs = Date.now();
+
+          // Reject if another active session from the SAME USER already owns this
+          // (project, session) pair. Without this guard two CC instances with the same
+          // saved state (same user, same project/session) form a livelock: each /connect
+          // evicts the other, which immediately reconnects, ad infinitum.
+          //
+          // We scope the check to same-user because a different user connecting to the
+          // same session is a legitimate handoff (driver transfer), not a livelock.
+          // We also skip create:true requests — those are explicit first-time setups.
+          if (!body.create) {
+            const CONFLICT_GRACE_MS = 30_000;
+            for (const [id, m] of sessions) {
+              if (
+                id !== body.ccSessionId &&
+                m.project === body.project &&
+                m.session === sessionName &&
+                m.user === body.user &&
+                nowMs - (m.connectedAt ?? 0) < CONFLICT_GRACE_MS
+              ) {
+                const ageSec = Math.round((nowMs - (m.connectedAt ?? 0)) / 1000);
+                console.error(
+                  `[daemon] Rejected /connect for ${body.project}/${sessionName}: ` +
+                  `session ${id.slice(0, 8)} connected ${ageSec}s ago (grace ${CONFLICT_GRACE_MS / 1000}s)`
+                );
+                return json(
+                  { error: "session_conflict", conflicting: id.slice(0, 8), project: body.project, session: sessionName },
+                  409
+                );
+              }
+            }
+          }
+
           const mapping: SessionMapping = {
             ccSessionId: body.ccSessionId,
             project: body.project,
@@ -713,6 +813,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             profile,
             ws: null,
             pendingMapping: true, // waiting for hook event to map the real CC session ID
+            connectedAt: nowMs,
           };
           sessions.set(body.ccSessionId, mapping);
 
@@ -720,6 +821,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // After a reconnect the old CC session ID still has an entry with the
           // same pair; leaving it allows hook events from the old shell to
           // alias-claim a future pending session or send duplicate events.
+          // We only reach here when the existing entry is old (outside CONFLICT_GRACE_MS).
           for (const [id, m] of sessions) {
             if (id !== body.ccSessionId && m.project === mapping.project && m.session === mapping.session) {
               sessions.delete(id);
@@ -936,6 +1038,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             if (hookEvent === "UserPromptSubmit") {
               const queue = injectQueues.get(mapping.ccSessionId);
               const pendingInjects = queue ? queue.splice(0, queue.length) : [];
+              // Advance inject checkpoint so WS reconnects don't re-deliver these
+              const maxInjectTs = pendingInjects.reduce((m, i) => i.timestamp > m ? i.timestamp : m, "");
+              if (maxInjectTs) void writeInjectCheckpoint(mapping.ccSessionId, maxInjectTs);
               return json({ ok: true, pendingInjects, queued: true });
             }
             return json({ status: "queued" });
@@ -960,6 +1065,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           if (hookEvent === "UserPromptSubmit") {
             const queue = injectQueues.get(mapping.ccSessionId);
             const pendingInjects = queue ? queue.splice(0, queue.length) : [];
+            // Advance inject checkpoint so WS reconnects don't re-deliver these
+            const maxInjectTs = pendingInjects.reduce((m, i) => i.timestamp > m ? i.timestamp : m, "");
+            if (maxInjectTs) void writeInjectCheckpoint(mapping.ccSessionId, maxInjectTs);
             return json({ ok: true, pendingInjects });
           }
           return json({ status: "relayed" });
@@ -1385,6 +1493,12 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
       if (outboxTimer) {
         clearTimeout(outboxTimer);
         outboxTimer = null;
+      }
+      // Disconnect all cloud WS connections intentionally so the onclose handler
+      // does not schedule a 3-second reconnect (which would fire after the server
+      // has stopped, causing errors in tests and wasted work in production).
+      for (const [id] of sessions) {
+        disconnectCloudWs(id);
       }
       server.stop(true);
     },

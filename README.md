@@ -110,17 +110,36 @@ polaris
 
 # Or run steps independently:
 polaris install          # Install MCP server, hooks, skill, status line + restart daemon
+polaris update           # Update to the latest version
 polaris login            # Authenticate against production
 polaris login --local    # Authenticate against localhost (for local dev)
+polaris login --token <token>  # Authenticate without a browser (SSH / headless machines)
+polaris token            # Print your token for copy-paste to another machine
 
 # Multi-account support
 polaris profiles                        # List all logged-in accounts
 polaris use you@work.com               # Switch to a work account
 polaris use you@personal.com           # Switch to a personal account (triggers login if not yet authenticated)
 
-# Other commands
-polaris daemon           # Start the local daemon (kills any existing daemon first)
-polaris status           # Show active account, daemon state, sessions
+# Session management
+polaris daemon                            # Start the local daemon (kills any existing daemon first)
+polaris status                            # Show active account, daemon state, connected sessions
+polaris connect <project> [session]       # Connect to a project (--create to create it if absent)
+polaris disconnect                        # Disconnect current session
+polaris rename <old-name> <new-name>      # Rename a project
+polaris rename-session <new-name>         # Rename the current session
+
+# Collaboration
+polaris send <session> <message>   # Send a message to another session in the same project
+polaris reply <message>            # Reply to the floor in Slack
+polaris context <session>          # Show recent activity for a session
+polaris team                       # List team members
+
+# Recovery
+polaris recover            # Re-POST locally logged events that are missing upstream
+polaris recover --dry-run  # Preview what would be restored without sending anything
+
+# Feedback & auth
 polaris feedback                          # Report a bug or request a feature (opens GitHub)
 polaris feedback "it crashed on startup"  # Pre-fill the issue title
 polaris feedback --bug "description"      # Open with bug label
@@ -128,6 +147,19 @@ polaris feedback --feature "description"  # Open with feature-request label
 polaris logout           # Remove active account credentials
 polaris logout --all     # Remove all credentials
 ```
+
+### Recovery
+
+`polaris recover` restores events that were captured locally by hooks but never reached the cloud — caused by a daemon crash, network outage, or extended WS disconnect.
+
+It works by comparing your local daemon log (`~/.polaris/logs/*.jsonl`) against what the cloud already has, then re-POSTing the gap. It handles multiple sessions and multiple accounts automatically, using per-session account credentials.
+
+```sh
+polaris recover --dry-run   # Shows per-session event counts; no changes made
+polaris recover             # Performs the restore
+```
+
+**When to run it:** After the daemon was down for an extended period, or if you notice a gap in your session history on the dashboard. The command is idempotent — running it again when everything is already in sync is a no-op.
 
 ### Multiple accounts
 
@@ -262,6 +294,8 @@ tests/         Test suite (bun test)
 - [ ] No pagination on event queries — will be slow for projects with thousands of events
 - [ ] Bridge polls DB every 5 seconds for new events — switch to Postgres LISTEN/NOTIFY for lower latency
 - [x] No auth on daemon HTTP endpoints — any local process can connect/disconnect sessions
+- [x] Reconciliation and recovery — `polaris recover` re-diffs the daemon JSONL log against the cloud, backfills missing events, handles multiple sessions and accounts, supports `--dry-run`
+- [x] Daemon local buffer — outbox queue persists hook events locally when the API is unavailable and flushes on reconnect; inject-message checkpoint (`{hash}-inject.json`) ensures advisor messages survive daemon restarts and WS drops
 - [ ] Slack channel creation uses sanitized project name — names with special characters may collide
 - [ ] Dashboard SSE connection has no reconnect logic on the client side
 - [ ] No way to delete a project or archive old sessions
@@ -271,11 +305,8 @@ tests/         Test suite (bun test)
 - [ ] Schema migration drops all data — the auto-migration detects old schema and recreates tables, losing all events including device connections. Need a proper migration strategy for production.
 - [ ] Capture all user input — currently only UserPromptSubmit is captured. Need to also capture tool call approvals, tool use rejections, ask-question responses, and any other user interaction that constitutes a prompt
 - [ ] Postgres backup cron job — scheduled `pg_dump` to Hetzner object storage for production disaster recovery
-- [ ] Daemon local buffer — write-ahead log for fault tolerance. If the API is slow or down, the daemon should persist events locally and flush them asynchronously with retry/backoff, so hooks and MCP tools never block or lose data
-- [ ] Reconciliation and recovery — `polaris recover` command that diffs the daemon JSONL log against the DB, backfills missing events, and posts an abridged recovery summary to Slack as a thread reply at the correct timeline position
 - [ ] CD pipeline for Hetzner — auto-deploy to production on merge to master (SSH + docker compose up), similar to the npm publish job
 - [ ] Auto-update local skill/hooks — locally installed skill and hook files go stale when the repo changes. `polaris install` fixes it but there's no staleness detection or auto-update mechanism
-- [ ] Update available indicator — daemon periodically checks npm for newer version, caches the result. Status line shows "update available" when stale. `polaris update` command installs the latest version and rewrites skill/hooks.
 - [ ] Slack channel name collision — if a channel name was previously deleted, Slack reserves it. Bridge should handle `name_taken` by trying a prefix/suffix (e.g., `p-project-name`)
 
 ## Testing
