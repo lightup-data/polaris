@@ -921,13 +921,16 @@ async function status() {
     const res = await fetch("http://127.0.0.1:4322/status", {
       headers: secret ? { "x-polaris-daemon-secret": secret } : undefined,
     });
-    const data = (await res.json()) as { ok: boolean; sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string }> };
+    const data = (await res.json()) as { ok: boolean; sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string; profile?: string }> };
     if (data.ok) {
       console.log("\nDaemon: running");
       if (data.sessions && data.sessions.length > 0) {
+        const allProfiles = config.profiles ?? {};
         console.log(`Active sessions (${data.sessions.length}):`);
         for (const s of data.sessions) {
-          console.log(`  ${s.project}/${s.session} as ${s.user}`);
+          const profileEmail = s.profile ? (allProfiles[s.profile]?.email ?? s.profile) : undefined;
+          const acct = profileEmail ? ` [${profileEmail}]` : "";
+          console.log(`  ${s.project}/${s.session} as ${s.user}${acct}`);
         }
       } else {
         console.log("No active sessions");
