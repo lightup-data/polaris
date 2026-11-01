@@ -962,6 +962,7 @@ interface RecoverCandidate {
   profileKey: string;
   sender: string;
   payload: Record<string, unknown>;
+  ts?: string; // ISO timestamp from the log entry
 }
 
 function isPresentUpstream(
@@ -1088,7 +1089,7 @@ async function recover(dryRun = false) {
 
       for (const line of text.split("\n")) {
         if (!line.trim()) continue;
-        let entry: { endpoint?: string; payload?: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string };
+        let entry: { endpoint?: string; payload?: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string; ts?: string };
         try { entry = JSON.parse(line); } catch { continue; }
         const payload = entry.payload;
         if (!payload || typeof payload !== "object") continue;
@@ -1136,7 +1137,7 @@ async function recover(dryRun = false) {
           if (!route) { unroutable++; continue; }
 
           const sender = hookEvent === "UserPromptSubmit" ? route.user : route.agent;
-          candidates.push({ project: route.project, session: route.session, profileKey: route.profileKey, sender, payload });
+          candidates.push({ project: route.project, session: route.session, profileKey: route.profileKey, sender, payload, ts: entry.ts });
           continue;
         }
 
@@ -1155,6 +1156,7 @@ async function recover(dryRun = false) {
             profileKey: route.profileKey,
             sender: route.agent,
             payload: { hook_event_name: "Stop", session_id: r.ccSessionId, stop_response: r.message },
+            ts: entry.ts,
           });
         }
       }
@@ -1173,8 +1175,12 @@ async function recover(dryRun = false) {
     let totalMissing = 0;
     let totalRestored = 0;
 
+    const hr = "─".repeat(45);
+
     if (dryRun) {
-      console.log(`Dry run — ${scanned} events scanned across ${groups.size} session(s):\n`);
+      console.log(`Polaris Recover (dry run)`);
+      console.log(hr);
+      console.log(`Scanning ${files.length} log file(s)... ${scanned} event(s) across ${groups.size} session(s)\n`);
     }
 
     for (const group of groups.values()) {
@@ -1189,7 +1195,24 @@ async function recover(dryRun = false) {
       if (dryRun) {
         // In dry-run mode, count candidates without fetching upstream —
         // show worst-case (all in log, may already be upstream).
-        console.log(`  #${project}/${session} [${profileKey}]: ${group.length} event(s) in log`);
+        const account = profileData.email ?? profileKey ?? "unknown account";
+        const timestamps = group.map(c => c.ts).filter((t): t is string => !!t).sort();
+        let dateRange = "";
+        if (timestamps.length > 0) {
+          const fmt = (iso: string) => {
+            const d = new Date(iso);
+            return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          };
+          const oldest = timestamps[0];
+          const newest = timestamps[timestamps.length - 1];
+          dateRange = oldest === newest ? fmt(oldest) : `${fmt(oldest)} – ${fmt(newest)}`;
+        }
+        const label = `  ${project} / ${session}`;
+        const acct = `[${account}]`;
+        const pad = Math.max(1, 46 - label.length - acct.length);
+        console.log(`${label}${" ".repeat(pad)}${acct}`);
+        const detail = `  ${group.length} event(s)${dateRange ? `  ·  ${dateRange}` : ""}`;
+        console.log(detail + "\n");
         totalMissing += group.length;
         continue;
       }
@@ -1219,9 +1242,11 @@ async function recover(dryRun = false) {
     }
 
     if (dryRun) {
-      console.log(`\nWould restore up to ${totalMissing} event(s) (events already upstream are excluded at run time).`);
-      if (unroutable > 0) console.log(`${unroutable} event(s) could not be attributed to any session.`);
-      console.log("\nRun without --dry-run to perform the restore.");
+      console.log(hr);
+      console.log(`Up to ${totalMissing} event(s) would be restored.`);
+      console.log(`Events already in sync are filtered out at run time.`);
+      if (unroutable > 0) console.log(`${unroutable} event(s) had no session match and will be skipped.`);
+      console.log(`\nRun \`polaris recover\` to restore.`);
     } else {
       console.log(`Recover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
       if (unroutable > 0) console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
@@ -1400,10 +1425,19 @@ switch (command) {
   case "update": {
     console.log("Polaris — updating\n");
     const mcpDir = join(POLARIS_DIR, "mcp");
-    let currentVersion = "";
+
+    // Version of the running global binary
+    let globalVersion = "";
+    try {
+      const pkg = JSON.parse(await readFile(join(import.meta.dir, "..", "..", "package.json"), "utf-8")) as { version: string };
+      globalVersion = pkg.version ?? "";
+    } catch { /* ignore */ }
+
+    // Version installed in the local MCP dir (may differ from global binary)
+    let mcpVersion = "";
     try {
       const pkg = JSON.parse(await readFile(join(mcpDir, "node_modules", "@lightupai", "polaris", "package.json"), "utf-8")) as { version: string };
-      currentVersion = pkg.version ?? "";
+      mcpVersion = pkg.version ?? "";
     } catch { /* not installed yet */ }
 
     let latestVersion = "";
@@ -1416,19 +1450,37 @@ switch (command) {
       console.error("  ✗ Could not reach npm. Check your network connection.");
       process.exit(1);
     }
-    if (latestVersion === currentVersion) {
+
+    const currentVersion = globalVersion || mcpVersion;
+    if (latestVersion === globalVersion && latestVersion === mcpVersion) {
       console.log(`  Already up to date (v${currentVersion}).`);
       break;
     }
 
     console.log(`  Updating v${currentVersion} → v${latestVersion}...`);
-    const npmResult = Bun.spawnSync(
-      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
-      { stdout: "ignore", stderr: "pipe" }
-    );
-    if (npmResult.exitCode !== 0) {
-      console.error("  ✗ Update failed:\n" + npmResult.stderr.toString().trim());
-      process.exit(1);
+
+    // Update the global binary if it's behind
+    if (latestVersion !== globalVersion) {
+      const globalResult = Bun.spawnSync(
+        ["npm", "install", "-g", `@lightupai/polaris@${latestVersion}`],
+        { stdout: "ignore", stderr: "pipe" }
+      );
+      if (globalResult.exitCode !== 0) {
+        console.error("  ✗ Global update failed:\n" + globalResult.stderr.toString().trim());
+        process.exit(1);
+      }
+    }
+
+    // Update the local MCP install if it's behind
+    if (latestVersion !== mcpVersion) {
+      const npmResult = Bun.spawnSync(
+        ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+        { stdout: "ignore", stderr: "pipe" }
+      );
+      if (npmResult.exitCode !== 0) {
+        console.error("  ✗ MCP update failed:\n" + npmResult.stderr.toString().trim());
+        process.exit(1);
+      }
     }
 
     console.log(`  ✓ Updated to v${latestVersion}`);
