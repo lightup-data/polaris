@@ -995,9 +995,14 @@ function isPresentUpstream(
 async function recover(dryRun = false) {
   try {
     const logDir = join(POLARIS_DIR, "logs");
+    // Only scan logs from v0.0.105+ (2026-10-13), when project/session context
+    // fields were added. Older entries can never be routed to a session.
+    const RECOVER_CUTOFF = "2026-10-13";
     let files: string[] = [];
     try {
-      files = (await readdir(logDir)).filter((f) => f.endsWith(".jsonl")).sort();
+      files = (await readdir(logDir))
+        .filter((f) => f.endsWith(".jsonl") && f >= `daemon-${RECOVER_CUTOFF}.jsonl`)
+        .sort();
     } catch { /* no log dir */ }
     if (files.length === 0) {
       console.log("No local logs found in ~/.polaris/logs — nothing to recover.");
@@ -1242,7 +1247,7 @@ async function recover(dryRun = false) {
           const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/events`, {
             method: "POST",
             headers: apiHeaders,
-            body: JSON.stringify({ sender: c.sender, payload: c.payload }),
+            body: JSON.stringify({ sender: c.sender, payload: c.payload, ...(c.ts ? { at: c.ts } : {}) }),
           });
           if (res.ok) {
             sessionRestored++;

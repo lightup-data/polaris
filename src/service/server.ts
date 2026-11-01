@@ -497,14 +497,18 @@ export async function startServer(opts: {
         if (!session) return error("Session not found", 404);
         const body = await jsonBody(req);
         const parsed = z
-          .object({ sender: ParticipantIdSchema, payload: HookPayload })
+          .object({
+            sender: ParticipantIdSchema,
+            payload: HookPayload,
+            at: z.string().datetime().optional(), // original capture time for recovered events
+          })
           .safeParse(body);
         if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
         const event: PolarisEvent = {
           id: crypto.randomUUID(),
           project: params.proj,
           session: params.sess,
-          timestamp: new Date().toISOString(),
+          timestamp: parsed.data.at ?? new Date().toISOString(),
           source: "hook",
           sender: parsed.data.sender,
           payload: parsed.data.payload,
