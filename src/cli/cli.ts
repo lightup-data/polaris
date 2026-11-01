@@ -1517,7 +1517,8 @@ switch (command) {
       console.log(`  Open a new shell (or run: source ~/.bashrc) to use the updated binary`);
     }
 
-    console.log(`\n✓ Polaris updated to v${latestVersion}. Restart Claude Code to use the new MCP server.`);
+    console.log(`\n✓ Polaris updated to v${latestVersion}.`);
+    console.log(`  Claude Code should restart the MCP server automatically. If tools seem stale, restart Claude Code.`);
     break;
   }
 
