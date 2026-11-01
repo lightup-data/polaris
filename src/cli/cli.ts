@@ -265,8 +265,8 @@ ExecStart=${runnerPath}
 Restart=always
 RestartSec=5
 ${secretLine}Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-StandardOutput=append:/tmp/polaris-daemon.log
-StandardError=append:/tmp/polaris-daemon.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
@@ -306,7 +306,7 @@ WantedBy=default.target
     } else {
       console.error(`  Warning: daemon service did not start. Check logs:`);
       const journal = Bun.spawnSync(
-        ["journalctl", "--user", "-u", SYSTEMD_SERVICE_NAME, "-n", "10", "--no-pager"],
+        ["journalctl", "--user", "-u", SYSTEMD_SERVICE_NAME, "-n", "20", "--no-pager"],
         { stdout: "pipe", stderr: "ignore", env: xdgEnv }
       );
       console.error(journal.stdout.toString().trim());
