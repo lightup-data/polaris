@@ -606,19 +606,36 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   if (loginHint) authUrl += `&login_hint=${encodeURIComponent(loginHint)}`;
 
   console.log(`  Opening browser for Google sign-in...`);
-  console.log(`  If the browser doesn't open, visit: ${authUrl}\n`);
+  console.log(`  If the browser doesn't open, visit:\n  ${authUrl}\n`);
 
-  const proc = Bun.spawn(
+  Bun.spawn(
     process.platform === "darwin" ? ["open", authUrl] :
     process.platform === "win32" ? ["cmd", "/c", "start", authUrl] :
     ["xdg-open", authUrl],
     { stdout: "ignore", stderr: "ignore" }
   );
-  await proc.exited;
 
-  console.log("  Waiting for authentication...");
-  const token = await tokenPromise;
-  setTimeout(() => callbackServer.stop(true), 3000);
+  // Race: automatic callback delivery (same machine) vs. manual token paste.
+  // The browser page shows the token prominently when delivery fails (e.g. SSH).
+  process.stdout.write("  Waiting for browser… (if the browser shows a token, paste it here and press Enter)\n  > ");
+  let resolveStdin!: (token: string) => void;
+  const stdinPromise = new Promise<string>((resolve) => { resolveStdin = resolve; });
+  const stdinBuf: string[] = [];
+  process.stdin.setEncoding("utf-8");
+  process.stdin.on("data", (chunk: string) => {
+    stdinBuf.push(chunk);
+    const full = stdinBuf.join("");
+    const nl = full.indexOf("\n");
+    if (nl !== -1) {
+      const t = full.slice(0, nl).trim();
+      if (t) resolveStdin(t);
+    }
+  });
+
+  const token = await Promise.race([tokenPromise, stdinPromise]);
+  process.stdin.removeAllListeners("data");
+  process.stdin.pause();
+  callbackServer.stop(true);
 
   const userInfo = await saveAuthToken(token, appUrl, profileName);
 

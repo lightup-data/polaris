@@ -128,13 +128,66 @@ function getGoogle(): Google {
 const oauthStates = new Map<string, { type: "login" | "signup"; codeVerifier: string; timestamp: number; plan?: string }>();
 const cliCallbackPorts = new Map<string, number>(); // state → CLI local server port
 
-// If this auth flow was initiated by the CLI, redirect the token to the CLI's local server.
+// If this auth flow was initiated by the CLI, show a page that:
+//   1. Tries to deliver the token to the CLI's local callback server via JS fetch
+//      (works when browser and CLI are on the same machine).
+//   2. Displays the token prominently so the user can copy-paste it when the
+//      automatic delivery fails (SSH, headless, remote machine, etc.).
 // Otherwise redirect to the dashboard.
-function authRedirect(c: { redirect: (url: string) => Response }, state: string, token: string): Response {
+function authRedirect(c: { redirect: (url: string) => Response; html: (html: string) => Response }, state: string, token: string): Response {
   const cliPort = cliCallbackPorts.get(state);
   if (cliPort) {
     cliCallbackPorts.delete(state);
-    return c.redirect(`http://127.0.0.1:${cliPort}/callback?token=${token}`);
+    const callbackUrl = `http://127.0.0.1:${cliPort}/callback?token=${encodeURIComponent(token)}`;
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Polaris — Authenticated</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f9f9f9; color: #1a1a1a; }
+    .card { background: #fff; border-radius: 12px; padding: 40px; max-width: 520px; width: 100%; box-shadow: 0 2px 16px rgba(0,0,0,0.08); text-align: center; }
+    h2 { margin: 0 0 8px; font-size: 1.4rem; }
+    p { color: #555; margin: 0 0 24px; }
+    .token-box { background: #f3f4f6; border-radius: 8px; padding: 14px 16px; font-family: monospace; font-size: 0.8rem; word-break: break-all; text-align: left; margin: 0 0 12px; }
+    .copy-btn { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; }
+    .copy-btn:hover { background: #333; }
+    .status { margin-top: 20px; font-size: 0.9rem; color: #888; min-height: 1.4em; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h2>Authenticated!</h2>
+  <p id="msg">Delivering token to CLI…</p>
+  <div id="fallback" style="display:none">
+    <p style="color:#c00;margin-bottom:12px">Automatic delivery failed (common over SSH).<br>Copy the token below and paste it in your terminal:</p>
+    <pre class="token-box" id="tok">${token}</pre>
+    <button class="copy-btn" onclick="copyToken()">Copy token</button>
+    <p style="margin-top:12px;color:#555;font-size:0.85rem">Then run: <code>polaris login --token &lt;paste&gt;</code></p>
+  </div>
+  <p class="status" id="status"></p>
+</div>
+<script>
+  const TOKEN = ${JSON.stringify(token)};
+  async function deliver() {
+    try {
+      const r = await fetch(${JSON.stringify(callbackUrl)}, { mode: "no-cors" });
+      document.getElementById("msg").textContent = "Token delivered — you can close this tab.";
+      document.getElementById("status").textContent = "✓ CLI authenticated successfully.";
+    } catch(e) {
+      document.getElementById("msg").style.display = "none";
+      document.getElementById("fallback").style.display = "block";
+    }
+  }
+  function copyToken() {
+    navigator.clipboard.writeText(TOKEN).then(() => {
+      document.querySelector(".copy-btn").textContent = "Copied!";
+    });
+  }
+  deliver();
+</script>
+</body>
+</html>`;
+    return c.html(html);
   }
   return c.redirect(`/dashboard?token=${token}`);
 }
