@@ -1195,7 +1195,7 @@ async function recover(dryRun = false) {
       if (dryRun) {
         // In dry-run mode, count candidates without fetching upstream —
         // show worst-case (all in log, may already be upstream).
-        const account = emailFromToken(profileData.token) ?? profileKey ?? "unknown account";
+        const account = profileData.email ?? profileKey ?? "unknown account";
         const timestamps = group.map(c => c.ts).filter((t): t is string => !!t).sort();
         let dateRange = "";
         if (timestamps.length > 0) {
