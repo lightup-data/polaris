@@ -1483,12 +1483,29 @@ switch (command) {
 
     console.log(`  Updating v${mcpVersion || "?"} → v${latestVersion}...`);
 
-    const npmResult = Bun.spawnSync(
-      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
-      { stdout: "ignore", stderr: "pipe" }
-    );
-    if (npmResult.exitCode !== 0) {
-      console.error("  ✗ Update failed:\n" + npmResult.stderr.toString().trim());
+    // Retry up to 4 times with backoff — npm registry can take a minute to propagate
+    // a freshly published version to all mirrors (ETARGET = version not found yet).
+    let npmResult: ReturnType<typeof Bun.spawnSync> | undefined;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      npmResult = Bun.spawnSync(
+        ["npm", "install", "--prefer-online", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+        { stdout: "ignore", stderr: "pipe" }
+      );
+      if (npmResult.exitCode === 0) break;
+      const stderr = npmResult.stderr.toString();
+      if (!stderr.includes("ETARGET") && !stderr.includes("notarget")) {
+        // Not a propagation error — fail immediately
+        console.error("  ✗ Update failed:\n" + stderr.trim());
+        process.exit(1);
+      }
+      if (attempt < 4) {
+        const wait = attempt * 15;
+        console.log(`  Registry hasn't propagated v${latestVersion} yet — retrying in ${wait}s... (attempt ${attempt}/4)`);
+        await Bun.sleep(wait * 1000);
+      }
+    }
+    if (npmResult!.exitCode !== 0) {
+      console.error(`  ✗ Update failed after 4 attempts — v${latestVersion} may still be propagating. Try again in a minute.`);
       process.exit(1);
     }
 
