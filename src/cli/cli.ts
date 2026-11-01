@@ -90,6 +90,29 @@ function getActiveProfile(config: Config): Profile | null {
   return config.profiles[config.active];
 }
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    return typeof payload.exp === "number" && Date.now() / 1000 > payload.exp;
+  } catch { return false; }
+}
+
+// Returns the active profile, or prints a clear error and exits.
+// Call this from any command that requires auth.
+async function requireProfile(): Promise<Profile> {
+  const config = await loadConfig();
+  const profile = getActiveProfile(config);
+  if (!profile) {
+    console.error("Not logged in. Run: polaris login");
+    process.exit(1);
+  }
+  if (isTokenExpired(profile.token)) {
+    console.error("🚨 Token expired. Run: polaris login");
+    process.exit(1);
+  }
+  return profile;
+}
+
 function deriveProfileName(appUrl: string): string {
   if (appUrl.includes("localhost") || appUrl.includes("127.0.0.1")) return "local";
   try {
@@ -851,14 +874,18 @@ async function daemon() {
 // --- Status ---
 
 async function status() {
-  // Active profile
   const config = await loadConfig();
   const profile = getActiveProfile(config);
-  if (profile) {
+  if (!profile) {
+    console.log("Not logged in. Run: polaris login");
+  } else if (isTokenExpired(profile.token)) {
     console.log(`Profile: ${config.active} (${profile.api})`);
     console.log(`User: ${profile.name} (${profile.email})`);
+    console.log("🚨 Token expired. Run: polaris login");
   } else {
-    console.log("Not logged in. Run: polaris login");
+    console.log(`Profile: ${config.active} (${profile.api})`);
+    console.log(`User: ${profile.name} (${profile.email})`);
+    console.log("Token: valid");
   }
 
   // Daemon (send the shared local secret when configured — the daemon
@@ -924,12 +951,7 @@ function isPresentUpstream(
 
 async function recover() {
   try {
-    const config = await loadConfig();
-    const profile = getActiveProfile(config);
-    if (!profile) {
-      console.log("Not logged in. Run: polaris login");
-      return;
-    }
+    const profile = await requireProfile();
     const headers = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${profile.token}`,
@@ -1217,12 +1239,7 @@ switch (command) {
     // Print the active token for copy-paste to another machine.
     // Usage: polaris token   (on source machine)
     //        polaris login --token <paste>  (on target machine, no browser needed)
-    const config = await loadConfig();
-    const profile = getActiveProfile(config);
-    if (!profile) {
-      console.error("Not logged in. Run: polaris login");
-      process.exit(1);
-    }
+    const profile = await requireProfile();
     console.log(profile.token);
     break;
   }

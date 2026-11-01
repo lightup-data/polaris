@@ -85,6 +85,26 @@ _EOF_
   fi
 fi
 
+# --- Token expiry check (local JWT decode, no network) ---
+TOKEN_WARN=""
+CREDS="$HOME/.polaris/credentials.json"
+if [ -f "$CREDS" ]; then
+  TOKEN=$(jq -r '.token // ""' "$CREDS" 2>/dev/null || echo "")
+  if [ -n "$TOKEN" ]; then
+    # Extract JWT payload (middle segment), pad to multiple of 4, base64-decode
+    PAYLOAD=$(echo "$TOKEN" | cut -d. -f2)
+    # Add padding
+    PAD=$(( ${#PAYLOAD} % 4 ))
+    [ "$PAD" -eq 2 ] && PAYLOAD="${PAYLOAD}=="
+    [ "$PAD" -eq 3 ] && PAYLOAD="${PAYLOAD}="
+    EXP=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.exp // 0' 2>/dev/null || echo "0")
+    NOW=$(date +%s 2>/dev/null || echo "0")
+    if [ -n "$EXP" ] && [ "$EXP" != "0" ] && [ "$NOW" -gt "$EXP" ] 2>/dev/null; then
+      TOKEN_WARN=" \033[1;31m🚨 TOKEN EXPIRED — run: polaris login\033[0m"
+    fi
+  fi
+fi
+
 if [ "$CONNECTED" = "true" ]; then
   PROJECT=$(echo "$STATUS" | jq -r '.project' 2>/dev/null)
   SESSION=$(echo "$STATUS" | jq -r '.session' 2>/dev/null)
@@ -114,7 +134,7 @@ if [ "$CONNECTED" = "true" ]; then
   if [ -n "$SLACK" ] && [ "$SLACK" != "$PROJECT" ]; then
     SLACK_TAG=" → #${SLACK}"
   fi
-  echo "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${VERSION_TAG}"
+  printf "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${VERSION_TAG}${TOKEN_WARN}\n"
 else
-  echo "polaris: not connected${VERSION_TAG}"
+  printf "polaris: not connected${VERSION_TAG}${TOKEN_WARN}\n"
 fi
