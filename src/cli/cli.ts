@@ -1337,14 +1337,21 @@ async function feedback(text?: string, label?: "bug" | "enhancement") {
 
 async function checkForUpdate(): Promise<void> {
   try {
-    const pkgPath = join(import.meta.dir, "..", "..", "package.json");
-    const { version: current } = JSON.parse(await readFile(pkgPath, "utf-8")) as { version: string };
+    // Prefer the MCP local install version (the authoritative copy that `polaris update`
+    // manages). Fall back to the running binary's package.json for legacy global installs.
+    const mcpPkg = join(POLARIS_DIR, "mcp", "node_modules", "@lightupai", "polaris", "package.json");
+    const runningPkg = join(import.meta.dir, "..", "..", "package.json");
+    let current = "";
+    for (const p of [mcpPkg, runningPkg]) {
+      try { ({ version: current } = JSON.parse(await readFile(p, "utf-8")) as { version: string }); break; } catch { /* try next */ }
+    }
+    if (!current) return;
     const res = await fetch("https://registry.npmjs.org/@lightupai/polaris/latest", { signal: AbortSignal.timeout(3000) });
     if (!res.ok) return;
     const { version: latest } = await res.json() as { version: string };
     if (latest !== current) {
       console.error(`\n⚠  A newer version of Polaris is available: ${latest} (you have ${current})`);
-      console.error("   Run: npm install -g @lightupai/polaris@latest\n");
+      console.error("   Run: polaris update\n");
     }
   } catch { /* best-effort — network may be unavailable */ }
 }
@@ -1364,7 +1371,8 @@ function hasFlag(name: string): boolean {
   return args.includes(`--${name}`);
 }
 
-void checkForUpdate();
+// No point warning about an update when the user is already running `polaris update`
+if (command !== "update") void checkForUpdate();
 
 switch (command) {
   case "install":
@@ -1433,13 +1441,8 @@ switch (command) {
     const mcpDir = join(POLARIS_DIR, "mcp");
 
     // Version of the running global binary
-    let globalVersion = "";
-    try {
-      const pkg = JSON.parse(await readFile(join(import.meta.dir, "..", "..", "package.json"), "utf-8")) as { version: string };
-      globalVersion = pkg.version ?? "";
-    } catch { /* ignore */ }
-
-    // Version installed in the local MCP dir (may differ from global binary)
+    // Check the local MCP install version (this is the authoritative binary —
+    // ~/.polaris/mcp/node_modules/.bin/polaris is wired to PATH by `polaris install`).
     let mcpVersion = "";
     try {
       const pkg = JSON.parse(await readFile(join(mcpDir, "node_modules", "@lightupai", "polaris", "package.json"), "utf-8")) as { version: string };
@@ -1457,36 +1460,20 @@ switch (command) {
       process.exit(1);
     }
 
-    const currentVersion = globalVersion || mcpVersion;
-    if (latestVersion === globalVersion && latestVersion === mcpVersion) {
-      console.log(`  Already up to date (v${currentVersion}).`);
+    if (latestVersion === mcpVersion) {
+      console.log(`  Already up to date (v${mcpVersion}).`);
       break;
     }
 
-    console.log(`  Updating v${currentVersion} → v${latestVersion}...`);
+    console.log(`  Updating v${mcpVersion || "?"} → v${latestVersion}...`);
 
-    // Update the global binary if it's behind
-    if (latestVersion !== globalVersion) {
-      const globalResult = Bun.spawnSync(
-        ["npm", "install", "-g", `@lightupai/polaris@${latestVersion}`],
-        { stdout: "ignore", stderr: "pipe" }
-      );
-      if (globalResult.exitCode !== 0) {
-        console.error("  ✗ Global update failed:\n" + globalResult.stderr.toString().trim());
-        process.exit(1);
-      }
-    }
-
-    // Update the local MCP install if it's behind
-    if (latestVersion !== mcpVersion) {
-      const npmResult = Bun.spawnSync(
-        ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
-        { stdout: "ignore", stderr: "pipe" }
-      );
-      if (npmResult.exitCode !== 0) {
-        console.error("  ✗ MCP update failed:\n" + npmResult.stderr.toString().trim());
-        process.exit(1);
-      }
+    const npmResult = Bun.spawnSync(
+      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+      { stdout: "ignore", stderr: "pipe" }
+    );
+    if (npmResult.exitCode !== 0) {
+      console.error("  ✗ Update failed:\n" + npmResult.stderr.toString().trim());
+      process.exit(1);
     }
 
     console.log(`  ✓ Updated to v${latestVersion}`);
