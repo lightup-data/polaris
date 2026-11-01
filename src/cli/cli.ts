@@ -991,13 +991,6 @@ function isPresentUpstream(
 
 async function recover(dryRun = false) {
   try {
-    // Load all profiles so we can use the right token for each session's account.
-    const config = await loadConfig();
-    const allProfiles = config.profiles ?? {} as Record<string, Profile>;
-    // Active profile is the fallback when a session's account can't be determined.
-    const activeProfile = await requireProfile();
-    const activeKey = config.active || "";
-
     const logDir = join(POLARIS_DIR, "logs");
     let files: string[] = [];
     try {
@@ -1007,6 +1000,14 @@ async function recover(dryRun = false) {
       console.log("No local logs found in ~/.polaris/logs — nothing to recover.");
       return;
     }
+
+    // Load all profiles so we can use the right token for each session's account.
+    const config = await loadConfig();
+    const allProfiles = config.profiles ?? {} as Record<string, Profile>;
+    // Active profile is the fallback when a session's account can't be determined.
+    // May be null when running in a sandboxed environment with no credentials.
+    const activeProfile = getActiveProfile(config);
+    const activeKey = config.active || "";
 
     // --- Pass 1: walk logs chronologically, learning routes and collecting candidates ---
     //
@@ -1062,6 +1063,7 @@ async function recover(dryRun = false) {
 
         // 5. Last resort: project/session are known from context but we have no /connect
         //    entry for this session (e.g. very old logs). Use the active profile's identity.
+        if (!activeProfile) return undefined;
         const route: RecoverRoute = {
           project: entryProject,
           session: entrySession,
@@ -1186,6 +1188,10 @@ async function recover(dryRun = false) {
     for (const group of groups.values()) {
       const { project, session, profileKey } = group[0];
       const profileData = allProfiles[profileKey] ?? activeProfile;
+      if (!profileData) {
+        unroutable += group.length;
+        continue;
+      }
       const apiHeaders = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${profileData.token}`,
