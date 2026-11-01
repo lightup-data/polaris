@@ -520,6 +520,33 @@ The Polaris daemon runs locally and is managed automatically — do NOT manually
 `;
   await writeFile(join(skillDir, "SKILL.md"), skillContent);
   console.log("  ✓ /polaris skill written");
+
+  // Add ~/.polaris/mcp/node_modules/.bin to PATH in shell rc files so
+  // `polaris login` works without specifying the full path (especially on Linux
+  // where npm global bin is often not in PATH).
+  await ensureInPath(join(mcpDir, "node_modules", ".bin"));
+  console.log("  ✓ polaris added to PATH (open a new shell or run: source ~/.bashrc)");
+}
+
+async function ensureInPath(binDir: string): Promise<void> {
+  const marker = "# Added by polaris install";
+  const snippet = `\n${marker}\nexport PATH="${binDir}:$PATH"\n`;
+
+  const rcFiles: string[] = [];
+  if (process.platform === "darwin") {
+    rcFiles.push(join(homedir(), ".zshrc"), join(homedir(), ".bash_profile"));
+  } else {
+    rcFiles.push(join(homedir(), ".bashrc"), join(homedir(), ".profile"));
+  }
+
+  for (const rc of rcFiles) {
+    try {
+      let existing = "";
+      try { existing = await readFile(rc, "utf-8"); } catch { /* file may not exist */ }
+      if (existing.includes(marker)) continue; // already added
+      await writeFile(rc, existing + snippet, "utf-8");
+    } catch { /* non-fatal */ }
+  }
 }
 
 // --- Login ---
