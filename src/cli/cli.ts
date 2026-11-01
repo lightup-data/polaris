@@ -1231,6 +1231,7 @@ async function recover(dryRun = false) {
 
       let sessionMissing = 0;
       let sessionRestored = 0;
+      const sessionErrors = new Map<string, number>(); // status -> count
       for (const c of group) {
         if (isPresentUpstream(c.payload, upstream)) continue;
         sessionMissing++;
@@ -1240,11 +1241,23 @@ async function recover(dryRun = false) {
             headers: apiHeaders,
             body: JSON.stringify({ sender: c.sender, payload: c.payload }),
           });
-          if (res.ok) sessionRestored++;
-        } catch { /* leave as missing */ }
+          if (res.ok) {
+            sessionRestored++;
+          } else {
+            const key = String(res.status);
+            sessionErrors.set(key, (sessionErrors.get(key) ?? 0) + 1);
+          }
+        } catch (err) {
+          const key = err instanceof Error ? err.message.split("\n")[0] : "network error";
+          sessionErrors.set(key, (sessionErrors.get(key) ?? 0) + 1);
+        }
       }
       totalMissing += sessionMissing;
       totalRestored += sessionRestored;
+      if (sessionErrors.size > 0) {
+        const summary = [...sessionErrors.entries()].map(([k, n]) => `${n}×${k}`).join(", ");
+        console.log(`  ⚠  ${project}/${session}: ${sessionMissing - sessionRestored} failed (${summary})`);
+      }
     }
 
     if (dryRun) {
