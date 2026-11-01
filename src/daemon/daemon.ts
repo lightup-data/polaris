@@ -1203,6 +1203,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             project: m.project,
             session: m.session,
             user: m.user,
+            profile: m.profile,
           }));
         return json({ ok: true, version: "0.0.1", sessions: active });
       }
