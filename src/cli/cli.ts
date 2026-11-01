@@ -1094,7 +1094,7 @@ async function recover(dryRun = false) {
 
       for (const line of text.split("\n")) {
         if (!line.trim()) continue;
-        let entry: { endpoint?: string; payload?: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string; ts?: string };
+        let entry: { endpoint?: string; payload?: Record<string, unknown>; project?: string; session?: string; ccSessionId?: string; t?: string; ts?: string };
         try { entry = JSON.parse(line); } catch { continue; }
         const payload = entry.payload;
         if (!payload || typeof payload !== "object") continue;
@@ -1142,7 +1142,7 @@ async function recover(dryRun = false) {
           if (!route) { unroutable++; continue; }
 
           const sender = hookEvent === "UserPromptSubmit" ? route.user : route.agent;
-          candidates.push({ project: route.project, session: route.session, profileKey: route.profileKey, sender, payload, ts: entry.ts });
+          candidates.push({ project: route.project, session: route.session, profileKey: route.profileKey, sender, payload, ts: entry.t ?? entry.ts });
           continue;
         }
 
@@ -1161,7 +1161,7 @@ async function recover(dryRun = false) {
             profileKey: route.profileKey,
             sender: route.agent,
             payload: { hook_event_name: "Stop", session_id: r.ccSessionId, stop_response: r.message },
-            ts: entry.ts,
+            ts: entry.t ?? entry.ts,
           });
         }
       }
