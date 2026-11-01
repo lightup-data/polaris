@@ -148,7 +148,7 @@ function authRedirect(c: { redirect: (url: string) => Response; html: (html: str
     .card { background: #fff; border-radius: 12px; padding: 40px; max-width: 520px; width: 100%; box-shadow: 0 2px 16px rgba(0,0,0,0.08); text-align: center; }
     h2 { margin: 0 0 8px; font-size: 1.4rem; }
     p { color: #555; margin: 0 0 24px; }
-    .token-box { background: #f3f4f6; border-radius: 8px; padding: 14px 16px; font-family: monospace; font-size: 0.8rem; word-break: break-all; text-align: left; margin: 0 0 12px; }
+    .token-box { background: #f3f4f6; border-radius: 8px; padding: 14px 16px; font-family: monospace; font-size: 0.8rem; word-break: break-all; overflow-wrap: break-word; white-space: pre-wrap; text-align: left; margin: 0 0 12px; }
     .copy-btn { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; }
     .copy-btn:hover { background: #333; }
     .status { margin-top: 20px; font-size: 0.9rem; color: #888; min-height: 1.4em; }
@@ -159,7 +159,7 @@ function authRedirect(c: { redirect: (url: string) => Response; html: (html: str
   <h2>Authenticated!</h2>
   <p id="msg">Delivering token to CLI…</p>
   <div id="fallback" style="display:none">
-    <p style="color:#c00;margin-bottom:12px">Automatic delivery failed (common over SSH).<br>Copy the token below and paste it in your terminal:</p>
+    <p style="color:#555;margin-bottom:12px">Looks like the browser and CLI are on different machines — copy the token below and paste it in your terminal:</p>
     <pre class="token-box" id="tok">${token}</pre>
     <button class="copy-btn" onclick="copyToken()">Copy token</button>
     <p style="margin-top:12px;color:#555;font-size:0.85rem">Then run: <code>polaris login --token &lt;paste&gt;</code></p>
