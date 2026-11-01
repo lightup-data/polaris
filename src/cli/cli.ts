@@ -279,26 +279,44 @@ WantedBy=default.target
   // before systemd takes over
   await killExistingDaemon();
 
+  // systemctl --user requires XDG_RUNTIME_DIR, which may not be set in SSH
+  // sessions. Derive it from the UID so commands work without a login session.
+  const uid = Bun.spawnSync(["id", "-u"], { stdout: "pipe" }).stdout.toString().trim();
+  const xdgEnv = { ...process.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${uid}` };
+  const sc = (args: string[]) =>
+    Bun.spawnSync(["systemctl", "--user", ...args], { stdout: "pipe", stderr: "pipe", env: xdgEnv });
+
   // Reload unit files, enable (start-at-login) and start/restart the service
-  Bun.spawnSync(["systemctl", "--user", "daemon-reload"], { stdout: "ignore", stderr: "ignore" });
-  Bun.spawnSync(["systemctl", "--user", "enable", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
-  Bun.spawnSync(["systemctl", "--user", "restart", SYSTEMD_SERVICE_NAME], { stdout: "ignore", stderr: "ignore" });
+  sc(["daemon-reload"]);
+  sc(["enable", SYSTEMD_SERVICE_NAME]);
+  sc(["restart", SYSTEMD_SERVICE_NAME]);
 
   // Verify the service came up
-  const check = Bun.spawnSync(["systemctl", "--user", "is-active", SYSTEMD_SERVICE_NAME], { stdout: "pipe", stderr: "ignore" });
-  if (check.stdout.toString().trim() !== "active") {
-    console.error(`  Warning: daemon service did not start. Check logs:`);
-    const journal = Bun.spawnSync(
-      ["journalctl", "--user", "-u", SYSTEMD_SERVICE_NAME, "-n", "10", "--no-pager"],
-      { stdout: "pipe", stderr: "ignore" }
-    );
-    console.error(journal.stdout.toString().trim());
-    console.error(`  Try manually: systemctl --user restart ${SYSTEMD_SERVICE_NAME}`);
+  const check = sc(["is-active", SYSTEMD_SERVICE_NAME]);
+  const activeState = check.stdout.toString().trim();
+  if (activeState !== "active") {
+    // Check if it's a D-Bus connectivity issue (SSH without login session)
+    const busError = check.stderr.toString().includes("No medium") ||
+                     check.stderr.toString().includes("No such file") ||
+                     check.exitCode === 1 && activeState === "";
+    if (busError) {
+      console.error(`  Warning: could not verify daemon status over SSH (no D-Bus session).`);
+      console.error(`  The service was written and enabled — it should start automatically at next login.`);
+      console.error(`  To start it now: export XDG_RUNTIME_DIR=/run/user/$(id -u) && systemctl --user restart ${SYSTEMD_SERVICE_NAME}`);
+    } else {
+      console.error(`  Warning: daemon service did not start. Check logs:`);
+      const journal = Bun.spawnSync(
+        ["journalctl", "--user", "-u", SYSTEMD_SERVICE_NAME, "-n", "10", "--no-pager"],
+        { stdout: "pipe", stderr: "ignore", env: xdgEnv }
+      );
+      console.error(journal.stdout.toString().trim());
+      console.error(`  Try manually: systemctl --user restart ${SYSTEMD_SERVICE_NAME}`);
+    }
   }
 
   // Enable lingering so the user service survives logout and starts at boot
   // (best-effort — requires sudo-less loginctl or appropriate privileges)
-  Bun.spawnSync(["loginctl", "enable-linger"], { stdout: "ignore", stderr: "ignore" });
+  Bun.spawnSync(["loginctl", "enable-linger"], { stdout: "ignore", stderr: "ignore", env: xdgEnv });
 }
 
 async function removeSystemdService(): Promise<void> {
