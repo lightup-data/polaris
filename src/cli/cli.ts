@@ -1519,28 +1519,17 @@ switch (command) {
     await install();
     await installDaemonService(await ensureDaemonSecret());
 
-    // If the running binary is NOT the MCP install (e.g. a legacy global npm install),
-    // try to remove it so there's no stale duplicate. Best-effort: ignore failures
-    // (e.g. needs sudo on Linux). Then tell the user to open a new shell.
-    const mcpBinPath = join(mcpDir, "node_modules", ".bin", "polaris");
+    console.log(`\n✓ Polaris updated to v${latestVersion}.`);
+    console.log(`  Claude Code should restart the MCP server automatically. If tools seem stale, restart Claude Code.`);
+
+    // If the running binary is a legacy global install (not the MCP bin), the PATH
+    // change takes effect in the next shell. Don't remove the global binary — removing
+    // it while the current shell still depends on it leaves the user stranded.
     const runningBin = process.execPath === Bun.which("bun") ? process.argv[1] : process.execPath;
     const runningViaMcp = runningBin.includes(join(".polaris", "mcp"));
     if (!runningViaMcp) {
-      const uninstall = Bun.spawnSync(
-        ["npm", "uninstall", "-g", "@lightupai/polaris"],
-        { stdout: "ignore", stderr: "ignore" }
-      );
-      if (uninstall.exitCode === 0) {
-        console.log(`\n  ✓ Removed old global install — ${mcpBinPath} is now the only binary`);
-      } else {
-        console.log(`\n  ℹ  Could not remove old global install (may need sudo) — it's harmless`);
-        console.log(`     but if you want to clean it up: sudo npm uninstall -g @lightupai/polaris`);
-      }
-      console.log(`  Open a new shell (or run: source ~/.bashrc) to use the updated binary`);
+      console.log(`  Open a new shell to switch to the updated binary at ~/.polaris/mcp/node_modules/.bin/polaris`);
     }
-
-    console.log(`\n✓ Polaris updated to v${latestVersion}.`);
-    console.log(`  Claude Code should restart the MCP server automatically. If tools seem stale, restart Claude Code.`);
     break;
   }
 
