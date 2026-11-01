@@ -3,6 +3,7 @@
 // Usage:
 //   polaris                       — install + login (default onboarding)
 //   polaris install               — install local components (no auth)
+//   polaris update                — update to the latest version
 //   polaris login                 — authenticate via Google SSO (production)
 //   polaris login --local         — authenticate against localhost
 //   polaris login --url <url>     — authenticate against a custom URL
@@ -1251,6 +1252,48 @@ switch (command) {
     await recover();
     break;
 
+  case "update": {
+    console.log("Polaris — updating\n");
+    const mcpDir = join(POLARIS_DIR, "mcp");
+    let currentVersion = "";
+    try {
+      const pkg = JSON.parse(await readFile(join(mcpDir, "node_modules", "@lightupai", "polaris", "package.json"), "utf-8")) as { version: string };
+      currentVersion = pkg.version ?? "";
+    } catch { /* not installed yet */ }
+
+    let latestVersion = "";
+    try {
+      const res = await fetch("https://registry.npmjs.org/@lightupai/polaris/latest", { signal: AbortSignal.timeout(5000) });
+      if (res.ok) ({ version: latestVersion } = await res.json() as { version: string });
+    } catch { /* network unavailable */ }
+
+    if (!latestVersion) {
+      console.error("  ✗ Could not reach npm. Check your network connection.");
+      process.exit(1);
+    }
+    if (latestVersion === currentVersion) {
+      console.log(`  Already up to date (v${currentVersion}).`);
+      break;
+    }
+
+    console.log(`  Updating v${currentVersion} → v${latestVersion}...`);
+    const npmResult = Bun.spawnSync(
+      ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
+      { stdout: "ignore", stderr: "pipe" }
+    );
+    if (npmResult.exitCode !== 0) {
+      console.error("  ✗ Update failed:\n" + npmResult.stderr.toString().trim());
+      process.exit(1);
+    }
+
+    console.log(`  ✓ Updated to v${latestVersion}`);
+    console.log("  Re-wiring local components...\n");
+    await install();
+    await installDaemonService(await ensureDaemonSecret());
+    console.log(`\n✓ Polaris updated to v${latestVersion}. Restart Claude Code to use the new MCP server.`);
+    break;
+  }
+
   case "feedback": {
     const isBug = hasFlag("bug");
     const isFeature = hasFlag("feature");
@@ -1284,6 +1327,7 @@ switch (command) {
     console.log("Usage:");
     console.log("  polaris                        — install + login (default setup)");
     console.log("  polaris install                — install local components (no auth)");
+    console.log("  polaris update                 — update to the latest version");
     console.log("  polaris login                  — authenticate (production)");
     console.log("  polaris login --local          — authenticate (local dev)");
     console.log("  polaris login --token <token>  — authenticate without a browser (SSH/headless)");
