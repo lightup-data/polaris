@@ -1092,7 +1092,72 @@ function isPresentUpstream(payload: Record<string, unknown>, upstreamKeys: Map<s
   return true;
 }
 
-async function recover(dryRun = false, debug = false) {
+// --- Reconciliation state (shared by `recover` and `recover --reconcile`) ---
+// Per-session watermark: every local event up to this time is known to be upstream.
+// A pass advances it only after a clean check of that session, so every period is
+// covered by some successful pass and holes can't slip behind it.
+
+const RECONCILE_STATE_FILE = join(POLARIS_DIR, "reconcile-state.json");
+const RECONCILE_LOCK_FILE = join(POLARIS_DIR, "reconcile.lock");
+// Events this recent may still be in the daemon's live relay; checking them would
+// race the relay and duplicate them.
+const RECONCILE_SETTLE_MS = 5 * 60_000;
+// Re-check a little before the watermark, for events whose server timestamp lands
+// slightly earlier than the pass that covered them (clock skew, `at` back-dating).
+const RECONCILE_OVERLAP_MS = 10 * 60_000;
+
+async function readWatermarks(): Promise<Record<string, string>> {
+  try { return JSON.parse(await readFile(RECONCILE_STATE_FILE, "utf-8")); } catch { return {}; }
+}
+
+// Sessions with events still queued in the daemon's outbox: the daemon will deliver
+// them, so recovering them too would duplicate.
+async function outboxSessions(): Promise<Set<string>> {
+  const pending = new Set<string>();
+  try {
+    const dir = join(POLARIS_DIR, "outbox");
+    for (const name of await readdir(dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const e = JSON.parse(await readFile(join(dir, name), "utf-8")) as { project?: string; session?: string };
+        if (e.project && e.session) pending.add(`${e.project}/${e.session}`);
+      } catch { /* unreadable entry */ }
+    }
+  } catch { /* no outbox */ }
+  return pending;
+}
+
+// Exclusive lock so a scheduled pass and a manual run can't both post the same gap.
+async function acquireReconcileLock(): Promise<boolean> {
+  await mkdir(POLARIS_DIR, { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await writeFile(RECONCILE_LOCK_FILE, String(process.pid), { flag: "wx" });
+      return true;
+    } catch {
+      const pid = Number(await readFile(RECONCILE_LOCK_FILE, "utf-8").catch(() => ""));
+      let alive = false;
+      try { if (pid > 0) { process.kill(pid, 0); alive = true; } } catch { /* not running */ }
+      if (alive) return false;
+      await rm(RECONCILE_LOCK_FILE, { force: true }); // stale lock from a crashed run
+    }
+  }
+  return false;
+}
+
+async function recover(dryRun = false, debug = false, opts: { reconcile?: boolean } = {}) {
+  if (!dryRun && !(await acquireReconcileLock())) {
+    console.log("Another recover/reconcile is already running — skipping.");
+    return;
+  }
+  try {
+    await recoverInner(dryRun, debug, opts);
+  } finally {
+    if (!dryRun) await rm(RECONCILE_LOCK_FILE, { force: true });
+  }
+}
+
+async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?: boolean }) {
   try {
     const logDir = join(POLARIS_DIR, "logs");
     // Only scan logs from v0.0.105+ (2026-10-13), when project/session context
@@ -1374,6 +1439,31 @@ async function recover(dryRun = false, debug = false) {
         groups.delete(key);
       }
     }
+
+    // Narrow each session to what this pass may safely check. Done before the upstream
+    // read, whose paging stops at the oldest local event left in the group.
+    const cutoffMs = Date.now() - RECONCILE_SETTLE_MS;
+    const watermarks = await readWatermarks();
+    const draining = await outboxSessions();
+    let drainingSessions = 0;
+    for (const [key, group] of groups) {
+      const { project, session } = group[0];
+      const wkey = `${project}/${session}`;
+      if (draining.has(wkey)) {
+        drainingSessions++;
+        groups.delete(key);
+        continue;
+      }
+      const wm = opts.reconcile && watermarks[wkey] ? Date.parse(watermarks[wkey]) - RECONCILE_OVERLAP_MS : -Infinity;
+      const kept = group.filter((c) => {
+        const t = c.ts ? Date.parse(c.ts) : NaN;
+        return Number.isNaN(t) || (t > wm && t <= cutoffMs);
+      });
+      if (kept.length === 0) groups.delete(key);
+      else groups.set(key, kept);
+    }
+    // Sessions checked cleanly this pass; ANDed across profile groups of one session
+    const sessionClean = new Map<string, boolean>();
     const skipSummary = (): string[] => {
       const lines: string[] = [];
       if (missingProjects.size > 0) {
@@ -1532,6 +1622,8 @@ async function recover(dryRun = false, debug = false) {
       }
       totalMissing += sessionMissing;
       totalRestored += sessionRestored;
+      const wkey = `${project}/${session}`;
+      sessionClean.set(wkey, (sessionClean.get(wkey) ?? true) && sessionErrors.size === 0);
       if (sessionErrors.size > 0) {
         const errSummary = [...sessionErrors.entries()].map(([k, n]) => `${n}×${k}`).join(", ");
         process.stdout.write(`\r${linePrefix}... ${sessionRestored}/${sessionMissing} restored (${errSummary})\n`);
@@ -1556,6 +1648,20 @@ async function recover(dryRun = false, debug = false) {
       if (uncheckedSessions > 0) console.log(`${uncheckedSessions} session(s) skipped because upstream couldn't be checked — rerun \`polaris recover\` later.`);
       if (unroutable > 0) console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
       if (totalMissing > totalRestored) console.log(`${totalMissing - totalRestored} event(s) could not be restored (API unreachable or rejected).`);
+      if (drainingSessions > 0) console.log(`Skipped ${drainingSessions} session(s) with events still queued in the outbox (the daemon is delivering them).`);
+
+      // Advance watermarks only for sessions checked cleanly in this pass
+      const through = new Date(cutoffMs).toISOString();
+      let advanced = 0;
+      for (const [wkey, clean] of sessionClean) {
+        if (!clean) continue;
+        watermarks[wkey] = through;
+        advanced++;
+      }
+      if (advanced > 0) {
+        await mkdir(POLARIS_DIR, { recursive: true });
+        await writeFile(RECONCILE_STATE_FILE, JSON.stringify(watermarks, null, 2));
+      }
     }
   } catch (err) {
     console.error(`Recover failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1750,7 +1856,7 @@ switch (command) {
     break;
 
   case "recover":
-    await recover(hasFlag("dry-run") || hasFlag("dry"), hasFlag("debug"));
+    await recover(hasFlag("dry-run") || hasFlag("dry"), hasFlag("debug"), { reconcile: hasFlag("reconcile") });
     break;
 
   case "update": {

@@ -31,10 +31,15 @@ afterAll(async () => {
 
 async function runRecover(
   jsonlLines: string[] | null,
-  opts: { config?: unknown; logDate?: string; args?: string[]; history?: unknown[] } = {}
-): Promise<{ exitCode: number; output: string }> {
+  opts: { config?: unknown; logDate?: string; args?: string[]; history?: unknown[]; files?: Record<string, string> } = {}
+): Promise<{ exitCode: number; output: string; home: string }> {
   const home = await mkdtemp(join(tmpdir(), "polaris-recover-"));
   homes.push(home);
+  for (const [rel, content] of Object.entries(opts.files ?? {})) {
+    const p = join(home, ".polaris", rel);
+    await mkdir(join(p, ".."), { recursive: true });
+    await writeFile(p, content);
+  }
   if (jsonlLines !== null) {
     const logDir = join(home, ".polaris", "logs");
     await mkdir(logDir, { recursive: true });
@@ -66,7 +71,7 @@ async function runRecover(
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  return { exitCode, output: stdout + stderr };
+  return { exitCode, output: stdout + stderr, home };
 }
 
 describe("polaris recover", () => {
@@ -294,5 +299,74 @@ describe("polaris recover: projects not on the server", () => {
     expect(exitCode).toBe(0);
     expect(api.posts).toHaveLength(0);
     expect(output).toContain("couldn't check upstream (HTTP 502)");
+  }, 30000);
+});
+
+describe("polaris recover: watermarks and safety rules", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+  const connect = JSON.stringify({ t: ago(600), endpoint: "/connect", payload: { ccSessionId: "cc-w", project: "real", session: "s1", user: "user:t", profile: "t" } });
+  const prompt = (t: string, text: string) => JSON.stringify({
+    t, endpoint: "/events", project: "real", session: "s1", ccSessionId: "cc-w",
+    payload: { session_id: "cc-w", hook_event_name: "UserPromptSubmit", prompt: text },
+  });
+  const reset = (over: Partial<typeof api> = {}) =>
+    Object.assign(api, { projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0, upstream: [], ...over });
+  const readState = async (home: string) =>
+    JSON.parse(await readFile(join(home, ".polaris", "reconcile-state.json"), "utf-8").catch(() => "{}")) as Record<string, string>;
+
+  test("leaves events from the last few minutes to the live relay, and records a watermark", async () => {
+    reset();
+    const { home } = await runRecover([connect, prompt(ago(30), "settled"), prompt(ago(1), "in flight")], { config, logDate: today });
+    expect(api.posts).toHaveLength(1);
+    const wm = Date.parse((await readState(home))["real/s1"]);
+    expect(Math.abs(wm - (Date.now() - 5 * 60_000))).toBeLessThan(60_000);
+  }, 30000);
+
+  test("--reconcile only checks events after the watermark; a manual run checks everything", async () => {
+    const lines = [connect, prompt(ago(180), "before watermark"), prompt(ago(30), "after watermark")];
+    const files = { "reconcile-state.json": JSON.stringify({ "real/s1": ago(60) }) };
+    reset();
+    await runRecover(lines, { config, logDate: today, args: ["--reconcile"], files });
+    expect(api.posts).toHaveLength(1);
+    reset();
+    await runRecover(lines, { config, logDate: today, files });
+    expect(api.posts).toHaveLength(2);
+  }, 30000);
+
+  test("skips sessions with events still queued in the outbox and doesn't advance them", async () => {
+    reset();
+    const { output, home } = await runRecover([connect, prompt(ago(30), "x")], {
+      config, logDate: today,
+      files: { "outbox/1-abc.json": JSON.stringify({ t: ago(20), project: "real", session: "s1", profile: "t", body: {} }) },
+    });
+    expect(api.posts).toHaveLength(0);
+    expect(output).toContain("still queued in the outbox");
+    expect((await readState(home))["real/s1"]).toBeUndefined();
+  }, 30000);
+
+  test("a failed upstream check does not advance the watermark", async () => {
+    reset({ messagesStatus: 502 });
+    const before = ago(60);
+    const { home } = await runRecover([connect, prompt(ago(30), "x")], {
+      config, logDate: today, args: ["--reconcile"], files: { "reconcile-state.json": JSON.stringify({ "real/s1": before }) },
+    });
+    expect(api.posts).toHaveLength(0);
+    expect((await readState(home))["real/s1"]).toBe(before);
+  }, 30000);
+
+  test("refuses to run while another recover holds the lock", async () => {
+    reset();
+    const { output } = await runRecover([connect, prompt(ago(30), "x")], {
+      config, logDate: today, files: { "reconcile.lock": String(process.pid) }, // this test runner: alive
+    });
+    expect(api.posts).toHaveLength(0);
+    expect(output).toContain("already running");
+  }, 30000);
+
+  test("a stale lock from a dead process is taken over", async () => {
+    reset();
+    await runRecover([connect, prompt(ago(30), "x")], { config, logDate: today, files: { "reconcile.lock": "999999" } });
+    expect(api.posts).toHaveLength(1);
   }, 30000);
 });
