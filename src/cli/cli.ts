@@ -1104,6 +1104,14 @@ function resolveRenames(project: string, session: string, ts: string | undefined
   return { project, session };
 }
 
+// Session rename chain within a project, ignoring when the renames happened
+function followSessionRenames(project: string, session: string, renames: RenameRecord[]): string {
+  for (const r of renames) {
+    if (r.kind === "session" && r.project === project && r.old_name === session) session = r.new_name;
+  }
+  return session;
+}
+
 interface RecoverCandidate {
   project: string;
   session: string;
@@ -1478,6 +1486,30 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
         renamedEvents++;
       }
     }
+    // A client that never heard about a rename keeps logging the old name after it.
+    // If that old session name no longer exists upstream, follow its rename chain
+    // regardless of time; if it exists (reused) or can't be checked, keep it as logged.
+    const oldNameExists = new Map<string, boolean>();
+    for (const c of candidates) {
+      const target = followSessionRenames(c.project, c.session, renamesByProfile.get(c.profileKey) ?? []);
+      if (target === c.session) continue;
+      const key = `${c.profileKey}\0${c.project}\0${c.session}`;
+      if (!oldNameExists.has(key)) {
+        const p = allProfiles[c.profileKey] ?? activeProfile;
+        let exists = true;
+        try {
+          const res = p
+            ? await fetch(`${p.api}/projects/${c.project}/sessions/${c.session}/events?limit=1`, { headers: { Authorization: `Bearer ${p.token}` }, signal: AbortSignal.timeout(15_000) })
+            : null;
+          if (res?.status === 404) exists = false;
+        } catch { /* unknown: keep the logged name */ }
+        oldNameExists.set(key, exists);
+      }
+      if (!oldNameExists.get(key)) {
+        c.session = target;
+        renamedEvents++;
+      }
+    }
     if (renamedEvents > 0) console.log(`Resolved ${renamedEvents} event(s) logged under since-renamed project/session names.`);
 
     // --- Pass 2: per session, fetch upstream and re-POST what's missing ---
@@ -1596,31 +1628,8 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
       };
       const apiUrl = profileData.api;
 
-      if (dryRun) {
-        // In dry-run mode, count candidates without fetching upstream —
-        // show worst-case (all in log, may already be upstream).
-        const account = profileData.email ?? profileKey ?? "unknown account";
-        const timestamps = group.map(c => c.ts).filter((t): t is string => !!t).sort();
-        let dateRange = "";
-        if (timestamps.length > 0) {
-          const fmt = (iso: string) => {
-            const d = new Date(iso);
-            return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-          };
-          const oldest = timestamps[0];
-          const newest = timestamps[timestamps.length - 1];
-          dateRange = oldest === newest ? fmt(oldest) : `${fmt(oldest)} – ${fmt(newest)}`;
-        }
-        const label = `  ${project} / ${session}`;
-        const acct = `[${account}]`;
-        const pad = Math.max(1, 46 - label.length - acct.length);
-        console.log(`${label}${" ".repeat(pad)}${acct}`);
-        const detail = `  ${group.length} event(s)${dateRange ? `  ·  ${dateRange}` : ""}`;
-        console.log(detail + "\n");
-        totalMissing += group.length;
-        continue;
-      }
-
+      // Dry run does the same read-only upstream check, so it reports what is actually
+      // missing rather than every logged event; it just never POSTs.
       const linePrefix = `  [${groupIdx}/${groups.size}] ${project}/${session}`;
       process.stdout.write(`${linePrefix}...`);
 
@@ -1689,6 +1698,12 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
       let sessionMissing = 0;
       let sessionRestored = 0;
       const sessionErrors = new Map<string, number>(); // status -> count
+      if (dryRun) {
+        const missing = group.filter((c) => !isPresentUpstream(c.payload, upstreamKeys)).length;
+        totalMissing += missing;
+        process.stdout.write(missing > 0 ? ` ${missing} missing (of ${group.length} logged)\n` : ` in sync\n`);
+        continue;
+      }
       for (const c of group) {
         if (isPresentUpstream(c.payload, upstreamKeys)) continue;
         sessionMissing++;
@@ -1729,11 +1744,12 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
 
     if (dryRun) {
       console.log(hr);
-      console.log(`Up to ${totalMissing} event(s) would be restored.`);
-      console.log(`Events already in sync are filtered out at run time.`);
+      console.log(totalMissing > 0 ? `${totalMissing} event(s) missing upstream would be restored.` : `Everything is in sync — nothing to restore.`);
       for (const line of skipSummary()) console.log(line);
+      if (notFoundSessions > 0) console.log(`${notFoundSessions} session(s) not found upstream (deleted, or renamed without a record) — would be skipped.`);
+      if (uncheckedSessions > 0) console.log(`${uncheckedSessions} session(s) couldn't be checked (API unreachable) — counts above are incomplete.`);
       if (unroutable > 0) console.log(`${unroutable} event(s) had no session match and will be skipped.`);
-      console.log(`\nRun \`polaris recover\` to restore.`);
+      if (totalMissing > 0) console.log(`\nRun \`polaris recover\` to restore.`);
     } else {
       console.log(`\nRecover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
       for (const line of skipSummary()) console.log(line);
