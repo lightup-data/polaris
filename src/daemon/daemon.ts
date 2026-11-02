@@ -1097,6 +1097,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         try {
           const body = (await req.json()) as {
             ccSessionId: string;
+            claudeSessionId?: boolean; // ccSessionId is Claude Code's own session id
             pid?: number;
             project: string;
             session?: string;
@@ -1199,7 +1200,9 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             agent: agentId,
             profile,
             ws: null,
-            pendingMapping: true, // waiting for hook event to map the real CC session ID
+            // Only an MCP server with a made-up id needs its first hook event to claim it;
+            // with Claude's real session id the mapping is already exact.
+            pendingMapping: !body.claudeSessionId,
             connectedAt: nowMs,
           };
           sessions.set(body.ccSessionId, mapping);
@@ -1390,6 +1393,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             // Known CC session ID but deliberately disconnected (project cleared
             // by /disconnect). Hooks still fire after disconnect — do NOT
             // alias-claim a pending session; the shell intentionally left.
+            return json({ status: "not_connected" });
+          }
+          if (mapping?.pendingMapping) {
+            // The hook's id IS the joined id (the MCP server got Claude's real session
+            // id), so there's no alias to learn. Left pending, any other session's
+            // first event could claim this join.
+            mapping.pendingMapping = false;
+            void persistSessions();
+          }
+          if (!mapping && (body.hook_event_name === "SessionStart" || body.hook_event_name === "SessionEnd")) {
+            // Lifecycle events come from sessions starting or stopping — never from the
+            // window that just ran /polaris join — so they never claim a pending join.
             return json({ status: "not_connected" });
           }
           if (!mapping) {
