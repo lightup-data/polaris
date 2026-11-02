@@ -10,6 +10,7 @@ import {
   getProject,
   renameProject,
   renameSession,
+  getRenameHistory,
   createSession,
   getSession,
   setDriver,
@@ -326,6 +327,11 @@ export async function startServer(opts: {
       if (method === "GET" && pathname === "/projects") {
         const projects = await listProjects(sql, orgId);
         return json(projects);
+      }
+
+      // Rename history: lets clients map names from old local logs to current ones
+      if (method === "GET" && pathname === "/renames") {
+        return json(await getRenameHistory(sql, orgId));
       }
 
       params = matchRoute(method, pathname, "/projects", "POST");

@@ -1035,6 +1035,28 @@ interface RecoverRoute {
   profileKey: string; // which account owns this session
 }
 
+interface RenameRecord {
+  kind: "project" | "session";
+  project: string; // the project's current name
+  old_name: string;
+  new_name: string;
+  renamed_at: string;
+}
+
+// Only renames after the event was captured apply (an old name may later be reused).
+// Projects first: session records are keyed by the project's current name.
+function resolveRenames(project: string, session: string, ts: string | undefined, renames: RenameRecord[]): { project: string; session: string } {
+  const at = ts ? Date.parse(ts) : -Infinity;
+  const after = renames.filter((r) => Date.parse(r.renamed_at) > at);
+  for (const r of after) {
+    if (r.kind === "project" && r.old_name === project) project = r.new_name;
+  }
+  for (const r of after) {
+    if (r.kind === "session" && r.project === project && r.old_name === session) session = r.new_name;
+  }
+  return { project, session };
+}
+
 interface RecoverCandidate {
   project: string;
   session: string;
@@ -1386,6 +1408,30 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
         }
       }
     }
+
+    // Logs keep the names in use at capture time; translate them through each account's
+    // rename history so renamed projects/sessions aren't skipped as missing.
+    const renamesByProfile = new Map<string, RenameRecord[]>();
+    for (const c of candidates) {
+      if (renamesByProfile.has(c.profileKey)) continue;
+      const p = allProfiles[c.profileKey] ?? activeProfile;
+      let list: RenameRecord[] = [];
+      try {
+        const res = p ? await fetch(`${p.api}/renames`, { headers: { Authorization: `Bearer ${p.token}` }, signal: AbortSignal.timeout(15_000) }) : null;
+        if (res?.ok) list = (await res.json()) as RenameRecord[];
+      } catch { /* older server or unreachable: names used as logged */ }
+      renamesByProfile.set(c.profileKey, list);
+    }
+    let renamedEvents = 0;
+    for (const c of candidates) {
+      const r = resolveRenames(c.project, c.session, c.ts, renamesByProfile.get(c.profileKey) ?? []);
+      if (r.project !== c.project || r.session !== c.session) {
+        c.project = r.project;
+        c.session = r.session;
+        renamedEvents++;
+      }
+    }
+    if (renamedEvents > 0) console.log(`Resolved ${renamedEvents} event(s) logged under since-renamed project/session names.`);
 
     // --- Pass 2: per session, fetch upstream and re-POST what's missing ---
     // Group by (project, session, profileKey) so each group uses the right account.

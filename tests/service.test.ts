@@ -371,3 +371,38 @@ describe("unknown routes", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// --- Renames ---
+
+describe("renames", () => {
+  async function seed() {
+    await post("/projects", { name: "pj" });
+    await post("/projects/pj/sessions", { name: "old", driver: "user:manu" });
+    await post("/projects/pj/sessions/old/events", {
+      sender: "user:manu",
+      payload: { hook_event_name: "UserPromptSubmit", session_id: "cc1", prompt: "before rename" },
+    });
+  }
+
+  test("session rename carries its events along", async () => {
+    await seed();
+    const res = await post("/projects/pj/sessions/old/rename", { name: "new" });
+    expect(res.status).toBe(200);
+    const events = (await (await fetch(`${base}/projects/pj/sessions/new/messages`)).json()) as Array<{ session: string; payload: { prompt?: string } }>;
+    expect(events).toHaveLength(1);
+    expect(events[0].session).toBe("new");
+    expect(events[0].payload.prompt).toBe("before rename");
+    expect((await fetch(`${base}/projects/pj/sessions/old/messages`)).status).toBe(404);
+  });
+
+  test("rename history records both kinds under the project's current name", async () => {
+    await seed();
+    await post("/projects/pj/sessions/old/rename", { name: "new" });
+    await post("/projects/pj/rename", { name: "pj2" });
+    const history = (await (await fetch(`${base}/renames`)).json()) as Array<{ kind: string; project: string; old_name: string; new_name: string }>;
+    expect(history.map(({ kind, project, old_name, new_name }) => ({ kind, project, old_name, new_name }))).toEqual([
+      { kind: "session", project: "pj2", old_name: "old", new_name: "new" },
+      { kind: "project", project: "pj2", old_name: "pj", new_name: "pj2" },
+    ]);
+  });
+});

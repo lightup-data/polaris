@@ -107,6 +107,7 @@ const api = {
   upstream: [] as UpstreamEvent[], // newest-first, like the server
   pageRequests: 0,
   posts: [] as string[],
+  renames: [] as unknown[],
 };
 const fake = Bun.serve({
   port: 0,
@@ -116,6 +117,7 @@ const fake = Bun.serve({
     if (req.method === "GET" && path === "/projects") {
       return api.projectsStatus === 200 ? Response.json([{ name: "real" }]) : new Response("bad gateway", { status: api.projectsStatus });
     }
+    if (req.method === "GET" && path === "/renames") return Response.json(api.renames);
     // The unpaginated full-history read can OOM prod — recover must never call it.
     if (path.endsWith("/messages")) return new Response("unpaginated read not allowed", { status: 500 });
     if (req.method === "GET" && path.endsWith("/events")) {
@@ -368,5 +370,30 @@ describe("polaris recover: watermarks and safety rules", () => {
     reset();
     await runRecover([connect, prompt(ago(30), "x")], { config, logDate: today, files: { "reconcile.lock": "999999" } });
     expect(api.posts).toHaveLength(1);
+  }, 30000);
+});
+
+describe("polaris recover: renames", () => {
+  test("events logged under old project/session names go to the current names", async () => {
+    const line = (t: string, prompt: string) => JSON.stringify({
+      t, endpoint: "/events", project: "oldproj", session: "s-old", ccSessionId: "cc-r",
+      payload: { session_id: "cc-r", hook_event_name: "UserPromptSubmit", prompt },
+    });
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0, upstream: [],
+      renames: [
+        { kind: "session", project: "real", old_name: "s-old", new_name: "s1", renamed_at: "2026-11-01T12:00:00.000Z" },
+        { kind: "project", project: "real", old_name: "oldproj", new_name: "real", renamed_at: "2026-11-01T13:00:00.000Z" },
+      ],
+    });
+    const { output } = await runRecover([
+      JSON.stringify({ t: "2026-11-01T10:00:00.000Z", endpoint: "/connect", payload: { ccSessionId: "cc-r", project: "oldproj", session: "s-old", user: "user:t", profile: "t" } }),
+      line("2026-11-01T10:01:00.000Z", "a"),
+      line("2026-11-01T10:02:00.000Z", "b"),
+    ], { config, logDate: "2026-11-01" });
+    api.renames = [];
+    expect(api.posts).toEqual(["/projects/real/sessions/s1/events", "/projects/real/sessions/s1/events"]);
+    expect(output).toContain("Resolved 2 event(s) logged under since-renamed");
+    expect(output).not.toContain("not on the server");
   }, 30000);
 });
