@@ -13,6 +13,8 @@
 //   polaris use <email>           — switch active account (triggers login if not found)
 //   polaris profiles              — list accounts
 //   polaris daemon                — start the local daemon
+//   polaris stop                  — stop the daemon and keep it off (survives reboot)
+//   polaris start                 — re-enable and start the managed daemon service
 //   polaris status                — show connection status
 //   polaris recover               — re-POST locally logged events missing upstream
 //   polaris recover --dry-run     — preview what would be restored without sending
@@ -281,12 +283,8 @@ WantedBy=default.target
   // before systemd takes over
   await killExistingDaemon();
 
-  // systemctl --user requires XDG_RUNTIME_DIR, which may not be set in SSH
-  // sessions. Derive it from the UID so commands work without a login session.
-  const uid = Bun.spawnSync(["id", "-u"], { stdout: "pipe" }).stdout.toString().trim();
-  const xdgEnv = { ...process.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${uid}` };
-  const sc = (args: string[]) =>
-    Bun.spawnSync(["systemctl", "--user", ...args], { stdout: "pipe", stderr: "pipe", env: xdgEnv });
+  const sc = systemctlUser;
+  const xdgEnv = xdgRuntimeEnv();
 
   // Reload unit files, enable (start-at-login) and start/restart the service
   sc(["daemon-reload"]);
@@ -319,6 +317,17 @@ WantedBy=default.target
   // Enable lingering so the user service survives logout and starts at boot
   // (best-effort — requires sudo-less loginctl or appropriate privileges)
   Bun.spawnSync(["loginctl", "enable-linger"], { stdout: "ignore", stderr: "ignore", env: xdgEnv });
+}
+
+// systemctl --user requires XDG_RUNTIME_DIR, which may not be set in SSH
+// sessions. Derive it from the UID so commands work without a login session.
+function xdgRuntimeEnv(): Record<string, string | undefined> {
+  const uid = Bun.spawnSync(["id", "-u"], { stdout: "pipe" }).stdout.toString().trim();
+  return { ...process.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${uid}` };
+}
+
+function systemctlUser(args: string[]) {
+  return Bun.spawnSync(["systemctl", "--user", ...args], { stdout: "pipe", stderr: "pipe", env: xdgRuntimeEnv() });
 }
 
 async function removeSystemdService(): Promise<void> {
@@ -382,6 +391,55 @@ async function installDaemonService(daemonSecret?: string): Promise<void> {
 async function removeDaemonService(): Promise<void> {
   if (process.platform === "darwin") return removeLaunchAgent();
   if (process.platform === "linux") return removeSystemdService();
+}
+
+// --- polaris stop / start ---
+// Stop disables the managed service so it stays down across crashes, logins and
+// reboots (KeepAlive/Restart would otherwise revive it), then clears anything
+// still on the port, including stale daemons from older installs.
+
+async function daemonListening(): Promise<boolean> {
+  try {
+    await fetch("http://127.0.0.1:4322/status", { signal: AbortSignal.timeout(1000) });
+    return true; // any HTTP answer (even 401) means a daemon owns the port
+  } catch {
+    return false;
+  }
+}
+
+async function stopDaemonService(): Promise<boolean> {
+  if (process.platform === "darwin") {
+    Bun.spawnSync(["launchctl", "unload", "-w", LAUNCH_AGENT_PLIST], { stdout: "ignore", stderr: "ignore" });
+  } else if (process.platform === "linux") {
+    systemctlUser(["disable", "--now", SYSTEMD_SERVICE_NAME]);
+  }
+  await killExistingDaemon();
+  return !(await daemonListening());
+}
+
+async function startDaemonService(): Promise<{ ok: boolean; message: string }> {
+  if (process.platform === "darwin") {
+    if (!(await Bun.file(LAUNCH_AGENT_PLIST).exists())) {
+      return { ok: false, message: "No launchd service registered — run `polaris install` first." };
+    }
+    Bun.spawnSync(["launchctl", "load", "-w", LAUNCH_AGENT_PLIST], { stdout: "ignore", stderr: "ignore" });
+  } else if (process.platform === "linux") {
+    if (!(await Bun.file(SYSTEMD_SERVICE_FILE).exists())) {
+      return { ok: false, message: "No systemd service registered — run `polaris install` first." };
+    }
+    systemctlUser(["daemon-reload"]);
+    systemctlUser(["enable", "--now", SYSTEMD_SERVICE_NAME]);
+  } else {
+    return { ok: false, message: "No managed service on this platform — run `polaris daemon` instead." };
+  }
+  for (let i = 0; i < 20; i++) {
+    if (await daemonListening()) return { ok: true, message: `Polaris daemon started (${daemonServiceLabel()}).` };
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const hint = process.platform === "linux"
+    ? `journalctl --user -u ${SYSTEMD_SERVICE_NAME} -n 20`
+    : "/tmp/polaris-daemon.log";
+  return { ok: false, message: `Service enabled but the daemon didn't answer within 10s. Check ${hint}.` };
 }
 
 function daemonServiceLabel(): string {
@@ -526,7 +584,7 @@ async function install(participantId?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -554,6 +612,14 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
+1. Call \`polaris_stop\`
+2. Report the result; note that events are not captured while stopped
+
+**\`/polaris start\`** — Start the local daemon again:
+1. Call \`polaris_start\`
+2. Report the result
 
 **\`/polaris disconnect\`** — Disconnect:
 1. Call \`polaris_disconnect\`
@@ -724,7 +790,7 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -752,6 +818,14 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
+1. Call \`polaris_stop\`
+2. Report the result; note that events are not captured while stopped
+
+**\`/polaris start\`** — Start the local daemon again:
+1. Call \`polaris_start\`
+2. Report the result
 
 **\`/polaris disconnect\`** — Disconnect:
 1. Call \`polaris_disconnect\`
@@ -1630,6 +1704,24 @@ switch (command) {
     await killExistingDaemon();
     await daemon();
     break;
+
+  case "stop": {
+    if (await stopDaemonService()) {
+      console.log("✓ Polaris daemon stopped. It stays off (including after reboot) until `polaris start`.");
+      console.log("  While stopped, Claude Code events are not captured.");
+    } else {
+      console.error("✗ Something is still listening on port 4322 — check `lsof -i :4322`.");
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "start": {
+    const result = await startDaemonService();
+    console.log(`${result.ok ? "✓" : "✗"} ${result.message}`);
+    if (!result.ok) process.exit(1);
+    break;
+  }
 
   case "status":
     await status();

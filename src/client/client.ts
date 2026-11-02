@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { POLARIS_DIR } from "../paths.js";
 import { DaemonClient } from "../core/daemon-client.js";
 
@@ -217,6 +218,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "polaris_update",
       description: "Update Polaris to the latest version. Runs npm install -g then polaris install to refresh hooks and the MCP server.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "polaris_stop",
+      description: "Stop the local Polaris daemon and keep it off (including after reboot) until polaris_start. While stopped, no Claude Code events are captured or synced.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
+      name: "polaris_start",
+      description: "Re-enable and start the local Polaris daemon service after polaris_stop.",
       inputSchema: {
         type: "object" as const,
         properties: {},
@@ -576,6 +593,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }
+  }
+
+  if (name === "polaris_stop" || name === "polaris_start") {
+    // Same logic as the CLI, from this installed version of the package
+    const cmd = name === "polaris_stop" ? "stop" : "start";
+    const r = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "cli", "cli.ts"), cmd], { stdout: "pipe", stderr: "pipe" });
+    const out = `${r.stdout.toString()}${r.stderr.toString()}`.trim();
+    return { content: [{ type: "text", text: out || `polaris ${cmd} exited with code ${r.exitCode}` }] };
   }
 
   if (name === "polaris_update") {
