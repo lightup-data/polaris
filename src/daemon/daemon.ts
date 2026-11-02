@@ -83,10 +83,14 @@ async function getTokenForProfile(profile: string): Promise<string | null> {
   if (process.env.POLARIS_AUTH_TOKEN !== undefined) {
     return process.env.POLARIS_AUTH_TOKEN || null;
   }
+  // Evict expired tokens from cache so a re-login is picked up immediately.
+  if (tokenCache.has(profile) && isTokenExpired(tokenCache.get(profile) ?? null)) {
+    tokenCache.delete(profile);
+  }
   if (tokenCache.has(profile)) return tokenCache.get(profile)!;
   const config = await loadConfig();
-  // Named profile
-  if (profile && config?.profiles[profile]?.token) {
+  // Named profile — skip if token is expired; fall through to active profile
+  if (profile && config?.profiles[profile]?.token && !isTokenExpired(config.profiles[profile].token)) {
     tokenCache.set(profile, config.profiles[profile].token);
     return config.profiles[profile].token;
   }
@@ -107,14 +111,19 @@ async function getTokenForProfile(profile: string): Promise<string | null> {
   }
 }
 
-function emailFromToken(token: string | null): string | null {
+function jwtPayload(token: string | null): Record<string, unknown> | null {
   if (!token) return null;
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.email ?? null;
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(atob(token.split(".")[1])); } catch { return null; }
+}
+
+function emailFromToken(token: string | null): string | null {
+  return (jwtPayload(token)?.email as string | undefined) ?? null;
+}
+
+function isTokenExpired(token: string | null): boolean {
+  const p = jwtPayload(token);
+  if (!p) return true;
+  return typeof p.exp === "number" && Date.now() / 1000 > p.exp;
 }
 
 async function authHeadersForProfile(profile: string): Promise<Record<string, string>> {
@@ -336,14 +345,19 @@ async function flushOutbox(): Promise<void> {
         `${serviceUrl}/projects/${entry.project}/sessions/${entry.session}/events`,
         { method: "POST", headers: await authHeadersForProfile(profile), body: JSON.stringify(entry.body) }
       );
-      if (res.ok || (res.status >= 400 && res.status < 500)) {
-        if (!res.ok) {
-          console.error(`polaris daemon: dropping outbox entry ${file} — upstream rejected it permanently (${res.status})`);
-        }
+      if (res.ok) {
+        pendingOutbox.delete(file);
+        await unlink(file).catch(() => {});
+      } else if (res.status === 401) {
+        // Auth failure — token may be stale; retry (getTokenForProfile will use fresh token next pass)
+        hadFailure = true;
+      } else if (res.status >= 400 && res.status < 500) {
+        // Other permanent client error (404, 409, etc.) — drop it
+        console.error(`polaris daemon: dropping outbox entry ${file} — upstream rejected it permanently (${res.status})`);
         pendingOutbox.delete(file);
         await unlink(file).catch(() => {});
       } else {
-        hadFailure = true; // 5xx — keep for the next pass
+        hadFailure = true; // 5xx or network — keep for the next pass
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
