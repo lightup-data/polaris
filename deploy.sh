@@ -8,17 +8,37 @@ DIR="${DEPLOY_DIR:-/opt/polaris}"
 # fast-forwards to an ancestor of HEAD, which is a no-op.
 REF="${DEPLOY_REF:-origin/master}"
 HEALTH_URL="${HEALTH_URL:-https://api.withpolaris.ai/projects}"
+# Images are built by CD (ghcr.io/lightup-data/polaris:<sha>); the server only pulls.
+# GHCR_TOKEN (CD passes its short-lived job token) logs the server in for the pull
+# and is logged out afterwards, so no registry credentials stay on the box.
+GHCR_TOKEN="${GHCR_TOKEN:-}"
 
 echo "Deploying $REF to $USER@$HOST:$DIR ..."
 
+if [ -n "$GHCR_TOKEN" ]; then
+  printf '%s' "$GHCR_TOKEN" | ssh "$USER@$HOST" "docker login ghcr.io -u github-actions --password-stdin >/dev/null"
+  trap 'ssh "$USER@$HOST" "docker logout ghcr.io >/dev/null" || true' EXIT
+fi
+
 ssh "$USER@$HOST" "
-  cd $DIR &&
-  git fetch -q origin &&
-  git merge -q --ff-only $REF &&
-  git log --oneline -1 &&
-  docker compose -f docker-compose.prod.yml build &&
-  docker compose -f docker-compose.prod.yml up -d --remove-orphans &&
-  docker compose -f docker-compose.prod.yml restart caddy &&
+  set -e
+  cd $DIR
+  git fetch -q origin
+  git merge -q --ff-only $REF
+  TAG=\$(git rev-parse HEAD)
+  git log --oneline -1
+  # Record the deployed tag in .env so manual docker compose commands use the same image
+  if grep -q '^POLARIS_IMAGE_TAG=' .env; then
+    sed -i \"s/^POLARIS_IMAGE_TAG=.*/POLARIS_IMAGE_TAG=\$TAG/\" .env
+  else
+    echo \"POLARIS_IMAGE_TAG=\$TAG\" >> .env
+  fi
+  docker compose -f docker-compose.prod.yml pull -q api web bridge
+  docker compose -f docker-compose.prod.yml up -d --remove-orphans
+  docker compose -f docker-compose.prod.yml restart caddy
+  # Keep the box clean: nothing is built here, so no image or build-cache leftovers
+  docker image prune -af >/dev/null
+  docker builder prune -af >/dev/null
   docker compose -f docker-compose.prod.yml ps
 "
 
