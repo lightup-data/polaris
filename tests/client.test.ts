@@ -121,14 +121,12 @@ describe("end-to-end: daemon + cloud service", () => {
       prompt: "from fxk",
     });
 
-    const fxmRes = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const fxmBody = await fxmRes.json();
+    const fxmBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(fxmBody).toHaveLength(1);
     expect(fxmBody[0].payload.prompt).toBe("from fxm");
     expect(fxmBody[0].sender).toBe("user:manu");
 
-    const fxkRes = await get(serviceUrl, "/projects/pj/sessions/fxk/messages");
-    const fxkBody = await fxkRes.json();
+    const fxkBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxk/messages`, 1);
     expect(fxkBody).toHaveLength(1);
     expect(fxkBody[0].payload.prompt).toBe("from fxk");
     expect(fxkBody[0].sender).toBe("user:krishna");
@@ -160,10 +158,7 @@ describe("capture.sh with daemon", () => {
     const exitCode = await proc.exited;
     expect(exitCode).toBe(0);
 
-    await new Promise((r) => setTimeout(r, 200));
-
-    const res = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const body = await res.json();
+    const body = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(body).toHaveLength(1);
     expect(body[0].payload.prompt).toBe("test from capture.sh");
   });

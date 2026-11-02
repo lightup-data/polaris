@@ -41,3 +41,29 @@ describe("polaris CLI defaults", () => {
     expect(r.out).toContain("Unknown command: instal");
   }, 30000);
 });
+
+describe("polaris accounts", () => {
+  test("lists every account on the machine with its login state, without the daemon", async () => {
+    const home = await mkdtemp(join(tmpdir(), "polaris-acct-"));
+    const jwt = (expOffsetSec: number) => `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + expOffsetSec })).toString("base64url")}.y`;
+    await Bun.write(join(home, ".polaris", "config.json"), JSON.stringify({
+      active: "work",
+      profiles: {
+        work: { email: "me@work.com", name: "Me", api: "https://api.example.com", token: jwt(10 * 86400) },
+        dev: { email: "me@home.com", name: "Me", api: "http://localhost:4321", token: jwt(-86400) },
+      },
+    }));
+    for (const cmd of ["accounts", "account", "profiles"]) {
+      const proc = Bun.spawn([process.execPath, CLI, cmd], {
+        env: { ...process.env, HOME: home, POLARIS_HOME: join(home, ".polaris") }, stdout: "pipe", stderr: "pipe",
+      });
+      const out = await new Response(proc.stdout).text();
+      expect(await proc.exited).toBe(0);
+      expect(out).toContain("Accounts on this machine (2)");
+      expect(out).toContain("me@work.com  ← default for new sessions");
+      expect(out).toContain("login valid, expires in 10d");
+      expect(out).toContain("login EXPIRED 24h ago — run: polaris login --local --profile dev");
+    }
+    await rm(home, { recursive: true, force: true });
+  }, 30000);
+});
