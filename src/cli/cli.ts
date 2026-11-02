@@ -1271,9 +1271,31 @@ async function recover(dryRun = false, debug = false) {
       }
 
       if (!sessionExistsUpstream) {
-        process.stdout.write(` not found\n`);
-        notFoundSessions++;
-        continue;
+        // Session doesn't exist upstream. Attempt to create it so we can recover events into it.
+        // A 200 means we created it fresh (empty, all local events will be replayed).
+        // A 409 means it already exists (race or stale detection) — proceed anyway.
+        const driver = (profileData as Profile).participant_id ?? "";
+        let created = false;
+        try {
+          const createRes = await fetch(`${apiUrl}/projects/${project}/sessions`, {
+            method: "POST",
+            headers: apiHeaders,
+            body: JSON.stringify({ name: session, driver }),
+          });
+          created = createRes.ok || createRes.status === 409;
+          if (debug && !created) {
+            const body = await createRes.text().catch(() => "(unreadable)");
+            process.stdout.write(`\n  DEBUG POST sessions → ${createRes.status} ${body.slice(0, 300)}\n`);
+          }
+        } catch { /* network error */ }
+
+        if (!created) {
+          process.stdout.write(` not found (project missing or auth error — skipped)\n`);
+          notFoundSessions++;
+          continue;
+        }
+        process.stdout.write(` recreated`);
+        // upstream stays empty — all local events will be replayed below
       }
 
       let sessionMissing = 0;

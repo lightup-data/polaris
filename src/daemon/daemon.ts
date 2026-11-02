@@ -449,13 +449,46 @@ async function loadPersistedSessions(): Promise<void> {
       });
     }
 
-    // Open one cloud WebSocket per (project, session) pair; alias entries share it
+    // Open one cloud WebSocket per (project, session) pair; alias entries share it.
+    // Before opening each WS, verify the session still exists on the server and
+    // recreate it if missing (handles server resets, DB migrations, or session GC
+    // that can delete session records without the daemon knowing).
     const primaryForPair = new Map<string, SessionMapping>();
+    let recreated = 0;
     for (const mapping of sessions.values()) {
       if (!mapping.project) continue;
       const key = `${mapping.project}/${mapping.session}`;
       if (!primaryForPair.has(key)) {
         primaryForPair.set(key, mapping);
+
+        // Verify session exists; recreate if the server has lost it
+        try {
+          const serviceUrl = getServiceUrlForProfile(mapping.profile);
+          const headers = await authHeadersForProfile(mapping.profile);
+          const checkRes = await fetch(
+            `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/sessions/${encodeURIComponent(mapping.session)}`,
+            { headers, signal: AbortSignal.timeout(5000) }
+          );
+          if (checkRes.status === 404) {
+            // Session is gone from the server — recreate it so events can be delivered
+            const createRes = await fetch(
+              `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/sessions`,
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ name: mapping.session, driver: mapping.user }),
+                signal: AbortSignal.timeout(5000),
+              }
+            );
+            if (createRes.ok || createRes.status === 409) {
+              recreated++;
+              console.error(`[daemon] Recreated missing session ${mapping.project}/${mapping.session} on server`);
+            } else {
+              console.error(`[daemon] Could not recreate ${mapping.project}/${mapping.session}: ${createRes.status}`);
+            }
+          }
+        } catch { /* best-effort — don't block startup if server is unreachable */ }
+
         connectCloudWs(mapping);
       } else {
         mapping.ws = primaryForPair.get(key)!.ws;
@@ -464,7 +497,8 @@ async function loadPersistedSessions(): Promise<void> {
 
     const count = Array.from(sessions.values()).filter((m) => m.project).length;
     if (count > 0) {
-      console.error(`polaris daemon: restored ${count} mapping(s) across ${primaryForPair.size} session(s)`);
+      const recreatedNote = recreated > 0 ? `, recreated ${recreated} on server` : "";
+      console.error(`polaris daemon: restored ${count} mapping(s) across ${primaryForPair.size} session(s)${recreatedNote}`);
     }
   } catch { /* no state file — fresh start */ }
 }
