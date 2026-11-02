@@ -108,6 +108,7 @@ const api = {
   pageRequests: 0,
   posts: [] as string[],
   renames: [] as unknown[],
+  missingSessions: [] as string[], // GET .../sessions/<name>/events → 404
 };
 const fake = Bun.serve({
   port: 0,
@@ -122,6 +123,7 @@ const fake = Bun.serve({
     if (path.endsWith("/messages")) return new Response("unpaginated read not allowed", { status: 500 });
     if (req.method === "GET" && path.endsWith("/events")) {
       if (!path.startsWith("/projects/real/")) return new Response("not found", { status: 404 });
+      if (api.missingSessions.some((n) => path.includes(`/sessions/${n}/`))) return new Response("Session not found", { status: 404 });
       if (api.messagesStatus !== 200) return new Response("bad gateway", { status: api.messagesStatus });
       const limit = Number(url.searchParams.get("limit"));
       if (!(limit >= 1 && limit <= 500)) return new Response("limit required (1-500)", { status: 400 });
@@ -179,9 +181,9 @@ describe("polaris recover: projects not on the server", () => {
   test("dry run lists only projects that exist upstream", async () => {
     Object.assign(api, { projectsStatus: 200, messagesStatus: 200, posts: [] });
     const { output } = await runRecover(mixedLog, { config, logDate: "2026-11-01", args: ["--dry-run"] });
-    expect(output).toContain("real / s1");
-    expect(output).not.toContain("ir-junk-1 /");
-    expect(output).toContain("Up to 2 event(s) would be restored.");
+    expect(output).toContain("real/s1");
+    expect(output).not.toContain("ir-junk-1/");
+    expect(output).toContain("2 event(s) missing upstream would be restored.");
     expect(api.posts).toHaveLength(0);
   }, 30000);
 
@@ -395,5 +397,50 @@ describe("polaris recover: renames", () => {
     expect(api.posts).toEqual(["/projects/real/sessions/s1/events", "/projects/real/sessions/s1/events"]);
     expect(output).toContain("Resolved 2 event(s) logged under since-renamed");
     expect(output).not.toContain("not on the server");
+  }, 30000);
+});
+
+describe("polaris recover: dry run and late renames", () => {
+  const line = (t: string, session: string, prompt: string) => JSON.stringify({
+    t, endpoint: "/events", project: "real", session, ccSessionId: "cc-d",
+    payload: { session_id: "cc-d", hook_event_name: "UserPromptSubmit", prompt },
+  });
+  const connect = (session: string) =>
+    JSON.stringify({ t: "2026-11-01T10:00:00.000Z", endpoint: "/connect", payload: { ccSessionId: "cc-d", project: "real", session, user: "user:t", profile: "t" } });
+
+  test("dry run reports only what is actually missing upstream, and posts nothing", async () => {
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0, renames: [], missingSessions: [],
+      upstream: [{ id: crypto.randomUUID(), timestamp: "2026-11-01T10:01:00.000Z", payload: { session_id: "cc-d", hook_event_name: "UserPromptSubmit", prompt: "a" } }],
+    });
+    const { output } = await runRecover([connect("s1"), line("2026-11-01T10:01:00.000Z", "s1", "a"), line("2026-11-01T10:02:00.000Z", "s1", "b")],
+      { config, logDate: "2026-11-01", args: ["--dry-run"] });
+    expect(output).toContain("1 missing (of 2 logged)");
+    expect(output).toContain("1 event(s) missing upstream would be restored.");
+    expect(api.posts).toHaveLength(0);
+  }, 30000);
+
+  test("events logged under an old session name after the rename follow it when the old name is gone", async () => {
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0, upstream: [],
+      renames: [{ kind: "session", project: "real", old_name: "s-old", new_name: "s1", renamed_at: "2026-11-01T09:00:00.000Z" }],
+      missingSessions: ["s-old"],
+    });
+    // Captured at 10:01, an hour after the rename, but still tagged with the old name
+    const { output } = await runRecover([connect("s-old"), line("2026-11-01T10:01:00.000Z", "s-old", "late")], { config, logDate: "2026-11-01" });
+    Object.assign(api, { renames: [], missingSessions: [] });
+    expect(api.posts).toEqual(["/projects/real/sessions/s1/events"]);
+    expect(output).not.toContain("not found");
+  }, 30000);
+
+  test("a reused old name (still exists upstream) keeps its post-rename events", async () => {
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0, upstream: [],
+      renames: [{ kind: "session", project: "real", old_name: "s-old", new_name: "s1", renamed_at: "2026-11-01T09:00:00.000Z" }],
+      missingSessions: [],
+    });
+    await runRecover([connect("s-old"), line("2026-11-01T10:01:00.000Z", "s-old", "new-life")], { config, logDate: "2026-11-01" });
+    Object.assign(api, { renames: [] });
+    expect(api.posts).toEqual(["/projects/real/sessions/s-old/events"]);
   }, 30000);
 });
