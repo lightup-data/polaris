@@ -13,7 +13,7 @@
 //   polaris login --token <token> — authenticate without a browser (SSH/headless)
 //   polaris token                 — print active token for copy-paste to another machine
 //   polaris use <email>           — switch active account (triggers login if not found)
-//   polaris profiles              — list accounts
+//   polaris accounts              — accounts logged in on this machine (aliases: account, profiles)
 //   polaris projects [email]      — list projects an account can see (default: active)
 //   polaris daemon                — start the local daemon
 //   polaris stop                  — stop the daemon and keep it off (survives reboot)
@@ -965,26 +965,68 @@ async function projects(account?: string) {
   }
 }
 
-async function profiles() {
+function tokenExpiresAt(token: string): number | null {
+  try {
+    const exp = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).exp;
+    return typeof exp === "number" ? exp * 1000 : null;
+  } catch { return null; }
+}
+
+function humanSpan(ms: number): string {
+  const m = Math.round(Math.abs(ms) / 60_000);
+  if (m < 60) return `${m}m`;
+  if (m < 48 * 60) return `${Math.round(m / 60)}h`;
+  return `${Math.round(m / 1440)}d`;
+}
+
+// Accounts logged in on this machine: login state, server, and which Claude sessions
+// the daemon has connected with each (best-effort: works with the daemon stopped).
+async function accounts() {
   const config = await loadConfig();
   const keys = Object.keys(config.profiles);
   if (keys.length === 0) {
-    console.log("No accounts configured. Run: polaris login");
+    console.log("No accounts on this machine. Run: polaris login");
     return;
   }
-  console.log("Accounts:\n");
+
+  const sessionsByProfile = new Map<string, Set<string>>();
+  let daemonUp = false;
+  try {
+    const secret = resolveDaemonSecret(config);
+    const res = await fetch("http://127.0.0.1:4322/status", {
+      headers: secret ? { "x-polaris-daemon-secret": secret } : {},
+      signal: AbortSignal.timeout(1500),
+    });
+    const data = await res.json() as { sessions?: Array<{ project: string; session: string; profile?: string }> };
+    daemonUp = res.ok;
+    for (const s of data.sessions ?? []) {
+      const k = s.profile || config.active;
+      if (!sessionsByProfile.has(k)) sessionsByProfile.set(k, new Set());
+      sessionsByProfile.get(k)!.add(`#${s.project}/${s.session}`);
+    }
+  } catch { /* daemon not running */ }
+
+  console.log(`Accounts on this machine (${keys.length}):\n`);
   for (const key of keys) {
     const p = config.profiles[key];
-    const active = key === config.active ? " (active)" : "";
-    // Use email as the primary label; show key only when it differs (legacy style)
-    const label = p.email || key;
-    const keyHint = p.email && key !== p.email ? ` [key: ${key}]` : "";
-    console.log(`  ${label}${active}${keyHint}`);
-    if (p.name) console.log(`    Name: ${p.name}`);
-    console.log(`    API:  ${p.api}`);
+    const exp = tokenExpiresAt(p.token);
+    const now = Date.now();
+    const login = exp === null ? "login status unknown"
+      : exp < now ? `login EXPIRED ${humanSpan(now - exp)} ago — run: polaris login${/localhost|127\.0\.0\.1/.test(p.api) ? " --local" : ""} --profile ${key}`
+      : exp - now < 3 * 86_400_000 ? `login valid, expires in ${humanSpan(exp - now)} (soon)`
+      : `login valid, expires in ${humanSpan(exp - now)}`;
+    console.log(`  ${p.email || key}${key === config.active ? "  ← default for new sessions" : ""}`);
+    console.log(`    profile: ${key}${p.name ? ` · ${p.name}` : ""}`);
+    console.log(`    ${login}`);
+    console.log(`    server:  ${p.api}`);
+    if (daemonUp) {
+      const s = [...(sessionsByProfile.get(key) ?? [])];
+      console.log(`    connected sessions: ${s.length ? s.join(", ") : "none"}`);
+    }
     console.log("");
   }
-  console.log(`Use \`polaris use <email>\` to switch accounts.`);
+  if (!daemonUp) console.log("(Daemon not running — connected sessions not shown.)");
+  console.log("Default for new sessions: `polaris use <email>`. Per Claude session: `/polaris account <email>`.");
 }
 
 // --- Daemon ---
@@ -1933,8 +1975,10 @@ switch (command) {
     await use(args[1]);
     break;
 
-  case "profiles":
-    await profiles();
+  case "accounts":
+  case "account":
+  case "profiles": // older name
+    await accounts();
     break;
 
   case "projects":
@@ -2247,7 +2291,7 @@ function printHelp(): void {
   console.log("  polaris login --token <token>  — authenticate without a browser (SSH/headless)");
   console.log("  polaris token                  — print token for copy-paste to another machine");
   console.log("  polaris use <email>            — switch active account (triggers login if needed)");
-  console.log("  polaris profiles               — list all accounts");
+  console.log("  polaris accounts               — accounts logged in on this machine, login status, sessions");
   console.log("  polaris projects [email]       — list projects an account can see");
   console.log("  polaris daemon                 — run the daemon in the foreground");
   console.log("  polaris stop | start           — stop the daemon (stays off) / start it again");
