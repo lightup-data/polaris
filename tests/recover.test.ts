@@ -107,6 +107,7 @@ const api = {
   upstream: [] as UpstreamEvent[], // newest-first, like the server
   pageRequests: 0,
   posts: [] as string[],
+  postedPayloads: [] as Array<Record<string, unknown>>,
   renames: [] as unknown[],
   missingSessions: [] as string[], // GET .../sessions/<name>/events → 404
 };
@@ -136,6 +137,7 @@ const fake = Bun.serve({
     }
     if (req.method === "POST" && path.endsWith("/events")) {
       api.posts.push(path);
+      api.postedPayloads.push(((await req.json()) as { payload: Record<string, unknown> }).payload);
       return Response.json({ id: crypto.randomUUID(), timestamp: new Date().toISOString() }, { status: 201 });
     }
     return new Response("not found", { status: 404 });
@@ -442,5 +444,35 @@ describe("polaris recover: dry run and late renames", () => {
     await runRecover([connect("s-old"), line("2026-11-01T10:01:00.000Z", "s-old", "new-life")], { config, logDate: "2026-11-01" });
     Object.assign(api, { renames: [] });
     expect(api.posts).toEqual(["/projects/real/sessions/s-old/events"]);
+  }, 30000);
+});
+
+describe("polaris recover: tool events match by tool_use_id", () => {
+  const tool = (t: string, tid: string, command: string) => JSON.stringify({
+    t, endpoint: "/events", project: "real", session: "s1", ccSessionId: "cc-t",
+    payload: { session_id: "cc-t", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, tool_use_id: tid },
+  });
+  const connect = JSON.stringify({ t: "2026-11-01T10:00:00.000Z", endpoint: "/connect", payload: { ccSessionId: "cc-t", project: "real", session: "s1", user: "user:t", profile: "t" } });
+  const up = (ts: string, payload: Record<string, unknown>): UpstreamEvent => ({ id: crypto.randomUUID(), timestamp: ts, payload });
+  const reset = (upstream: UpstreamEvent[]) =>
+    Object.assign(api, { projectsStatus: 200, messagesStatus: 200, posts: [], postedPayloads: [], pageRequests: 0, renames: [], missingSessions: [], upstream });
+
+  test("identical commands with different ids: exactly the one missing upstream is posted", async () => {
+    reset([up("2026-11-01T10:02:00.000Z", { session_id: "cc-t", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git status" }, tool_use_id: "toolu_A" })]);
+    // toolu_B is logged first: content matching would wrongly consume A's upstream copy for it
+    await runRecover([connect, tool("2026-11-01T10:01:00.000Z", "toolu_B", "git status"), tool("2026-11-01T10:02:00.000Z", "toolu_A", "git status")], { config, logDate: "2026-11-01" });
+    expect(api.postedPayloads.map((p) => p.tool_use_id)).toEqual(["toolu_B"]);
+  }, 30000);
+
+  test("an upstream copy with a different id never satisfies a local event by content", async () => {
+    reset([up("2026-11-01T10:01:00.000Z", { session_id: "cc-t", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" }, tool_use_id: "toolu_Y" })]);
+    await runRecover([connect, tool("2026-11-01T10:01:00.000Z", "toolu_X", "ls")], { config, logDate: "2026-11-01" });
+    expect(api.postedPayloads.map((p) => p.tool_use_id)).toEqual(["toolu_X"]);
+  }, 30000);
+
+  test("legacy upstream copies without tool_use_id still match by content", async () => {
+    reset([up("2026-11-01T10:01:00.000Z", { session_id: "cc-t", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "pwd" } })]);
+    await runRecover([connect, tool("2026-11-01T10:01:00.000Z", "toolu_L", "pwd")], { config, logDate: "2026-11-01" });
+    expect(api.posts).toHaveLength(0);
   }, 30000);
 });
