@@ -406,3 +406,14 @@ describe("renames", () => {
     ]);
   });
 });
+
+describe("server errors", () => {
+  test("a handler that throws (database error) answers 500 instead of escaping", async () => {
+    await post("/projects", { name: "pj" });
+    await post("/projects/pj/sessions", { name: "fxm" });
+    await sql`DROP TABLE events CASCADE`; // restored by resetTestData before the next test
+    const res = await fetch(`${base}/projects/pj/sessions/fxm/messages`);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Internal server error" });
+  });
+});
