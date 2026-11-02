@@ -2232,6 +2232,7 @@ function printHelp(): void {
   console.log("  polaris token                  — print token for copy-paste to another machine");
   console.log("  polaris use <email>            — switch active account (triggers login if needed)");
   console.log("  polaris profiles               — list all accounts");
+  console.log("  polaris projects [email]       — list projects an account can see");
   console.log("  polaris daemon                 — run the daemon in the foreground");
   console.log("  polaris stop | start           — stop the daemon (stays off) / start it again");
   console.log("  polaris status                 — show connection status");
