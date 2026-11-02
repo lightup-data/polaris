@@ -210,6 +210,24 @@ async function createSchemaTables(sql: Sql): Promise<void> {
     )
   `;
 
+  // Every project/session rename, so clients holding old names (local logs, recover
+  // watermarks) can resolve them to current ones. Never pruned.
+  await sql`
+    CREATE TABLE IF NOT EXISTS rename_history (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id TEXT NOT NULL,
+      project_id UUID NOT NULL,
+      kind TEXT NOT NULL,
+      old_name TEXT NOT NULL,
+      new_name TEXT NOT NULL,
+      renamed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_rename_history_org ON rename_history(org_id, renamed_at)
+  `;
+
   await runMigrations(sql);
 }
 
@@ -342,20 +360,58 @@ export async function createProject(sql: Sql, orgId: string, name: string): Prom
   return rowToProject(row);
 }
 
+// Events and annotations reference sessions by name, so a rename must carry them
+// along in the same transaction — otherwise the renamed session loses its history.
 export async function renameSession(sql: Sql, orgId: string, project: string, oldName: string, newName: string): Promise<void> {
-  const result = await sql`
-    UPDATE sessions SET name = ${newName}
-    WHERE org_id = ${orgId} AND name = ${oldName}
-      AND project_id = (SELECT id FROM projects WHERE org_id = ${orgId} AND name = ${project})
-  `;
-  if (result.count === 0) throw new Error(`Session not found: ${project}/${oldName}`);
+  await sql.begin(async (tx) => {
+    const [proj] = await tx<{ id: string }[]>`SELECT id FROM projects WHERE org_id = ${orgId} AND name = ${project}`;
+    if (!proj) throw new Error(`Session not found: ${project}/${oldName}`);
+    const result = await tx`
+      UPDATE sessions SET name = ${newName}
+      WHERE org_id = ${orgId} AND project_id = ${proj.id} AND name = ${oldName}
+    `;
+    if (result.count === 0) throw new Error(`Session not found: ${project}/${oldName}`);
+    await tx`UPDATE events SET session = ${newName} WHERE org_id = ${orgId} AND project_id = ${proj.id} AND session = ${oldName}`;
+    await tx`UPDATE annotations SET session = ${newName} WHERE org_id = ${orgId} AND project = ${project} AND session = ${oldName}`;
+    await tx`
+      INSERT INTO rename_history (org_id, project_id, kind, old_name, new_name)
+      VALUES (${orgId}, ${proj.id}, 'session', ${oldName}, ${newName})
+    `;
+  });
 }
 
 export async function renameProject(sql: Sql, orgId: string, oldName: string, newName: string): Promise<void> {
-  await sql`
-    UPDATE projects SET name = ${newName}, slack_channel_name = ${newName}
-    WHERE org_id = ${orgId} AND name = ${oldName}
+  await sql.begin(async (tx) => {
+    const [proj] = await tx<{ id: string }[]>`
+      UPDATE projects SET name = ${newName}, slack_channel_name = ${newName}
+      WHERE org_id = ${orgId} AND name = ${oldName}
+      RETURNING id
+    `;
+    if (!proj) return;
+    await tx`UPDATE annotations SET project = ${newName} WHERE org_id = ${orgId} AND project = ${oldName}`;
+    await tx`
+      INSERT INTO rename_history (org_id, project_id, kind, old_name, new_name)
+      VALUES (${orgId}, ${proj.id}, 'project', ${oldName}, ${newName})
+    `;
+  });
+}
+
+export interface RenameRecord {
+  kind: "project" | "session";
+  project: string; // the project's current name
+  old_name: string;
+  new_name: string;
+  renamed_at: string;
+}
+
+export async function getRenameHistory(sql: Sql, orgId: string): Promise<RenameRecord[]> {
+  const rows = await sql<RenameRecord[]>`
+    SELECT r.kind, p.name AS project, r.old_name, r.new_name, r.renamed_at
+    FROM rename_history r JOIN projects p ON p.id = r.project_id
+    WHERE r.org_id = ${orgId}
+    ORDER BY r.renamed_at ASC, r.id
   `;
+  return rows.map((r) => ({ ...r, renamed_at: new Date(r.renamed_at).toISOString() }));
 }
 
 export async function setProjectSlackChannel(sql: Sql, orgId: string, projectName: string, channelId: string, channelName?: string): Promise<void> {
