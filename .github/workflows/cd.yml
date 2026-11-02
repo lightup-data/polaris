@@ -28,6 +28,11 @@ on:
     types: [completed]
     branches: [master]
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Build and deploy even if no server-side files changed"
+        type: boolean
+        default: false
 
 # Never run two deploys at once; queue (don't cancel) an in-flight deploy.
 concurrency:
@@ -57,10 +62,49 @@ jobs:
             echo "DEPLOY_HOST / DEPLOY_SSH_KEY not configured — skipping deploy."
           fi
 
+  # Fast path: client-only merges (CLI, MCP client, daemon, hooks, docs) ship via npm
+  # alone. Diff the commit the server is actually running (the api container's image
+  # tag) against this one; build + deploy only when server-side paths changed
+  # (.github/server-paths.regex) or deps changed. Any doubt → deploy.
+  plan:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.plan.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf 'Host *\n  IdentityFile ~/.ssh/id_deploy\n  StrictHostKeyChecking accept-new\n' >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+      - name: Decide
+        id: plan
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "forced"; exit 0; fi
+          image=$(ssh "${DEPLOY_USER:-deploy}@$DEPLOY_HOST" "docker inspect -f '{{.Config.Image}}' polaris-api-1" 2>/dev/null || true)
+          deployed="${image##*:}"
+          echo "server is running: ${image:-unknown}"
+          echo "deploy=$(./scripts/needs-server-deploy.sh "$deployed" "$SHA")" >> "$GITHUB_OUTPUT"
+
   # The prod box never builds: CI builds the single app image (api/web/bridge all
   # use docker/Dockerfile) and pushes it to GHCR tagged with the commit SHA.
   build-image:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: plan
+    if: needs.plan.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,8 +130,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: [check-secrets, build-image]
-    if: needs.check-secrets.outputs.configured == 'true'
+    needs: [plan, build-image]
+    if: needs.plan.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

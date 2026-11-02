@@ -1,0 +1,6 @@
+^src/(service|web|slack|core)/
+^src/(types|paths|bridge-discover-org)\.ts$
+^docker/
+^docker-compose\.prod\.yml$
+^deploy\.sh$
+^bun\.lock$
