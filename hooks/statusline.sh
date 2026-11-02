@@ -124,8 +124,10 @@ if [ "$CONNECTED" = "true" ]; then
       RECENCY=" · just now"
     elif [ "$LAST_AGE" -lt 3600 ] 2>/dev/null; then
       RECENCY=" · $(( LAST_AGE / 60 ))m ago"
-    else
+    elif [ "$LAST_AGE" -lt 86400 ] 2>/dev/null; then
       RECENCY=" · $(( LAST_AGE / 3600 ))h ago"
+    else
+      RECENCY=" · $(( LAST_AGE / 86400 ))d ago"
     fi
   fi
 

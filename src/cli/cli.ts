@@ -1249,7 +1249,8 @@ async function recover(dryRun = false, debug = false) {
         continue;
       }
 
-      process.stdout.write(`  [${groupIdx}/${groups.size}] ${project}/${session}...`);
+      const linePrefix = `  [${groupIdx}/${groups.size}] ${project}/${session}`;
+      process.stdout.write(`${linePrefix}...`);
 
       const messagesUrl = `${apiUrl}/projects/${project}/sessions/${session}/messages`;
       let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
@@ -1281,6 +1282,7 @@ async function recover(dryRun = false, debug = false) {
         continue;
       }
 
+      const PROGRESS_BATCH = 50; // emit a progress tick every N posts
       let sessionMissing = 0;
       let sessionRestored = 0;
       const sessionErrors = new Map<string, number>(); // status -> count
@@ -1303,16 +1305,19 @@ async function recover(dryRun = false, debug = false) {
           const key = err instanceof Error ? err.message.split("\n")[0] : "network error";
           sessionErrors.set(key, (sessionErrors.get(key) ?? 0) + 1);
         }
+        if (sessionMissing % PROGRESS_BATCH === 0) {
+          process.stdout.write(`\r${linePrefix}... ${sessionMissing} posted`);
+        }
       }
       totalMissing += sessionMissing;
       totalRestored += sessionRestored;
       if (sessionErrors.size > 0) {
         const errSummary = [...sessionErrors.entries()].map(([k, n]) => `${n}×${k}`).join(", ");
-        process.stdout.write(` ${sessionRestored}/${sessionMissing} restored (${errSummary})\n`);
+        process.stdout.write(`\r${linePrefix}... ${sessionRestored}/${sessionMissing} restored (${errSummary})\n`);
       } else if (sessionMissing > 0) {
-        process.stdout.write(` ${sessionMissing} restored\n`);
+        process.stdout.write(`\r${linePrefix}... ${sessionMissing} restored\n`);
       } else {
-        process.stdout.write(` in sync\n`);
+        process.stdout.write(`\r${linePrefix}... in sync\n`);
       }
     }
 
