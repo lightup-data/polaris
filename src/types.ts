@@ -12,6 +12,9 @@ export const ParticipantId = z
 export type ParticipantId = z.infer<typeof ParticipantId>;
 
 // --- Hook Event Payloads ---
+// Every payload schema is .passthrough(): store the hook payload exactly as Claude
+// Code sent it. Default zod stripping silently dropped tool_response, tool_use_id
+// and any field added in newer Claude Code versions.
 
 const HookCommon = z.object({
   session_id: z.string(),
@@ -23,7 +26,7 @@ const HookCommon = z.object({
 export const UserPromptSubmitPayload = HookCommon.extend({
   hook_event_name: z.literal("UserPromptSubmit"),
   prompt: z.string(),
-});
+}).passthrough();
 
 export const StopPayload = HookCommon.extend({
   hook_event_name: z.literal("Stop"),
@@ -31,20 +34,23 @@ export const StopPayload = HookCommon.extend({
   last_assistant_message: z.string().optional(),
   stop_hook_active: z.boolean().optional(),
   raw_turn: z.array(z.unknown()).optional(),
-});
+}).passthrough();
 
 export const PreToolUsePayload = HookCommon.extend({
   hook_event_name: z.literal("PreToolUse"),
   tool_name: z.string(),
   tool_input: z.record(z.unknown()),
-});
+  tool_use_id: z.string().optional(),
+}).passthrough();
 
 export const PostToolUsePayload = HookCommon.extend({
   hook_event_name: z.literal("PostToolUse"),
   tool_name: z.string(),
   tool_input: z.record(z.unknown()),
-  tool_result: z.unknown(),
-});
+  tool_use_id: z.string().optional(),
+  tool_response: z.unknown(), // what Claude Code sends
+  tool_result: z.unknown(), // legacy name, kept for older clients/tests
+}).passthrough();
 
 export const HookPayload = z.discriminatedUnion("hook_event_name", [
   UserPromptSubmitPayload,

@@ -604,6 +604,7 @@ interface EventPayload {
   last_assistant_message?: string;
   tool_name?: string;
   tool_input?: unknown;
+  tool_response?: unknown;
   tool_result?: unknown;
   content?: string;
 }
@@ -646,7 +647,7 @@ function renderTranscriptItem(e: TranscriptEvent): string {
   }
 
   if (typeof p.tool_name === "string") {
-    const detail = p.hook_event_name === "PostToolUse" ? p.tool_result : p.tool_input;
+    const detail = p.hook_event_name === "PostToolUse" ? (p.tool_response ?? p.tool_result) : p.tool_input;
     let detailText = "";
     try { detailText = JSON.stringify(detail, null, 2) ?? ""; } catch { detailText = String(detail); }
     return `
