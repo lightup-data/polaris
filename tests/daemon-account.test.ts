@@ -37,7 +37,7 @@ afterAll(async () => {
 
 const post = (path: string, body: unknown) =>
   fetch(`${daemonUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-const status = async (id: string) => (await fetch(`${daemonUrl}/status/${id}`)).json() as Promise<{ connected: boolean; account: string | null }>;
+const status = async (id: string) => (await fetch(`${daemonUrl}/status/${id}`)).json() as Promise<{ connected: boolean; account: string | null; accountSource: string | null }>;
 
 describe("daemon /account", () => {
   test("binds the choice to the Claude session that called the tool, before any join", async () => {
@@ -48,7 +48,7 @@ describe("daemon /account", () => {
     const res = await post("/account", { ccSessionId: "mcp-A", account: "me@home.com" });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ profile: "personal", email: "me@home.com", paired: true });
-    expect(await status("hook-A")).toMatchObject({ connected: false, account: "me@home.com" });
+    expect(await status("hook-A")).toMatchObject({ connected: false, account: "me@home.com", accountSource: "selected" });
   });
 
   test("another session's choice doesn't leak into this one", async () => {
@@ -59,7 +59,8 @@ describe("daemon /account", () => {
     await post("/account", { ccSessionId: "mcp-B", account: "work" });
     expect((await status("hook-B")).account).toBe("me@work.com");
     expect((await status("hook-A")).account).toBe("me@home.com");
-    expect((await status("hook-C")).account).toBeNull();
+    // No choice for this session: the default account, labelled as such
+    expect(await status("hook-C")).toMatchObject({ account: "me@work.com", accountSource: "default" });
   });
 
   test("unknown account is rejected", async () => {

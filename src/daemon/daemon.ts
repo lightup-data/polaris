@@ -1570,8 +1570,22 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         const ccSessionId = pathname.slice("/status/".length);
         const mapping = sessions.get(ccSessionId);
         if (!mapping || !mapping.project) {
+          // Which account a join would use: this session's /polaris account choice, else
+          // the default (read fresh, so `polaris use` / `polaris login` show immediately)
           const selected = accountSelections.get(ccSessionId);
-          return json({ connected: false, account: selected?.email ?? null, serverDownFor: upstreamDownForSec() });
+          let account = selected?.email ?? null;
+          let accountSource: "selected" | "default" | null = selected ? "selected" : null;
+          if (!selected) {
+            try {
+              const cfg = JSON.parse(await readFile(join(POLARIS_DIR, "config.json"), "utf-8")) as PolarisConfig;
+              const active = cfg.active ? cfg.profiles?.[cfg.active] : undefined;
+              if (active) {
+                account = String(active.email ?? cfg.active);
+                accountSource = "default";
+              }
+            } catch { /* no config: no account */ }
+          }
+          return json({ connected: false, account, accountSource, serverDownFor: upstreamDownForSec() });
         }
         // Resolve slackChannel from any session in the same project
         let slackChannel = mapping.slackChannel ?? null;
