@@ -12,6 +12,7 @@
 //   polaris token                 — print active token for copy-paste to another machine
 //   polaris use <email>           — switch active account (triggers login if not found)
 //   polaris profiles              — list accounts
+//   polaris projects [email]      — list projects an account can see (default: active)
 //   polaris daemon                — start the local daemon
 //   polaris stop                  — stop the daemon and keep it off (survives reboot)
 //   polaris start                 — re-enable and start the managed daemon service
@@ -584,7 +585,7 @@ async function install(participantId?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start polaris_account polaris_projects
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -612,6 +613,15 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris projects [email]\`** — List the projects an account can see:
+1. Call \`polaris_projects\`, with \`account\` set if an email or profile name was given
+2. Report the list verbatim
+
+**\`/polaris account [email]\`** — Choose the account this session uses (do this before join when you have several accounts):
+1. With an email or profile name: call \`polaris_account\` with \`account\` set to it
+2. Without one: call \`polaris_account\` with no arguments to list accounts and show this session's choice
+3. Report the result verbatim
 
 **\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
 1. Call \`polaris_stop\`
@@ -790,7 +800,7 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start polaris_account polaris_projects
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -818,6 +828,15 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris projects [email]\`** — List the projects an account can see:
+1. Call \`polaris_projects\`, with \`account\` set if an email or profile name was given
+2. Report the list verbatim
+
+**\`/polaris account [email]\`** — Choose the account this session uses (do this before join when you have several accounts):
+1. With an email or profile name: call \`polaris_account\` with \`account\` set to it
+2. Without one: call \`polaris_account\` with no arguments to list accounts and show this session's choice
+3. Report the result verbatim
 
 **\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
 1. Call \`polaris_stop\`
@@ -917,6 +936,32 @@ async function use(arg: string) {
 }
 
 // --- Profiles ---
+
+// Projects an account can see. Talks to the API directly (works with the daemon stopped).
+async function projects(account?: string) {
+  const config = await loadConfig();
+  const key = account
+    ? Object.keys(config.profiles).find((k) => k === account || config.profiles[k].email === account)
+    : config.active;
+  const p = key ? config.profiles[key] : undefined;
+  if (!p) {
+    console.error(account ? `No account "${account}" — run \`polaris login\` to add it.` : "No active account — run `polaris login`.");
+    process.exit(1);
+  }
+  try {
+    const res = await fetch(`${p.api}/projects`, { headers: { Authorization: `Bearer ${p.token}` }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) {
+      console.error(`Couldn't list projects for ${p.email} (HTTP ${res.status})${res.status === 401 ? " — token expired? run `polaris login`" : ""}`);
+      process.exit(1);
+    }
+    const list = ((await res.json()) as Array<{ name: string }>).filter((x) => x.name !== "_system");
+    console.log(`Projects for ${p.email}${list.length ? ":" : ": (none)"}`);
+    for (const x of list) console.log(`  #${x.name}`);
+  } catch (err) {
+    console.error(`Couldn't reach ${p.api}: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
 
 async function profiles() {
   const config = await loadConfig();
@@ -1872,6 +1917,10 @@ switch (command) {
 
   case "profiles":
     await profiles();
+    break;
+
+  case "projects":
+    await projects(getFlag("account") ?? (args[1]?.startsWith("--") ? undefined : args[1]));
     break;
 
   case "daemon":
