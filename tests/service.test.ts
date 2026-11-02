@@ -146,6 +146,25 @@ describe("POST /projects/:proj/sessions/:sess/events", () => {
     expect(body.payload.prompt).toBe("build auth middleware");
   });
 
+  test("stores the full hook payload, including fields the schema doesn't list", async () => {
+    await post("/projects", { name: "pj" });
+    await post("/projects/pj/sessions", { name: "fxm", driver: "user:manu" });
+    const payload = {
+      hook_event_name: "PostToolUse",
+      session_id: "s1",
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+      tool_use_id: "toolu_123",
+      tool_response: { stdout: "a\nb", stderr: "", interrupted: false },
+      duration_ms: 42,
+      some_future_field: { nested: [1, 2] },
+    };
+    const res = await post("/projects/pj/sessions/fxm/events", { sender: "agent:claude", payload });
+    expect(res.status).toBe(201);
+    const stored = (await (await fetch(`${base}/projects/pj/sessions/fxm/messages`)).json()) as Array<{ payload: unknown }>;
+    expect(stored[0].payload).toEqual(payload);
+  });
+
   test("400 on invalid payload", async () => {
     await post("/projects", { name: "pj" });
     await post("/projects/pj/sessions", { name: "fxm" });
