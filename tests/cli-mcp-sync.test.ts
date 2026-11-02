@@ -17,6 +17,7 @@ import { join } from "node:path";
 // Update this table when you intentionally add a one-sided command.
 const MCP_ONLY = new Set([
   "polaris_standby",   // agent-only blocking long-poll — nonsensical in a CLI
+  "polaris_account",   // per-Claude-session account choice; the CLI has no session (see `polaris use`)
 ]);
 
 const CLI_ONLY = new Set([

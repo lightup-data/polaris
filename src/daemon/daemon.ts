@@ -443,6 +443,50 @@ async function scanOutbox(): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+// --- Per-session account selection (/polaris account) ---
+// The MCP server doesn't know Claude Code's session id, but Claude Code sends the
+// daemon a PreToolUse hook (carrying that id and the tool input) just before it
+// calls polaris_account. Pairing the two binds the selection to the exact Claude
+// session, so the status line can show the account before any join.
+
+interface PolarisToolCall { ccSessionId: string; tool: string; input: Record<string, unknown>; at: number }
+const recentPolarisCalls: PolarisToolCall[] = [];
+const PAIRING_WINDOW_MS = 30_000;
+
+// key: CC hook session id (or MCP id until paired) → selected profile
+const accountSelections = new Map<string, { profile: string; email: string }>();
+
+function notePolarisToolCall(body: Record<string, unknown>): void {
+  const tool = typeof body.tool_name === "string" ? body.tool_name : "";
+  if (body.hook_event_name !== "PreToolUse" || !/polaris_account$/.test(tool)) return;
+  const now = Date.now();
+  while (recentPolarisCalls.length && now - recentPolarisCalls[0].at > PAIRING_WINDOW_MS) recentPolarisCalls.shift();
+  recentPolarisCalls.push({ ccSessionId: String(body.session_id), tool, input: (body.tool_input as Record<string, unknown>) ?? {}, at: now });
+}
+
+// Most recent unpaired polaris_account call asking for this account
+function pairAccountCall(account: string): string | null {
+  for (let i = recentPolarisCalls.length - 1; i >= 0; i--) {
+    const c = recentPolarisCalls[i];
+    if (Date.now() - c.at <= PAIRING_WINDOW_MS && c.input.account === account) {
+      recentPolarisCalls.splice(i, 1);
+      return c.ccSessionId;
+    }
+  }
+  return null;
+}
+
+// Fresh read (not the startup cache) so accounts added by `polaris login` are visible
+async function resolveProfile(account: string): Promise<{ profile: string; email: string } | null> {
+  try {
+    const cfg = JSON.parse(await readFile(join(POLARIS_DIR, "config.json"), "utf-8")) as PolarisConfig;
+    for (const [key, p] of Object.entries(cfg.profiles ?? {})) {
+      if (key === account || p.email === account) return { profile: key, email: String(p.email ?? key) };
+    }
+  } catch { /* no config */ }
+  return null;
+}
+
 // --- Scheduled reconciliation ---
 // Periodically runs `polaris recover --reconcile` (watermark mode) so holes from
 // outages, dropped events or old bugs are filled without anyone running recover.
@@ -1149,6 +1193,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const body = (await req.json()) as { session_id?: string; [key: string]: unknown };
           const ccSessionId = body.session_id;
           if (!ccSessionId) return error("session_id required in hook payload", 400);
+          // Before routing: works for sessions that haven't joined anything yet
+          notePolarisToolCall(body);
 
           // Session routing (deterministic, in priority order):
           // 1. Exact match: session_id is a known mapping (registered via
@@ -1311,12 +1357,30 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         }
       }
 
+      // POST /account — select the account a session will use (before or without join)
+      if (method === "POST" && pathname === "/account") {
+        let body: { ccSessionId?: string; account?: string };
+        try { body = await req.json(); } catch { return error("Invalid JSON", 400); }
+        if (!body.ccSessionId || !body.account) return error("ccSessionId and account required", 400);
+        const resolved = await resolveProfile(body.account);
+        if (!resolved) return error(`No account "${body.account}" — run \`polaris login\` to add it`, 404);
+        const existing = sessions.get(body.ccSessionId);
+        if (existing?.project && existing.profile !== resolved.profile) {
+          return error(`Connected to #${existing.project}/${existing.session} on another account — disconnect first`, 409);
+        }
+        accountSelections.set(body.ccSessionId, resolved);
+        const hookId = pairAccountCall(body.account);
+        if (hookId) accountSelections.set(hookId, resolved);
+        return json({ ...resolved, paired: hookId !== null });
+      }
+
       // GET /status/:ccSessionId — status line queries this
       if (method === "GET" && pathname.startsWith("/status/")) {
         const ccSessionId = pathname.slice("/status/".length);
         const mapping = sessions.get(ccSessionId);
         if (!mapping || !mapping.project) {
-          return json({ connected: false, serverDownFor: upstreamDownForSec() });
+          const selected = accountSelections.get(ccSessionId);
+          return json({ connected: false, account: selected?.email ?? null, serverDownFor: upstreamDownForSec() });
         }
         // Resolve slackChannel from any session in the same project
         let slackChannel = mapping.slackChannel ?? null;

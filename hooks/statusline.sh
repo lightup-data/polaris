@@ -168,5 +168,9 @@ if [ "$CONNECTED" = "true" ]; then
   fi
   printf "${SERVER_WARN}polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${DRIFT_TAG}${VERSION_TAG}${TOKEN_WARN}\n"
 else
-  printf "${SERVER_WARN}polaris: not connected${VERSION_TAG}${TOKEN_WARN}\n"
+  # Account chosen with /polaris account before joining
+  PENDING_ACCOUNT=$(echo "$STATUS" | jq -r '.account // empty' 2>/dev/null)
+  PENDING_TAG=""
+  [ -n "$PENDING_ACCOUNT" ] && PENDING_TAG=" [${PENDING_ACCOUNT}]"
+  printf "${SERVER_WARN}polaris: not connected${PENDING_TAG}${VERSION_TAG}${TOKEN_WARN}\n"
 fi

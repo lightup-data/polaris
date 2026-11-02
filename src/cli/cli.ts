@@ -584,7 +584,7 @@ async function install(participantId?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start polaris_account
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -612,6 +612,11 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris account [email]\`** — Choose the account this session uses (do this before join when you have several accounts):
+1. With an email or profile name: call \`polaris_account\` with \`account\` set to it
+2. Without one: call \`polaris_account\` with no arguments to list accounts and show this session's choice
+3. Report the result verbatim
 
 **\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
 1. Call \`polaris_stop\`
@@ -790,7 +795,7 @@ async function login(appUrl: string, profileName?: string, loginHint?: string) {
   const skillContent = `---
 name: polaris
 description: Connect to a Polaris multiplayer collaboration session
-allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start
+allowed-tools: polaris_connect polaris_disconnect polaris_status polaris_reply polaris_context polaris_rename polaris_rename_session polaris_update polaris_stop polaris_start polaris_account
 argument-hint: [join #channel [session-name] | rename <new-name> | rename-session <name> | disconnect | update | (no args for status)]
 ---
 
@@ -818,6 +823,11 @@ Based on the arguments provided, do ONE of the following:
 **\`/polaris update\`** — Update Polaris to the latest version:
 1. Call \`polaris_update\`
 2. Report what changed and remind the user to restart Claude Code if the MCP server was updated
+
+**\`/polaris account [email]\`** — Choose the account this session uses (do this before join when you have several accounts):
+1. With an email or profile name: call \`polaris_account\` with \`account\` set to it
+2. Without one: call \`polaris_account\` with no arguments to list accounts and show this session's choice
+3. Report the result verbatim
 
 **\`/polaris stop\`** — Stop the local daemon and keep it off until started again:
 1. Call \`polaris_stop\`

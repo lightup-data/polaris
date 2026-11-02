@@ -53,7 +53,7 @@ function sessionStatePath(): string {
 async function saveSessionState(project: string, session: string, user: string, profile: string): Promise<void> {
   try {
     await mkdir(`${POLARIS_DIR}/sessions`, { recursive: true });
-    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd(), ccSessionId: CC_SESSION_ID }));
+    await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, account: selectedAccount, cwd: process.cwd(), ccSessionId: CC_SESSION_ID }));
   } catch { /* best-effort */ }
 }
 
@@ -86,6 +86,16 @@ let currentProject = "";
 let currentSession = "";
 let currentUser = "";
 let currentProfile = "";
+// Account chosen for this session via /polaris account (profile key); "" = use the active one
+let selectedAccount = "";
+
+async function loadProfiles(): Promise<Record<string, { email?: string }>> {
+  try {
+    return (JSON.parse(await readFile(`${POLARIS_DIR}/config.json`, "utf-8")).profiles ?? {}) as Record<string, { email?: string }>;
+  } catch {
+    return {};
+  }
+}
 
 // --- MCP Server ---
 
@@ -216,6 +226,16 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "polaris_account",
+      description: "Choose which Polaris account this Claude session uses (before or instead of joining). Without an account, lists accounts and shows this session's choice. Can't change while connected — disconnect first.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          account: { type: "string", description: "Account email or profile name. Omit to list accounts." },
+        },
+      },
+    },
+    {
       name: "polaris_update",
       description: "Update Polaris to the latest version. Runs npm install -g then polaris install to refresh hooks and the MCP server.",
       inputSchema: {
@@ -312,7 +332,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     const project = channel.replace(/^#/, ""); // strip leading # if present
-    const activeProfile = await loadActiveProfile();
+    // This session's /polaris account choice wins; otherwise the globally active account
+    const activeProfile = selectedAccount || await loadActiveProfile();
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
@@ -341,7 +362,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         currentUser = user;
         currentProfile = activeProfile;
         await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
-        let msg = `Connected to #${currentProject}/${currentSession} as ${user}.`;
+        const profiles = await loadProfiles();
+        const email = profiles[activeProfile]?.email ?? activeProfile;
+        let msg = `Connected to #${currentProject}/${currentSession} as ${user} — account: ${email}.`;
+        if (!selectedAccount && Object.keys(profiles).length > 1) {
+          msg += `\n(Used the active account; run /polaris account to choose one for this session.)`;
+        }
         if (body.gap && body.gap.events > 0) {
           msg += `\n${body.gap.events} events since ${body.gap.since} not delivered — re-sending now.`;
         }
@@ -595,6 +621,31 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
+  if (name === "polaris_account") {
+    const { account } = (args ?? {}) as { account?: string };
+    const profiles = await loadProfiles();
+    const active = await loadActiveProfile();
+    const inUse = currentProject ? currentProfile : (selectedAccount || active);
+    if (!account) {
+      const lines = Object.entries(profiles).map(([key, p]) => {
+        const tags = [key === inUse ? "this session" : "", key === active ? "active default" : ""].filter(Boolean);
+        return `  ${p.email ?? key}${key !== p.email ? ` (${key})` : ""}${tags.length ? `  ← ${tags.join(", ")}` : ""}`;
+      });
+      const how = selectedAccount ? "chosen with /polaris account" : currentProject ? "used at join" : "not chosen yet — the active default will be used";
+      return { content: [{ type: "text", text: `Accounts:\n${lines.join("\n") || "  (none — run `polaris login`)"}\n\nThis session: ${profiles[inUse]?.email ?? inUse} (${how}).` }] };
+    }
+    try {
+      const res = await daemonPost("/account", { ccSessionId: CC_SESSION_ID, account });
+      const body = await res.json() as { profile?: string; email?: string; error?: string };
+      if (!res.ok || !body.profile) return { content: [{ type: "text", text: body.error ?? `Couldn't select account (HTTP ${res.status})` }] };
+      selectedAccount = body.profile;
+      await saveSessionState(currentProject, currentSession, currentUser, currentProfile);
+      return { content: [{ type: "text", text: `This session will use ${body.email}. Run /polaris join #project to connect with it.` }] };
+    } catch {
+      return { content: [{ type: "text", text: "Failed to reach the Polaris daemon — is it running? (`polaris start`)" }] };
+    }
+  }
+
   if (name === "polaris_stop" || name === "polaris_start") {
     // Same logic as the CLI, from this installed version of the package
     const cmd = name === "polaris_stop" ? "stop" : "start";
@@ -700,6 +751,10 @@ async function main() {
   } catch {
     console.error("Warning: Polaris daemon not reachable. Start it with `bun run src/daemon/daemon.ts`.");
   }
+
+  try {
+    selectedAccount = (JSON.parse(await readFile(sessionStatePath(), "utf-8")).account as string) ?? "";
+  } catch { /* no saved state */ }
 
   // Auto-reconnect if a previous session was active in this workspace
   const saved = await loadSessionState();
