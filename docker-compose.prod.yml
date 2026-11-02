@@ -21,6 +21,7 @@ services:
     restart: unless-stopped
     command: ["bun", "run", "src/service/server.ts"]
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgres://polaris:${POSTGRES_PASSWORD}@postgres:5432/polaris
       POLARIS_JWT_SECRET: ${POLARIS_JWT_SECRET}
       WEB_HOST: web
