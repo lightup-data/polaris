@@ -25,6 +25,7 @@ try {
       method: "POST",
       headers,
       body: JSON.stringify(input),
+      signal: AbortSignal.timeout(3000),
     }).catch(() => {});
     process.exit(0);
   }
@@ -111,6 +112,7 @@ try {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(3000),
   }).catch(() => null);
 
   // If the POST failed (e.g., Unicode issue in raw_turn), retry without it
@@ -120,6 +122,7 @@ try {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3000),
     }).catch(() => {});
   }
 } catch {

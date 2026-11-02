@@ -5,8 +5,8 @@ import type { Sql } from "../src/service/db";
 import { resetTestData } from "./helpers";
 import { rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { POLARIS_DIR } from "../src/paths";
 
 // ---------------------------------------------------------------------------
 // Inject message recovery tests
@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 // ---------------------------------------------------------------------------
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris_test";
-const SESSIONS_DIR = join(homedir(), ".polaris", "sessions");
+const SESSIONS_DIR = join(POLARIS_DIR, "sessions");
 
 let sql: Sql;
 let serviceUrl: string;

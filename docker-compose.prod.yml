@@ -20,6 +20,9 @@ services:
       dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["bun", "run", "src/service/server.ts"]
+    # Contain runaway queries: OOM kills only this container instead of starving
+    # the host (no swap), which previously made SSH and every service unresponsive.
+    mem_limit: 2g
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://polaris:${POSTGRES_PASSWORD}@postgres:5432/polaris

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:tes
 import { startDaemon } from "../src/daemon/daemon";
 import { startServer } from "../src/service/server";
 import type { Sql } from "../src/service/db";
-import { resetTestData } from "./helpers";
+import { resetTestData, waitForMessages } from "./helpers";
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris_test";
 
@@ -152,8 +152,7 @@ describe("daemon /events (hook relay)", () => {
     expect(res.status).toBe(200);
 
     // Verify event reached cloud
-    const messages = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const body = await messages.json();
+    const body = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(body).toHaveLength(1);
     expect(body[0].payload.prompt).toBe("build auth middleware");
   });

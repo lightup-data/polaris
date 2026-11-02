@@ -5,8 +5,8 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { POLARIS_DIR } from "../paths.js";
 import { DaemonClient } from "../core/daemon-client.js";
 
 // --- Configuration ---
@@ -46,12 +46,12 @@ function sessionStatePath(): string {
   // project. Previously keyed by cwd hash, which caused unrelated sessions to
   // silently inherit another session's project connection (#154, #153).
   const hash = createHash("sha256").update(CC_SESSION_ID).digest("hex").slice(0, 16);
-  return `${homedir()}/.polaris/sessions/${hash}.json`;
+  return `${POLARIS_DIR}/sessions/${hash}.json`;
 }
 
 async function saveSessionState(project: string, session: string, user: string, profile: string): Promise<void> {
   try {
-    await mkdir(`${homedir()}/.polaris/sessions`, { recursive: true });
+    await mkdir(`${POLARIS_DIR}/sessions`, { recursive: true });
     await writeFile(sessionStatePath(), JSON.stringify({ project, session, user, profile, cwd: process.cwd(), ccSessionId: CC_SESSION_ID }));
   } catch { /* best-effort */ }
 }
@@ -72,7 +72,7 @@ async function loadSessionState(): Promise<{ project: string; session: string; u
 
 async function loadActiveProfile(): Promise<string> {
   try {
-    const data = JSON.parse(await readFile(`${homedir()}/.polaris/config.json`, "utf-8"));
+    const data = JSON.parse(await readFile(`${POLARIS_DIR}/config.json`, "utf-8"));
     return data.active ?? "";
   } catch {
     return "";
@@ -579,7 +579,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === "polaris_update") {
-    const installedPkgPath = `${homedir()}/.polaris/mcp/node_modules/@lightupai/polaris/package.json`;
+    const installedPkgPath = `${POLARIS_DIR}/mcp/node_modules/@lightupai/polaris/package.json`;
     let currentVersion = "";
     try {
       const pkg = JSON.parse(await readFile(installedPkgPath, "utf-8")) as { version: string };
@@ -602,7 +602,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     // Update the copy that's actually in use: ~/.polaris/mcp (no sudo required).
     // This is the same location the version was read from, and where the daemon
     // and MCP server binaries are resolved by run-daemon.sh and claude mcp add.
-    const mcpDir = `${homedir()}/.polaris/mcp`;
+    const mcpDir = `${POLARIS_DIR}/mcp`;
     const npmResult = Bun.spawnSync(
       ["npm", "install", "--prefix", mcpDir, `@lightupai/polaris@${latestVersion}`],
       { stdout: "pipe", stderr: "pipe" }
@@ -628,7 +628,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === "polaris_profiles") {
     try {
-      const config = JSON.parse(await readFile(`${homedir()}/.polaris/config.json`, "utf-8")) as { active: string; profiles: Record<string, { email: string; name: string; api: string }> };
+      const config = JSON.parse(await readFile(`${POLARIS_DIR}/config.json`, "utf-8")) as { active: string; profiles: Record<string, { email: string; name: string; api: string }> };
       const keys = Object.keys(config.profiles);
       if (keys.length === 0) return { content: [{ type: "text", text: "No accounts configured. Run: polaris login" }] };
       const lines = keys.map((k) => {

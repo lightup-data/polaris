@@ -206,13 +206,7 @@ async function authOrgId(req: Request, defaultOrgId: string): Promise<{ orgId: s
   if (auth?.startsWith("Bearer ")) {
     const token = auth.slice(7);
     const payload = await verifyToken(token);
-    if (payload) {
-      console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → token ok (org=${payload.org_id})`);
-      return { orgId: payload.org_id, participantId: payload.participant_id };
-    }
-    console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → token FAILED (fallback org=${defaultOrgId})`);
-  } else {
-    console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → no bearer token (fallback org=${defaultOrgId})`);
+    if (payload) return { orgId: payload.org_id, participantId: payload.participant_id };
   }
   // No/invalid token: fall back to the default org outside production
   if (process.env.NODE_ENV !== "production") {
@@ -446,7 +440,10 @@ export async function startServer(opts: {
         if (!project) return error("Project not found", 404);
         const since = url.searchParams.get("since");
         const events = since
-          ? await getEventsSince(sql, orgId, params.proj, since)
+          ? await getEventsSince(sql, orgId, params.proj, since, {
+              session: url.searchParams.get("session") ?? undefined,
+              source: url.searchParams.get("source") ?? undefined,
+            })
           : await getProjectEvents(sql, orgId, params.proj);
         return json(events);
       }
