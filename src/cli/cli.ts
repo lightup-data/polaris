@@ -1115,8 +1115,13 @@ async function recover(dryRun = false, debug = false) {
         if (entry.endpoint === "/connect") {
           const c = payload as { ccSessionId?: string; project?: string; session?: string; user?: string; agent?: string; profile?: string };
           if (!c.ccSessionId || !c.project || !c.user) continue;
-          // profile in /connect body is the profile key (email / active name)
-          const profileKey = c.profile && allProfiles[c.profile] ? c.profile : activeKey;
+          // profile in /connect body is the profile key (email / active name).
+          // Skip profiles with expired tokens — fall back to the active profile so
+          // recover still works even when the session's original profile is stale.
+          const profileKey =
+            c.profile && allProfiles[c.profile] && !isTokenExpired(allProfiles[c.profile].token)
+              ? c.profile
+              : activeKey;
           if (c.session) {
             // Explicit session name -- full route learned immediately
             addRoute(c.ccSessionId, {
