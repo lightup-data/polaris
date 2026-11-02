@@ -1091,7 +1091,14 @@ async function recover(dryRun = false) {
     let scanned = 0;
     let unroutable = 0;
 
-    for (const file of files) {
+    if (!dryRun) {
+      console.log(`Scanning ${files.length} log file(s) (from ${RECOVER_CUTOFF})...`);
+    }
+
+    for (const [fileIdx, file] of files.entries()) {
+      if (!dryRun) {
+        process.stdout.write(`  [${fileIdx + 1}/${files.length}] ${file}\n`);
+      }
       let text: string;
       try {
         text = await readFile(join(logDir, file), "utf-8");
@@ -1184,6 +1191,7 @@ async function recover(dryRun = false) {
 
     let totalMissing = 0;
     let totalRestored = 0;
+    let notFoundSessions = 0;
 
     const hr = "─".repeat(45);
 
@@ -1191,9 +1199,13 @@ async function recover(dryRun = false) {
       console.log(`Polaris Recover (dry run)`);
       console.log(hr);
       console.log(`Scanning ${files.length} log file(s)... ${scanned} event(s) across ${groups.size} session(s)\n`);
+    } else {
+      console.log(`\nFound ${scanned} event(s) across ${groups.size} session(s). Checking upstream...`);
     }
 
+    let groupIdx = 0;
     for (const group of groups.values()) {
+      groupIdx++;
       const { project, session, profileKey } = group[0];
       const profileData = allProfiles[profileKey] ?? activeProfile;
       if (!profileData) {
@@ -1231,11 +1243,26 @@ async function recover(dryRun = false) {
         continue;
       }
 
+      process.stdout.write(`  [${groupIdx}/${groups.size}] ${project}/${session}...`);
+
       let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
+      let sessionExistsUpstream = true;
       try {
         const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/messages`, { headers: apiHeaders });
-        if (res.ok) upstream = (await res.json()) as typeof upstream;
-      } catch { /* treat as empty — will re-POST everything */ }
+        if (res.ok) {
+          upstream = (await res.json()) as typeof upstream;
+        } else if (res.status === 404) {
+          // Session doesn't exist upstream — test artifact or deleted session. Skip quietly.
+          sessionExistsUpstream = false;
+        }
+        // Other HTTP errors: proceed with empty upstream and try to re-POST
+      } catch { /* network error: proceed with empty upstream */ }
+
+      if (!sessionExistsUpstream) {
+        process.stdout.write(` not found\n`);
+        notFoundSessions++;
+        continue;
+      }
 
       let sessionMissing = 0;
       let sessionRestored = 0;
@@ -1263,8 +1290,12 @@ async function recover(dryRun = false) {
       totalMissing += sessionMissing;
       totalRestored += sessionRestored;
       if (sessionErrors.size > 0) {
-        const summary = [...sessionErrors.entries()].map(([k, n]) => `${n}×${k}`).join(", ");
-        console.log(`  ⚠  ${project}/${session}: ${sessionMissing - sessionRestored} failed (${summary})`);
+        const errSummary = [...sessionErrors.entries()].map(([k, n]) => `${n}×${k}`).join(", ");
+        process.stdout.write(` ${sessionRestored}/${sessionMissing} restored (${errSummary})\n`);
+      } else if (sessionMissing > 0) {
+        process.stdout.write(` ${sessionMissing} restored\n`);
+      } else {
+        process.stdout.write(` in sync\n`);
       }
     }
 
@@ -1275,7 +1306,8 @@ async function recover(dryRun = false) {
       if (unroutable > 0) console.log(`${unroutable} event(s) had no session match and will be skipped.`);
       console.log(`\nRun \`polaris recover\` to restore.`);
     } else {
-      console.log(`Recover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
+      console.log(`\nRecover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
+      if (notFoundSessions > 0) console.log(`${notFoundSessions} session(s) not found upstream (test artifacts or deleted sessions — skipped).`);
       if (unroutable > 0) console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
       if (totalMissing > totalRestored) console.log(`${totalMissing - totalRestored} event(s) could not be restored (API unreachable or rejected).`);
     }
