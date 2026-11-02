@@ -443,6 +443,36 @@ async function scanOutbox(): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+// --- Scheduled reconciliation ---
+// Periodically runs `polaris recover --reconcile` (watermark mode) so holes from
+// outages, dropped events or old bugs are filled without anyone running recover.
+// Jittered so a fleet of daemons never hits the API in lockstep.
+
+const RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleReconcile(baseMs: number): void {
+  const delay = baseMs * (0.75 + Math.random() * 0.5);
+  reconcileTimer = setTimeout(() => void runReconcile(), delay);
+  (reconcileTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+async function runReconcile(): Promise<void> {
+  // Known outage: nothing can be checked; try again sooner than a full interval
+  if (upstreamDownSince !== null) return scheduleReconcile(30 * 60_000);
+  try {
+    const cli = join(import.meta.dir, "..", "cli", "cli.ts");
+    const proc = Bun.spawn([process.execPath, cli, "recover", "--reconcile"], { stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const summary = `${out}${err}`.replace(/\r[^\n]*(?=\r)/g, "").trim();
+    await ensureLogDir();
+    await appendFile(join(LOG_DIR, "reconcile.log"), `--- ${new Date().toISOString()} exit=${code}\n${summary}\n`);
+  } catch (e) {
+    console.error(`polaris daemon: reconcile failed to run: ${(e as Error).message}`);
+  }
+  scheduleReconcile(RECONCILE_INTERVAL_MS);
+}
+
 // --- Background relay ---
 // Hook events are relayed off the request path, serialized per CC session so
 // upstream order matches capture order. Failures land in the outbox.
@@ -1648,6 +1678,8 @@ if (import.meta.main) {
   await loadPersistedSessions();
   // Replay any events left in the outbox by a previous daemon run
   await scanOutbox();
+  // First reconciliation pass 5–15 min after start (lets the outbox drain first)
+  scheduleReconcile(10 * 60_000);
   const { server } = startDaemon();
   console.error(`Polaris daemon listening on http://127.0.0.1:${server.port}`);
   console.error(`  API endpoint: ${getServiceUrl()}`);
