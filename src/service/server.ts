@@ -206,7 +206,13 @@ async function authOrgId(req: Request, defaultOrgId: string): Promise<{ orgId: s
   if (auth?.startsWith("Bearer ")) {
     const token = auth.slice(7);
     const payload = await verifyToken(token);
-    if (payload) return { orgId: payload.org_id, participantId: payload.participant_id };
+    if (payload) {
+      console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → token ok (org=${payload.org_id})`);
+      return { orgId: payload.org_id, participantId: payload.participant_id };
+    }
+    console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → token FAILED (fallback org=${defaultOrgId})`);
+  } else {
+    console.log(`[auth] ${req.method} ${new URL(req.url).pathname} → no bearer token (fallback org=${defaultOrgId})`);
   }
   // No/invalid token: fall back to the default org outside production
   if (process.env.NODE_ENV !== "production") {
