@@ -510,6 +510,8 @@ async function wireHooks(daemonSecret?: string): Promise<void> {
     PostToolUse: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
     // Lets the daemon release a session's cloud connection when Claude Code closes it
     SessionEnd: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
+    // Wakes a dormant session the moment Claude Code starts or resumes it
+    SessionStart: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
   };
 
   const settingsPath = join(CLAUDE_DIR, "settings.json");

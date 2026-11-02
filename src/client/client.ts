@@ -351,6 +351,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project,
         user,
         profile: activeProfile,
@@ -783,6 +784,7 @@ async function main() {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project: saved.project,
         session: saved.session,
         user: saved.user,
@@ -822,6 +824,7 @@ async function main() {
       // Daemon lost the mapping — attempt to reconnect to the same session
       const reconnectRes = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project: currentProject,
         session: currentSession,
         user: currentUser,
