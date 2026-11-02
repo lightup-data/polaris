@@ -921,7 +921,7 @@ async function status() {
     const res = await fetch("http://127.0.0.1:4322/status", {
       headers: secret ? { "x-polaris-daemon-secret": secret } : undefined,
     });
-    const data = (await res.json()) as { ok: boolean; sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string; profile?: string }> };
+    const data = (await res.json()) as { ok: boolean; sessions?: Array<{ ccSessionId: string; project: string; session: string; user: string; profile?: string; wsState?: string }> };
     if (data.ok) {
       console.log("\nDaemon: running");
       if (data.sessions && data.sessions.length > 0) {
@@ -930,7 +930,8 @@ async function status() {
         for (const s of data.sessions) {
           const profileEmail = s.profile ? (allProfiles[s.profile]?.email ?? s.profile) : undefined;
           const acct = profileEmail ? ` [${profileEmail}]` : "";
-          console.log(`  ${s.project}/${s.session} as ${s.user}${acct}`);
+          const ws = s.wsState ? ` ws:${s.wsState}` : "";
+          console.log(`  ${s.project}/${s.session} as ${s.user}${acct}${ws}`);
         }
       } else {
         console.log("No active sessions");
@@ -992,7 +993,7 @@ function isPresentUpstream(
   });
 }
 
-async function recover(dryRun = false) {
+async function recover(dryRun = false, debug = false) {
   try {
     const logDir = join(POLARIS_DIR, "logs");
     // Only scan logs from v0.0.105+ (2026-10-13), when project/session context
@@ -1245,18 +1246,29 @@ async function recover(dryRun = false) {
 
       process.stdout.write(`  [${groupIdx}/${groups.size}] ${project}/${session}...`);
 
+      const messagesUrl = `${apiUrl}/projects/${project}/sessions/${session}/messages`;
       let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
       let sessionExistsUpstream = true;
       try {
-        const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/messages`, { headers: apiHeaders });
+        const res = await fetch(messagesUrl, { headers: apiHeaders });
         if (res.ok) {
           upstream = (await res.json()) as typeof upstream;
         } else if (res.status === 404) {
           // Session doesn't exist upstream — test artifact or deleted session. Skip quietly.
           sessionExistsUpstream = false;
+          if (debug) {
+            const body = await res.text().catch(() => "(unreadable)");
+            process.stdout.write(`\n  DEBUG GET ${messagesUrl} → 404 ${body.slice(0, 300)}\n`);
+          }
+        } else if (debug) {
+          const body = await res.text().catch(() => "(unreadable)");
+          process.stdout.write(`\n  DEBUG GET ${messagesUrl} → ${res.status} ${body.slice(0, 300)}\n`);
         }
         // Other HTTP errors: proceed with empty upstream and try to re-POST
-      } catch { /* network error: proceed with empty upstream */ }
+      } catch (err) {
+        if (debug) process.stdout.write(`\n  DEBUG GET ${messagesUrl} → network error: ${err}\n`);
+        /* network error: proceed with empty upstream */
+      }
 
       if (!sessionExistsUpstream) {
         process.stdout.write(` not found\n`);
@@ -1486,7 +1498,7 @@ switch (command) {
     break;
 
   case "recover":
-    await recover(hasFlag("dry-run") || hasFlag("dry"));
+    await recover(hasFlag("dry-run") || hasFlag("dry"), hasFlag("debug"));
     break;
 
   case "update": {

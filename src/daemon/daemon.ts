@@ -1196,6 +1196,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
       // GET /status — daemon health + all active sessions
       if (method === "GET" && pathname === "/status") {
+        const WS_STATES = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"] as const;
         const active = Array.from(sessions.values())
           .filter((m) => m.project)
           .map((m) => ({
@@ -1204,6 +1205,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             session: m.session,
             user: m.user,
             profile: m.profile,
+            wsState: m.ws != null ? (WS_STATES[m.ws.readyState] ?? "UNKNOWN") : "NONE",
           }));
         return json({ ok: true, version: "0.0.1", sessions: active });
       }
