@@ -23,6 +23,9 @@ const CC_SESSION_ID =
   process.env.CLAUDE_SESSION_ID ??
   process.env.CLAUDE_CODE_SESSION_ID ??
   crypto.randomUUID();
+// True when the id above is Claude Code's real session id (not made up): the daemon can
+// then bind the join exactly instead of waiting for a hook event to claim it.
+const CC_SESSION_ID_IS_CLAUDES = !!(process.env.POLARIS_CC_SESSION_ID ?? process.env.CLAUDE_SESSION_ID ?? process.env.CLAUDE_CODE_SESSION_ID);
 
 const daemon = new DaemonClient({ url: DAEMON_URL, secret: DAEMON_SECRET });
 
@@ -352,6 +355,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        claudeSessionId: CC_SESSION_ID_IS_CLAUDES,
         pid: process.pid,
         project,
         user,
@@ -796,6 +800,7 @@ async function main() {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        claudeSessionId: CC_SESSION_ID_IS_CLAUDES,
         pid: process.pid,
         project: saved.project,
         session: saved.session,
@@ -836,6 +841,7 @@ async function main() {
       // Daemon lost the mapping — attempt to reconnect to the same session
       const reconnectRes = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        claudeSessionId: CC_SESSION_ID_IS_CLAUDES,
         pid: process.pid,
         project: currentProject,
         session: currentSession,
@@ -880,6 +886,10 @@ async function main() {
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
   console.error(`Polaris MCP client started (session: ${CC_SESSION_ID})`);
+  // The host closed our stdio (e.g. /mcp reconnect killed the wrapper but not us):
+  // nobody can talk to this server any more, so exit instead of lingering.
+  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("close", () => process.exit(0));
 
   // Notify the host that the tool list is ready. On a normal first start this
   // is redundant (Claude Code fetches tools during initialize); on a hot
