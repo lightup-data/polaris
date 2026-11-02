@@ -89,6 +89,20 @@ let currentProfile = "";
 // Account chosen for this session via /polaris account (profile key); "" = use the active one
 let selectedAccount = "";
 
+// Projects visible to an account ("" = the active account)
+async function listProjectsText(account: string): Promise<string> {
+  try {
+    const res = await daemonGet(`/channels${account ? `?account=${encodeURIComponent(account)}` : ""}`);
+    const body = await res.json() as { channels?: string[]; account?: string; error?: string };
+    if (!res.ok) return body.error ?? `Couldn't list projects (HTTP ${res.status})`;
+    const who = body.account ? ` for ${body.account}` : "";
+    if (!body.channels?.length) return `No projects${who}. Create one with: /polaris join #my-project (create:true)`;
+    return `Projects${who}:\n${body.channels.map((c) => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #project-name`;
+  } catch {
+    return "Failed to reach the Polaris daemon — is it running? (`polaris start`)";
+  }
+}
+
 async function loadProfiles(): Promise<Record<string, { email?: string }>> {
   try {
     return (JSON.parse(await readFile(`${POLARIS_DIR}/config.json`, "utf-8")).profiles ?? {}) as Record<string, { email?: string }>;
@@ -226,6 +240,16 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "polaris_projects",
+      description: "List the Polaris projects an account can see. Defaults to the account this session uses (/polaris account), else the active one.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          account: { type: "string", description: "Account email or profile name (optional)." },
+        },
+      },
+    },
+    {
       name: "polaris_account",
       description: "Choose which Polaris account this Claude session uses (before or instead of joining). Without an account, lists accounts and shows this session's choice. Can't change while connected — disconnect first.",
       inputSchema: {
@@ -318,17 +342,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     // If no channel specified, list available channels
     if (!channel) {
-      try {
-        const res = await daemonGet("/channels");
-        if (res.ok) {
-          const body = await res.json() as { channels: string[] };
-          if (body.channels.length === 0) {
-            return { content: [{ type: "text", text: "No projects found. Create one with: `/polaris join #my-project` with create:true" }] };
-          }
-          return { content: [{ type: "text", text: `Available projects:\n${body.channels.map(c => `  ${c}`).join("\n")}\n\nJoin one with: /polaris join #project-name` }] };
-        }
-      } catch { /* fall through */ }
-      return { content: [{ type: "text", text: "Specify a project: `/polaris join #my-project`" }] };
+      return { content: [{ type: "text", text: await listProjectsText(selectedAccount) }] };
     }
 
     const project = channel.replace(/^#/, ""); // strip leading # if present
@@ -619,6 +633,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch {
       return { content: [{ type: "text", text: "Failed to reach the daemon." }] };
     }
+  }
+
+  if (name === "polaris_projects") {
+    const { account } = (args ?? {}) as { account?: string };
+    const which = account || (currentProject ? currentProfile : selectedAccount);
+    return { content: [{ type: "text", text: await listProjectsText(which) }] };
   }
 
   if (name === "polaris_account") {

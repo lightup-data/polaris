@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { startDaemon } from "../src/daemon/daemon";
+import { startDaemon, pickToken } from "../src/daemon/daemon";
 import { POLARIS_DIR } from "../src/paths";
 
 // /polaris account: a session picks its account before joining. The daemon pairs the
@@ -64,6 +64,37 @@ describe("daemon /account", () => {
 
   test("unknown account is rejected", async () => {
     const res = await post("/account", { ccSessionId: "mcp-X", account: "nobody@nowhere.com" });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("pickToken: never cross accounts", () => {
+  const jwt = (email: string, expOffsetSec: number) =>
+    `x.${btoa(JSON.stringify({ email, exp: Math.floor(Date.now() / 1000) + expOffsetSec }))}.y`;
+  const work = jwt("me@work.com", 3600);
+  const workOld = jwt("me@work.com", -3600);
+  const homeOld = jwt("me@home.com", -3600);
+  const cfg = (profiles: Record<string, { email: string; token: string }>, active = "work") =>
+    ({ active, profiles: Object.fromEntries(Object.entries(profiles).map(([k, v]) => [k, { ...v, api: "" }])) });
+
+  test("uses the session's own valid token", () => {
+    expect(pickToken(cfg({ work: { email: "me@work.com", token: work }, home: { email: "me@home.com", token: jwt("me@home.com", 3600) } }), "home"))
+      .not.toBe(work);
+  });
+  test("expired token, same account under another profile key: falls back to it", () => {
+    expect(pickToken(cfg({ work: { email: "me@work.com", token: work }, "work-old": { email: "me@work.com", token: workOld } }), "work-old")).toBe(work);
+  });
+  test("expired token for a different account: no token, never the active account's", () => {
+    expect(pickToken(cfg({ work: { email: "me@work.com", token: work }, home: { email: "me@home.com", token: homeOld } }), "home")).toBeNull();
+  });
+  test("legacy session with no profile uses the active account", () => {
+    expect(pickToken(cfg({ work: { email: "me@work.com", token: work } }), "")).toBe(work);
+  });
+});
+
+describe("daemon /channels", () => {
+  test("unknown account is rejected instead of silently using the active one", async () => {
+    const res = await fetch(`${daemonUrl}/channels?account=${encodeURIComponent("nobody@nowhere.com")}`);
     expect(res.status).toBe(404);
   });
 });

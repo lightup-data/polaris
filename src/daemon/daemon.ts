@@ -117,16 +117,16 @@ async function getTokenForProfile(profile: string): Promise<string | null> {
     tokenCache.delete(profile);
   }
   if (tokenCache.has(profile)) return tokenCache.get(profile)!;
+  // Fresh read on a cache miss so `polaris login` (new account or re-login) is
+  // picked up without restarting the daemon
+  cachedConfig = undefined;
   const config = await loadConfig();
-  // Named profile — skip if token is expired; fall through to active profile
-  if (profile && config?.profiles[profile]?.token && !isTokenExpired(config.profiles[profile].token)) {
-    tokenCache.set(profile, config.profiles[profile].token);
-    return config.profiles[profile].token;
-  }
-  // Active profile fallback
-  if (config?.active && config.profiles[config.active]?.token) {
-    tokenCache.set(profile, config.profiles[config.active].token);
-    return config.profiles[config.active].token;
+  if (config) {
+    const token = pickToken(config, profile);
+    if (token !== undefined) {
+      if (token) tokenCache.set(profile, token); // never cache "none": a re-login must be seen
+      return token;
+    }
   }
   // Legacy credentials.json
   try {
@@ -138,6 +138,21 @@ async function getTokenForProfile(profile: string): Promise<string | null> {
     tokenCache.set(profile, null);
     return null;
   }
+}
+
+// Token for a session's profile. Falls back to the active profile only when it is the
+// same account (same email): an expired personal token must never send a personal
+// session's events into the work org. Returns null when there's no usable token for
+// this account (relays fail and queue; the status line shows the expired token), or
+// undefined when config has nothing to say (legacy credentials.json applies).
+export function pickToken(config: PolarisConfig, profile: string): string | null | undefined {
+  const own = profile ? config.profiles[profile] : undefined;
+  if (own?.token && !isTokenExpired(own.token)) return own.token;
+  const active = config.active ? config.profiles[config.active] : undefined;
+  const sameAccount = !profile || !own || (own.email !== undefined && own.email === active?.email);
+  if (sameAccount && active?.token && !isTokenExpired(active.token)) return active.token;
+  if (own || (profile && sameAccount && active)) return null;
+  return undefined;
 }
 
 function jwtPayload(token: string | null): Record<string, unknown> | null {
@@ -1635,18 +1650,30 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
       }
 
       // GET /channels — list available channels/projects
+      // GET /channels[?account=<email|profile>] — projects visible to that account
+      // (default: the active one, read fresh so `polaris use`/`login` apply immediately)
       if (method === "GET" && pathname === "/channels") {
         try {
-          const serviceUrl = getServiceUrl();
-          const res = await fetch(`${serviceUrl}/projects`, {
-            headers: await authHeaders(),
+          const account = new URL(req.url).searchParams.get("account");
+          cachedConfig = undefined;
+          const cfg = await loadConfig();
+          let profile = cfg?.active ?? "";
+          if (account) {
+            const resolved = await resolveProfile(account);
+            if (!resolved) return error(`No account "${account}" — run \`polaris login\` to add it`, 404);
+            profile = resolved.profile;
+          }
+          const res = await fetch(`${getServiceUrlForProfile(profile)}/projects`, {
+            headers: await authHeadersForProfile(profile),
+            signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
           });
           if (!res.ok) return error("Failed to fetch channels", res.status);
           const projects = (await res.json()) as Array<{ name: string; slack_channel_name?: string }>;
           const channels = projects
             .filter((p) => p.name !== "_system")
             .map((p) => `#${p.slack_channel_name || p.name}`);
-          return json({ channels });
+          const email = String(cfg?.profiles[profile]?.email ?? profile);
+          return json({ channels, account: email });
         } catch {
           return error("API unreachable", 503);
         }
