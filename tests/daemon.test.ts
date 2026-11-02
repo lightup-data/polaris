@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:test";
-import { startDaemon } from "../src/daemon/daemon";
+import { startDaemon, sweepSessions } from "../src/daemon/daemon";
 import { startServer } from "../src/service/server";
 import type { Sql } from "../src/service/db";
 import { resetTestData, waitForMessages } from "./helpers";
@@ -214,5 +214,36 @@ describe("daemon /status", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.sessions.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("daemon session liveness", () => {
+  const listed = async (id: string) =>
+    ((await (await get(daemonUrl, "/status")).json()) as { sessions: Array<{ ccSessionId: string; dormant: boolean; wsState: string }> })
+      .sessions.find((s) => s.ccSessionId === id);
+
+  test("SessionEnd makes the session dormant (socket closed); the next event wakes it", async () => {
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-live", project: "pj", session: "live1", user: "user:manu", create: true });
+    expect((await listed("cc-live"))?.dormant).toBe(false);
+
+    const end = await post(daemonUrl, "/events", { session_id: "cc-live", hook_event_name: "SessionEnd", reason: "exit" });
+    expect((await end.json()).status).toBe("ended");
+    const after = await listed("cc-live");
+    expect(after?.dormant).toBe(true);
+    expect(after?.wsState).toBe("NONE");
+    // SessionEnd is local bookkeeping, never sent upstream
+    expect(await waitForMessages(`${serviceUrl}/projects/pj/sessions/live1/messages`, 1, 300)).toHaveLength(0);
+
+    await post(daemonUrl, "/events", { session_id: "cc-live", hook_event_name: "UserPromptSubmit", prompt: "resumed" });
+    expect((await listed("cc-live"))?.dormant).toBe(false);
+    expect(await waitForMessages(`${serviceUrl}/projects/pj/sessions/live1/messages`, 1)).toHaveLength(1);
+  });
+
+  test("idle 24h → dormant; dormant 30 days → forgotten", async () => {
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-idle", project: "pj", session: "idle1", user: "user:manu", create: true });
+    sweepSessions(Date.now() + 25 * 3600_000);
+    expect((await listed("cc-idle"))?.dormant).toBe(true);
+    sweepSessions(Date.now() + 31 * 24 * 3600_000);
+    expect(await listed("cc-idle")).toBeUndefined();
   });
 });

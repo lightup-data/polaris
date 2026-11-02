@@ -660,6 +660,97 @@ interface PersistedSession {
   slackChannel?: string;
 }
 
+// --- Session liveness ---
+// Claude sessions end without telling anyone, so the daemon used to keep every
+// mapping (and its cloud WebSocket, reconnects, catch-up queries) forever. Activity
+// is tracked per project/session pair (a Claude session's MCP id and hook id are two
+// mappings sharing one pair and one socket). SessionEnd or 24h without events makes
+// a pair dormant: socket closed, nothing reconnects. Any later hook event (e.g.
+// `claude --resume`) wakes it. Dormant for 30 days → forgotten.
+
+const IDLE_DORMANT_MS = 24 * 60 * 60_000;
+const FORGET_AFTER_MS = 30 * 24 * 60 * 60_000;
+const SWEEP_INTERVAL_MS = 60 * 60_000;
+const pairState = new Map<string, { lastActiveAt: number; dormant: boolean }>();
+const pairKey = (m: { project: string; session: string }) => `${m.project}/${m.session}`;
+
+function mappingsForPair(key: string): SessionMapping[] {
+  return [...sessions.values()].filter((m) => m.project && pairKey(m) === key);
+}
+
+function touchPair(mapping: SessionMapping): void {
+  const key = pairKey(mapping);
+  const st = pairState.get(key);
+  pairState.set(key, { lastActiveAt: Date.now(), dormant: false });
+  if (st?.dormant) {
+    // Woken (e.g. a resumed Claude session): reopen the socket; onopen catches up injects
+    if (!mappingsForPair(key).some((m) => m.ws)) connectCloudWs(mapping);
+    console.error(`[daemon] Session ${key} active again`);
+    void persistSessions();
+  }
+}
+
+function makeDormant(key: string, why: string): void {
+  const st = pairState.get(key) ?? { lastActiveAt: Date.now(), dormant: false };
+  if (st.dormant) return;
+  pairState.set(key, { ...st, dormant: true });
+  for (const m of mappingsForPair(key)) {
+    if (m.ws) {
+      m.closingIntentionally = true;
+      m.ws.close();
+      m.ws = null;
+    }
+  }
+  console.error(`[daemon] Session ${key} dormant (${why})`);
+  void persistSessions();
+}
+
+function isDormant(m: SessionMapping): boolean {
+  return pairState.get(pairKey(m))?.dormant ?? false;
+}
+
+// Last time each Claude session id appears in the event log (a hook event it sent, or
+// its join). Newest files first; stops once every id is found or after a week of logs.
+async function lastSeenInLogs(ids: Set<string>): Promise<Map<string, number>> {
+  const found = new Map<string, number>();
+  let files: string[] = [];
+  try {
+    files = (await readdir(LOG_DIR)).filter((f) => /^daemon-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort().reverse().slice(0, 7);
+  } catch { return found; }
+  for (const f of files) {
+    let text = "";
+    try { text = await readFile(join(LOG_DIR, f), "utf-8"); } catch { continue; }
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      let e: { t?: string; endpoint?: string; payload?: { session_id?: string; ccSessionId?: string } };
+      try { e = JSON.parse(line); } catch { continue; }
+      if (e.endpoint !== "/events" && e.endpoint !== "/connect") continue;
+      const id = e.payload?.session_id ?? e.payload?.ccSessionId;
+      if (!id || !ids.has(id) || !e.t) continue;
+      const t = Date.parse(e.t);
+      if (t > (found.get(id) ?? 0)) found.set(id, t);
+    }
+    if (found.size === ids.size) break;
+  }
+  return found;
+}
+
+export function sweepSessions(now = Date.now()): void {
+  for (const [key, st] of [...pairState]) {
+    const idle = now - st.lastActiveAt;
+    if (!st.dormant && idle > IDLE_DORMANT_MS) makeDormant(key, "no events for 24h");
+    else if (st.dormant && idle > FORGET_AFTER_MS) {
+      for (const m of mappingsForPair(key)) {
+        sessions.delete(m.ccSessionId);
+        injectQueues.delete(m.ccSessionId);
+      }
+      pairState.delete(key);
+      console.error(`[daemon] Forgot session ${key} (dormant 30 days)`);
+      void persistSessions();
+    }
+  }
+}
+
 async function persistSessions(): Promise<void> {
   if (!persistenceEnabled) return;
   try {
@@ -677,14 +768,19 @@ async function persistSessions(): Promise<void> {
         ...(m.slackChannel ? { slackChannel: m.slackChannel } : {}),
       });
     }
-    await writeFile(DAEMON_STATE_FILE, JSON.stringify({ sessions: active }));
+    const pairs = Object.fromEntries([...pairState].filter(([k]) => mappingsForPair(k).length > 0));
+    await writeFile(DAEMON_STATE_FILE, JSON.stringify({ sessions: active, pairs }));
   } catch { /* best-effort */ }
 }
 
 async function loadPersistedSessions(): Promise<void> {
   try {
-    const data = JSON.parse(await readFile(DAEMON_STATE_FILE, "utf-8")) as { sessions: PersistedSession[] };
+    const data = JSON.parse(await readFile(DAEMON_STATE_FILE, "utf-8")) as {
+      sessions: PersistedSession[];
+      pairs?: Record<string, { lastActiveAt: number; dormant: boolean }>;
+    };
     if (!Array.isArray(data.sessions)) return;
+    for (const [k, v] of Object.entries(data.pairs ?? {})) pairState.set(k, v);
 
     // Populate the sessions map
     for (const s of data.sessions) {
@@ -702,10 +798,27 @@ async function loadPersistedSessions(): Promise<void> {
       });
     }
 
-    // Open one cloud WebSocket per (project, session) pair; alias entries share it
+    // State saved before liveness tracking: seed each session's activity from the
+    // daemon's own records (last hook event or join in the event log, last delivered
+    // event) so long-dead sessions go dormant now instead of reconnecting. Sessions
+    // with no record at all get a fresh 24h, the conservative choice.
+    const legacy = [...sessions.values()].filter((m) => !pairState.has(pairKey(m)));
+    if (legacy.length > 0) {
+      const seen = await lastSeenInLogs(new Set(legacy.map((m) => m.ccSessionId)));
+      const seed = new Map<string, number>();
+      for (const m of legacy) {
+        const cp = await readCheckpoint(m.ccSessionId);
+        const at = Math.max(seen.get(m.ccSessionId) ?? 0, cp ? Date.parse(cp.lastEventTimestamp) || 0 : 0);
+        seed.set(pairKey(m), Math.max(seed.get(pairKey(m)) ?? 0, at));
+      }
+      for (const [key, at] of seed) pairState.set(key, { lastActiveAt: at || Date.now(), dormant: false });
+    }
+    sweepSessions();
+
+    // Open one cloud WebSocket per active (project, session) pair; alias entries share it
     const primaryForPair = new Map<string, SessionMapping>();
     for (const mapping of sessions.values()) {
-      if (!mapping.project) continue;
+      if (!mapping.project || isDormant(mapping)) continue;
       const key = `${mapping.project}/${mapping.session}`;
       if (!primaryForPair.has(key)) {
         primaryForPair.set(key, mapping);
@@ -1154,6 +1267,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           }
 
           // Connect to cloud WebSocket
+          pairState.set(pairKey(mapping), { lastActiveAt: Date.now(), dormant: false });
           connectCloudWs(mapping);
           await logSessionChange("connect", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
 
@@ -1285,6 +1399,14 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               return json({ status: "not_connected" });
             }
           }
+
+          // Claude Code says the session closed: stop holding its socket. Local only —
+          // not part of the event stream (and the server schema doesn't take it).
+          if (body.hook_event_name === "SessionEnd") {
+            makeDormant(pairKey(mapping), `Claude session ended${body.reason ? `: ${body.reason}` : ""}`);
+            return json({ status: "ended" });
+          }
+          touchPair(mapping);
 
           // Log with session context so backfill can filter by exact origin
           await logEvent("/events", body, undefined, { project: mapping.project, session: mapping.session, ccSessionId });
@@ -1468,6 +1590,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             user: m.user,
             profile: m.profile,
             wsState: m.ws != null ? (WS_STATES[m.ws.readyState] ?? "UNKNOWN") : "NONE",
+            dormant: isDormant(m),
+            lastActiveAt: pairState.get(pairKey(m))?.lastActiveAt ?? null,
           }));
         return json({ ok: true, version: "0.0.1", sessions: active });
       }
@@ -1765,12 +1889,15 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
   void probeUpstream();
   const probeTimer = setInterval(() => void probeUpstream(), PROBE_INTERVAL_MS);
+  const sweepTimer = setInterval(() => sweepSessions(), SWEEP_INTERVAL_MS);
+  (sweepTimer as unknown as { unref?: () => void }).unref?.();
 
   return {
     server,
     sessions,
     stop: () => {
       clearInterval(probeTimer);
+      clearInterval(sweepTimer);
       if (outboxTimer) {
         clearTimeout(outboxTimer);
         outboxTimer = null;
