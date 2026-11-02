@@ -1191,7 +1191,7 @@ function eventMatchKey(p: Record<string, unknown>): string {
       break;
     case "PreToolUse":
     case "PostToolUse":
-      // Not tool_use_id: the server's payload schema strips it, so it never round-trips.
+      // Content fallback for upstream copies stored before tool_use_id was kept (see toolIdKey)
       detail = `${s(p.tool_name)}\0${s(p.tool_input)}`;
       break;
     default:
@@ -1200,15 +1200,39 @@ function eventMatchKey(p: Record<string, unknown>): string {
   return createHash("sha256").update(`${s(kind)}\0${s(p.session_id)}\0${detail}`).digest("base64");
 }
 
+// Exact identity for tool events. Since the server stores full payloads (#189), tool
+// events carry tool_use_id upstream; older upstream copies don't (the old schema
+// stripped it) and fall back to the content key.
+function toolIdKey(p: Record<string, unknown>): string | null {
+  const kind = p.hook_event_name;
+  if ((kind === "PreToolUse" || kind === "PostToolUse") && typeof p.tool_use_id === "string") {
+    return `${kind}\0tid:${p.tool_use_id}`;
+  }
+  return null;
+}
+
+// Each upstream event contributes exactly one key — its tool_use_id key if it has one,
+// else its content key — so it can satisfy at most one local event.
+function upstreamMatchKey(p: Record<string, unknown>): string {
+  return toolIdKey(p) ?? eventMatchKey(p);
+}
+
 // upstreamKeys counts copies per key; each local match consumes one, so a command run
 // twice locally but stored once upstream still gets its second occurrence restored.
+// Local tool events with an id match by id first, then by content (a pre-#189 upstream
+// copy has no id). Content keys only ever come from id-less upstream events, so an
+// upstream copy with a different id never satisfies a local event by content.
 function isPresentUpstream(payload: Record<string, unknown>, upstreamKeys: Map<string, number>): boolean {
   if (typeof payload.id === "string" && upstreamKeys.has(`id:${payload.id}`)) return true;
-  const key = eventMatchKey(payload);
-  const n = upstreamKeys.get(key) ?? 0;
-  if (n === 0) return false;
-  upstreamKeys.set(key, n - 1);
-  return true;
+  const consume = (key: string): boolean => {
+    const n = upstreamKeys.get(key) ?? 0;
+    if (n === 0) return false;
+    upstreamKeys.set(key, n - 1);
+    return true;
+  };
+  const tid = toolIdKey(payload);
+  if (tid && consume(tid)) return true;
+  return consume(eventMatchKey(payload));
 }
 
 // --- Reconciliation state (shared by `recover` and `recover --reconcile`) ---
@@ -1710,7 +1734,7 @@ async function recoverInner(dryRun: boolean, debug: boolean, opts: { reconcile?:
           for (const e of page.events) {
             if (e.id) upstreamKeys.set(`id:${e.id}`, 1);
             if (e.payload) {
-              const k = eventMatchKey(e.payload);
+              const k = upstreamMatchKey(e.payload);
               upstreamKeys.set(k, (upstreamKeys.get(k) ?? 0) + 1);
             }
           }
