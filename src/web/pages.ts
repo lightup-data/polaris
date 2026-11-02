@@ -456,7 +456,7 @@ export function renderLandingPage(): string {
             <div class="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold shrink-0">2</div>
             <div>
               <h3 class="font-semibold text-gray-900">Install</h3>
-              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris</code> on your machine sets up hooks, MCP server, and logs you in.</p>
+              <p class="mt-1 text-sm text-gray-500"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 text-xs">npx @lightupai/polaris setup</code> on your machine sets up hooks, MCP server, and logs you in.</p>
             </div>
           </div>
           <div class="flex gap-4">

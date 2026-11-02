@@ -48,7 +48,7 @@ A dedicated onboarding page replaces the empty dashboard for new orgs. Three ste
 - After connecting (or skipping), advance to Step 2
 
 **Step 2: Install the CLI**
-- Show `npx @lightupai/polaris` with a copy button
+- Show `npx @lightupai/polaris setup` with a copy button
 - Explain: "Run this on your machine to set up hooks and log in."
 - A "I've installed it" button to advance (or auto-detect via CLI auth callback)
 

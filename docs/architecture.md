@@ -126,7 +126,7 @@ Polaris captures everything a coding agent does (prompts, responses, tool calls)
 - Search: web `GET /search` → API `GET /search?q=&project=&sender=&source=` → `searchEvents` (query-time Postgres full-text with `ts_headline` snippets).
 
 ### 5d. Onboarding / login
-1. `npx @lightupai/polaris` → CLI starts a loopback server, opens browser to web `/auth/cli?port=…`.
+1. `npx @lightupai/polaris setup` → CLI starts a loopback server, opens browser to web `/auth/cli?port=…`.
 2. Web → Google OAuth → callback mints a JWT (`createToken`, HS256) carrying `org_id` + `participant_id` (org resolved/created by email domain).
 3. Web redirects the JWT to the CLI's `127.0.0.1:<port>/callback?token=` → stored in `~/.polaris/config.json`.
 4. CLI installs hooks + statusline into `~/.claude/settings.json`, writes SKILL.md, registers the MCP server via `claude mcp add`, starts the daemon.

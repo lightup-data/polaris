@@ -27,6 +27,9 @@ const CLI_ONLY = new Set([
   "use",        // switch active account — auth management, CLI only
   "daemon",     // starts daemon process — infra, CLI only
   "logout",     // removes credentials — auth management, CLI only
+  "setup",      // first-time onboarding (install + login) — CLI only
+  "help", "--help", "-h",          // usage text
+  "version", "--version", "-v",    // installed version
 ]);
 
 // Explicit pairing: MCP tool name → CLI command name.

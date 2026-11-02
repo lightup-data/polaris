@@ -331,7 +331,7 @@ function renderDevicesSection(ctx: ViewContext, devices: DeviceFixture[], state:
           <summary class="text-xs text-polaris-700 hover:text-polaris-800 font-medium cursor-pointer select-none">+ Add another device</summary>
           <div class="mt-2 bg-white border border-gray-200 rounded-lg p-4">
             <p class="text-sm text-gray-500">Run on any new machine:</p>
-            ${copyBlock("npx @lightupai/polaris")}
+            ${copyBlock("npx @lightupai/polaris setup")}
           </div>
         </details>
         <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
@@ -350,7 +350,7 @@ function renderDevicesSection(ctx: ViewContext, devices: DeviceFixture[], state:
       <div class="bg-white border ${state === "active" ? cardClass("active") : "border-gray-200"} rounded-lg p-5">
         <p class="text-sm font-semibold text-gray-900">${ctx.cliInstalled ? "Add another device" : "Set up Polaris on your first device"}</p>
         <p class="text-sm text-gray-500 mt-1">Run this in your terminal${ctx.cliInstalled ? " on any new machine" : ". Repeat on each machine you work from"}.</p>
-        ${copyBlock("npx @lightupai/polaris")}
+        ${copyBlock("npx @lightupai/polaris setup")}
       </div>
     </div>`);
 }

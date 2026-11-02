@@ -105,8 +105,10 @@ Restart Claude Code so it picks up the updated `.mcp.json`. The Polaris MCP tool
 # Install globally
 npm install -g @lightupai/polaris
 
-# Default setup: install local components + login to production
-polaris
+# First-time setup: install local components + login to production
+polaris setup
+
+# Bare `polaris` (or `polaris help`) only prints usage — it never changes anything
 
 # Or run steps independently:
 polaris install          # Install MCP server, hooks, skill, status line + restart daemon
@@ -187,7 +189,7 @@ Because `polaris` is a **global install**, use `npm install -g` to upgrade — n
 npm install -g @lightupai/polaris@latest
 ```
 
-`npx @lightupai/polaris@latest` will work for first-time installs but won't override a global binary already in `PATH`. The CLI warns you at startup if a newer version is available.
+`npx @lightupai/polaris@latest setup` will work for first-time installs but won't override a global binary already in `PATH`. The CLI warns you at startup if a newer version is available.
 
 ## Configuration
 
