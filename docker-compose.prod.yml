@@ -15,9 +15,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/lightup-data/polaris:${POLARIS_IMAGE_TAG:-latest} # built by CD; deploy.sh sets the tag
     restart: unless-stopped
     command: ["bun", "run", "src/service/server.ts"]
     # Contain runaway queries: OOM kills only this container instead of starving
@@ -34,9 +32,7 @@ services:
         condition: service_healthy
 
   web:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/lightup-data/polaris:${POLARIS_IMAGE_TAG:-latest} # built by CD; deploy.sh sets the tag
     restart: unless-stopped
     command: ["bun", "run", "src/web/serve.ts"]
     environment:
@@ -56,9 +52,7 @@ services:
         condition: service_healthy
 
   bridge:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/lightup-data/polaris:${POLARIS_IMAGE_TAG:-latest} # built by CD; deploy.sh sets the tag
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/app/docker/bridge-entrypoint.sh"]
     environment:

@@ -1,7 +1,9 @@
 name: CD
 
-# Continuous deployment: on every push (merge) to master:
-#   1. SSH to the prod host and run deploy.sh (git pull + docker compose build/up).
+# Continuous deployment: after CI passes on a push (merge) to master:
+#   1. Build the app image and push it to ghcr.io/lightup-data/polaris:<sha>, then
+#      SSH to the prod host and run deploy.sh for that commit (fast-forward, pull
+#      image, up, prune, post-deploy health check). Nothing is built on the server.
 #   2. Publish @lightupai/polaris to npm if the version in package.json has been
 #      bumped beyond what is already published (i.e. only when there are client-side
 #      changes that warrant a release).
@@ -20,7 +22,10 @@ name: CD
 # safe no-op on forks and on repos where CD has not been set up yet.
 
 on:
-  push:
+  # Only after CI passes for a push to master, so a merge that fails tests never ships
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master]
   workflow_dispatch:
 
@@ -31,6 +36,7 @@ concurrency:
 
 jobs:
   check-secrets:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
       configured: ${{ steps.check.outputs.configured }}
@@ -51,13 +57,46 @@ jobs:
             echo "DEPLOY_HOST / DEPLOY_SSH_KEY not configured — skipping deploy."
           fi
 
+  # The prod box never builds: CI builds the single app image (api/web/bridge all
+  # use docker/Dockerfile) and pushes it to GHCR tagged with the commit SHA.
+  build-image:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ghcr.io/lightup-data/polaris:${{ github.event.workflow_run.head_sha || github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
-    needs: check-secrets
+    needs: [check-secrets, build-image]
     if: needs.check-secrets.outputs.configured == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up SSH
         env:
@@ -78,12 +117,17 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          DEPLOY_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./deploy.sh
 
   publish-npm:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
