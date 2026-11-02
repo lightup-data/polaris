@@ -1047,8 +1047,20 @@ interface RecoverCandidate {
 // Identity used to decide whether a logged event is already upstream: same hook kind
 // and session_id, plus the kind-specific fields below. Hashed so recover keeps only a
 // small digest per upstream event instead of whole payloads (sessions can be 100s of MB).
+// Key-order-independent JSON. Upstream payloads come back from Postgres JSONB, which
+// reorders object keys, so plain JSON.stringify never matched the local log copy —
+// every tool event looked "missing" and was re-posted on every recover run.
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "∅";
+}
+
 function eventMatchKey(p: Record<string, unknown>): string {
-  const s = (v: unknown) => JSON.stringify(v) ?? "∅";
+  const s = canonicalJson;
   const kind = p.hook_event_name;
   let detail: string;
   switch (kind) {
@@ -1060,6 +1072,7 @@ function eventMatchKey(p: Record<string, unknown>): string {
       break;
     case "PreToolUse":
     case "PostToolUse":
+      // Not tool_use_id: the server's payload schema strips it, so it never round-trips.
       detail = `${s(p.tool_name)}\0${s(p.tool_input)}`;
       break;
     default:
@@ -1068,9 +1081,15 @@ function eventMatchKey(p: Record<string, unknown>): string {
   return createHash("sha256").update(`${s(kind)}\0${s(p.session_id)}\0${detail}`).digest("base64");
 }
 
-function isPresentUpstream(payload: Record<string, unknown>, upstreamKeys: Set<string>): boolean {
+// upstreamKeys counts copies per key; each local match consumes one, so a command run
+// twice locally but stored once upstream still gets its second occurrence restored.
+function isPresentUpstream(payload: Record<string, unknown>, upstreamKeys: Map<string, number>): boolean {
   if (typeof payload.id === "string" && upstreamKeys.has(`id:${payload.id}`)) return true;
-  return upstreamKeys.has(eventMatchKey(payload));
+  const key = eventMatchKey(payload);
+  const n = upstreamKeys.get(key) ?? 0;
+  if (n === 0) return false;
+  upstreamKeys.set(key, n - 1);
+  return true;
 }
 
 async function recover(dryRun = false, debug = false) {
@@ -1434,7 +1453,7 @@ async function recover(dryRun = false, debug = false) {
       const stopBefore = localTimes.some((t) => Number.isNaN(t))
         ? null
         : localTimes.reduce((a, b) => Math.min(a, b), Infinity) - SKEW_MARGIN_MS;
-      const upstreamKeys = new Set<string>();
+      const upstreamKeys = new Map<string, number>();
       let checkFailure: string | null = null;
       let cursor: string | null = null;
       let pages = 0;
@@ -1455,8 +1474,11 @@ async function recover(dryRun = false, debug = false) {
             nextCursor: string | null;
           };
           for (const e of page.events) {
-            if (e.id) upstreamKeys.add(`id:${e.id}`);
-            if (e.payload) upstreamKeys.add(eventMatchKey(e.payload));
+            if (e.id) upstreamKeys.set(`id:${e.id}`, 1);
+            if (e.payload) {
+              const k = eventMatchKey(e.payload);
+              upstreamKeys.set(k, (upstreamKeys.get(k) ?? 0) + 1);
+            }
           }
           pages++;
           cursor = page.nextCursor;

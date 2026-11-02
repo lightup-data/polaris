@@ -204,6 +204,57 @@ describe("polaris recover: projects not on the server", () => {
     expect(output).toContain("1 event(s) with no recoverable project/session mapping");
   }, 30000);
 
+  test("tool events already upstream are not re-posted despite JSONB key reordering", async () => {
+    const toolLine = (t: string, kind: string, id: string | undefined, input: Record<string, unknown>) =>
+      JSON.stringify({
+        t, endpoint: "/events", project: "real", session: "s1", ccSessionId: "cc-real",
+        payload: { session_id: "cc-real", hook_event_name: kind, tool_name: "Bash", tool_input: input, ...(id ? { tool_use_id: id } : {}) },
+      });
+    const local = [
+      JSON.stringify({ t: "2026-11-01T10:00:00.000Z", endpoint: "/connect", payload: { ccSessionId: "cc-real", project: "real", session: "s1", user: "user:t", profile: "t" } }),
+      toolLine("2026-11-01T10:01:00.000Z", "PreToolUse", "toolu_1", { command: "ls", description: "list" }),
+      toolLine("2026-11-01T10:01:01.000Z", "PostToolUse", "toolu_1", { command: "ls", description: "list" }),
+      toolLine("2026-11-01T10:02:00.000Z", "PreToolUse", undefined, { command: "pwd", description: "where" }),
+    ];
+    // Same events as the real server returns them: tool_use_id stripped by the payload
+    // schema, and object keys reordered by Postgres JSONB
+    const up = (ts: string, kind: string, _id: string | undefined, input: Record<string, unknown>): UpstreamEvent => ({
+      id: crypto.randomUUID(), timestamp: ts,
+      payload: { tool_input: input, tool_name: "Bash", hook_event_name: kind, session_id: "cc-real" },
+    });
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0,
+      upstream: [
+        up("2026-11-01T10:02:00.000Z", "PreToolUse", undefined, { description: "where", command: "pwd" }),
+        up("2026-11-01T10:01:01.000Z", "PostToolUse", "toolu_1", { description: "list", command: "ls" }),
+        up("2026-11-01T10:01:00.000Z", "PreToolUse", "toolu_1", { description: "list", command: "ls" }),
+      ],
+    });
+    const { output } = await runRecover(local, { config, logDate: "2026-11-01" });
+    expect(api.posts).toHaveLength(0);
+    expect(output).toContain("0 missing upstream");
+  }, 30000);
+
+  test("a repeated identical tool call is restored when upstream has fewer copies", async () => {
+    // Real hook payloads carry a unique tool_use_id, so the two runs are distinct locally
+    const line = (t: string) => JSON.stringify({
+      t, endpoint: "/events", project: "real", session: "s1", ccSessionId: "cc-real",
+      payload: { session_id: "cc-real", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git status" }, tool_use_id: `toolu_${t}` },
+    });
+    Object.assign(api, {
+      projectsStatus: 200, messagesStatus: 200, posts: [], pageRequests: 0,
+      upstream: [{ id: crypto.randomUUID(), timestamp: "2026-11-01T10:01:00.000Z",
+        payload: { tool_input: { command: "git status" }, tool_name: "Bash", hook_event_name: "PreToolUse", session_id: "cc-real" } }],
+    });
+    const { output } = await runRecover([
+      JSON.stringify({ t: "2026-11-01T10:00:00.000Z", endpoint: "/connect", payload: { ccSessionId: "cc-real", project: "real", session: "s1", user: "user:t", profile: "t" } }),
+      line("2026-11-01T10:01:00.000Z"),
+      line("2026-11-01T10:05:00.000Z"),
+    ], { config, logDate: "2026-11-01" });
+    expect(api.posts).toEqual(["/projects/real/sessions/s1/events"]);
+    expect(output).toContain("1 restored");
+  }, 30000);
+
   test("pages through upstream to find already-present events", async () => {
     // 450 upstream events (3 pages of 200); the local prompt "a" is the oldest, on the last page.
     const filler = Array.from({ length: 449 }, (_, i): UpstreamEvent => ({
