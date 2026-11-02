@@ -473,7 +473,7 @@ const accountSelections = new Map<string, { profile: string; email: string }>();
 
 function notePolarisToolCall(body: Record<string, unknown>): void {
   const tool = typeof body.tool_name === "string" ? body.tool_name : "";
-  if (body.hook_event_name !== "PreToolUse" || !/polaris_account$/.test(tool)) return;
+  if (body.hook_event_name !== "PreToolUse" || !/polaris_(account|connect)$/.test(tool)) return;
   const now = Date.now();
   while (recentPolarisCalls.length && now - recentPolarisCalls[0].at > PAIRING_WINDOW_MS) recentPolarisCalls.shift();
   recentPolarisCalls.push({ ccSessionId: String(body.session_id), tool, input: (body.tool_input as Record<string, unknown>) ?? {}, at: now });
@@ -483,10 +483,26 @@ function notePolarisToolCall(body: Record<string, unknown>): void {
 function pairAccountCall(account: string): string | null {
   for (let i = recentPolarisCalls.length - 1; i >= 0; i--) {
     const c = recentPolarisCalls[i];
-    if (Date.now() - c.at <= PAIRING_WINDOW_MS && c.input.account === account) {
+    if (Date.now() - c.at <= PAIRING_WINDOW_MS && /polaris_account$/.test(c.tool) && c.input.account === account) {
       recentPolarisCalls.splice(i, 1);
       return c.ccSessionId;
     }
+  }
+  return null;
+}
+
+// Most recent unpaired polaris_connect call for this project (and session, if the
+// call named one). Binds a join to the exact Claude session that made it, instead of
+// letting the next hook event from any unmapped session claim the pending join.
+function pairConnectCall(project: string, session: string | undefined): string | null {
+  for (let i = recentPolarisCalls.length - 1; i >= 0; i--) {
+    const c = recentPolarisCalls[i];
+    if (Date.now() - c.at > PAIRING_WINDOW_MS || !/polaris_connect$/.test(c.tool)) continue;
+    const channel = typeof c.input.channel === "string" ? c.input.channel.replace(/^#/, "") : "";
+    if (channel !== project) continue;
+    if (session && typeof c.input.session === "string" && c.input.session !== session) continue;
+    recentPolarisCalls.splice(i, 1);
+    return c.ccSessionId;
   }
   return null;
 }
@@ -1123,6 +1139,19 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               mapping.slackChannel = projData.slack_channel_name ?? undefined;
             }
           } catch {}
+
+          // Bind to the exact Claude session that called polaris_connect (its PreToolUse
+          // hook carried the real session id). Without a pair (e.g. CLI connect) the
+          // pendingMapping fallback in /events applies, as before.
+          const hookId = pairConnectCall(body.project, body.session);
+          if (hookId && hookId !== body.ccSessionId) {
+            mapping.pendingMapping = false;
+            sessions.set(hookId, { ...mapping, ccSessionId: hookId });
+            const queue = injectQueues.get(mapping.ccSessionId) ?? [];
+            injectQueues.set(mapping.ccSessionId, queue);
+            injectQueues.set(hookId, queue);
+            console.error(`[daemon] Paired CC session ${hookId.slice(0, 8)} → ${mapping.project}/${mapping.session}`);
+          }
 
           // Connect to cloud WebSocket
           connectCloudWs(mapping);
