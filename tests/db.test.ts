@@ -255,6 +255,17 @@ describe("events", () => {
     expect(events[0].timestamp).toBe("2026-06-05T10:01:00.000Z");
   });
 
+  test("getEventsSince narrows by session and source", async () => {
+    await pushEvent(sql, "test-org", makeEvent({ session: "fxm", source: "inject", timestamp: "2026-06-05T10:01:00.000Z" }));
+    await pushEvent(sql, "test-org", makeEvent({ session: "fxm", source: "hook", timestamp: "2026-06-05T10:02:00.000Z" }));
+    await pushEvent(sql, "test-org", makeEvent({ session: "fxk", source: "inject", timestamp: "2026-06-05T10:03:00.000Z" }));
+
+    const events = await getEventsSince(sql, "test-org", "pj", "2026-06-05T10:00:00.000Z", { session: "fxm", source: "inject" });
+    expect(events).toHaveLength(1);
+    expect(events[0].session).toBe("fxm");
+    expect(events[0].source).toBe("inject");
+  });
+
   test("payload round-trips through JSONB", async () => {
     const event = makeEvent({
       source: "inject",

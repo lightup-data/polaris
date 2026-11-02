@@ -18,6 +18,7 @@ interface SessionMapping {
   pendingMapping?: boolean; // true until the first hook event from this shell claims the mapping
   closingIntentionally?: boolean; // set before deliberate ws.close() so onclose can distinguish drops
   connectedAt?: number; // epoch ms when /connect was called — used to detect livelock
+  wsRetries?: number; // consecutive cloud WS drops without a successful open; drives backoff
 }
 
 function generateSessionName(): string {
@@ -196,6 +197,7 @@ function connectCloudWs(mapping: SessionMapping) {
   // by querying the project messages API with the timestamp of the last delivered inject.
   // Falls back to the outbound event checkpoint as a safe lower bound.
   ws.onopen = async () => {
+    mapping.wsRetries = 0;
     try {
       let since = await readInjectCheckpoint(mapping.ccSessionId);
       if (!since) {
@@ -206,9 +208,13 @@ function connectCloudWs(mapping: SessionMapping) {
         since = cp.lastEventTimestamp;
       }
       const headers = await authHeadersForProfile(mapping.profile);
+      // Filter server-side: unfiltered, this returns every event in the project since
+      // the checkpoint (hundreds of MB on big projects), which OOM-looped the API when
+      // all daemons reconnected at once. Older servers ignore the extra params.
+      const q = new URLSearchParams({ since, source: "inject", session: mapping.session });
       const res = await fetch(
-        `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/messages?since=${encodeURIComponent(since)}`,
-        { headers }
+        `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/messages?${q}`,
+        { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
       );
       if (!res.ok) return;
       const events = await res.json() as Array<{
@@ -261,12 +267,17 @@ function connectCloudWs(mapping: SessionMapping) {
     if (m && m.project === mapping.project && mapping.project !== "" && !m.closingIntentionally) {
       // Unexpected cloud WS drop — log it so the user has a record
       void logSessionChange("ws-drop", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
+      // Exponential backoff with jitter: when the API restarts, every daemon's sessions
+      // drop together; a fixed delay made them all reconnect in the same instant.
+      const retries = m.wsRetries ?? 0;
+      m.wsRetries = retries + 1;
+      const delay = Math.min(60_000, 3000 * 2 ** retries) * (0.5 + Math.random());
       setTimeout(() => {
         const current = sessions.get(mapping.ccSessionId);
         if (current && current.project) {
           connectCloudWs(current);
         }
-      }, 3000);
+      }, delay);
     }
     if (m) m.closingIntentionally = false;
   };

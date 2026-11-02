@@ -717,13 +717,26 @@ export async function getOrgEventsSince(sql: Sql, orgId: string, since: string):
   return rows.map(rowToEvent);
 }
 
-export async function getEventsSince(sql: Sql, orgId: string, project: string, since: string): Promise<PolarisEvent[]> {
+// Hard cap: older daemons query ?since without filters on reconnect; unbounded, that
+// returned whole multi-hundred-MB projects and OOM-killed the API in a restart loop.
+export const EVENTS_SINCE_MAX_ROWS = 1000;
+
+export async function getEventsSince(
+  sql: Sql,
+  orgId: string,
+  project: string,
+  since: string,
+  opts: { session?: string; source?: string } = {}
+): Promise<PolarisEvent[]> {
   const rows = await sql`
     SELECT e.id, p.name as project, e.session, e.timestamp, e.source, e.sender, e.payload
     FROM events e
     JOIN projects p ON e.project_id = p.id
     WHERE e.org_id = ${orgId} AND p.name = ${project} AND e.timestamp > ${since}
+      ${opts.session ? sql`AND e.session = ${opts.session}` : sql``}
+      ${opts.source ? sql`AND e.source = ${opts.source}` : sql``}
     ORDER BY e.timestamp ASC
+    LIMIT ${EVENTS_SINCE_MAX_ROWS}
   `;
   return rows.map(rowToEvent);
 }

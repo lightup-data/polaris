@@ -23,6 +23,7 @@ import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:f
 import { DaemonClient } from "../core/daemon-client.js";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { POLARIS_DIR } from "../paths.js";
 
 const CONFIG_FILE = join(POLARIS_DIR, "config.json");
@@ -945,8 +946,8 @@ async function status() {
 // --- Recover ---
 
 // Replay locally logged daemon events (~/.polaris/logs/*.jsonl) that never
-// made it upstream. Presence is determined by fetching each session's
-// messages (GET /projects/:p/sessions/:s/messages) and diffing: by event id
+// made it upstream. Presence is determined by paging each session's events
+// (GET /projects/:p/sessions/:s/events?limit&before) and diffing: by event id
 // when the logged payload carries one, otherwise by the payload's identifying
 // fields (hook ids are assigned server-side at ingest, so hook log entries
 // have no id of their own). Missing events are re-POSTed via the normal
@@ -969,28 +970,33 @@ interface RecoverCandidate {
   ts?: string; // ISO timestamp from the log entry
 }
 
-function isPresentUpstream(
-  payload: Record<string, unknown>,
-  upstream: Array<{ id?: string; payload?: Record<string, unknown> }>
-): boolean {
-  const id = payload.id;
-  if (typeof id === "string" && upstream.some((e) => e.id === id)) return true;
-  const kind = payload.hook_event_name;
-  return upstream.some((e) => {
-    const p = e.payload;
-    if (!p || p.hook_event_name !== kind || p.session_id !== payload.session_id) return false;
-    switch (kind) {
-      case "UserPromptSubmit":
-        return p.prompt === payload.prompt;
-      case "Stop":
-        return (p.stop_response ?? p.last_assistant_message) === (payload.stop_response ?? payload.last_assistant_message);
-      case "PreToolUse":
-      case "PostToolUse":
-        return p.tool_name === payload.tool_name && JSON.stringify(p.tool_input) === JSON.stringify(payload.tool_input);
-      default:
-        return JSON.stringify(p) === JSON.stringify(payload);
-    }
-  });
+// Identity used to decide whether a logged event is already upstream: same hook kind
+// and session_id, plus the kind-specific fields below. Hashed so recover keeps only a
+// small digest per upstream event instead of whole payloads (sessions can be 100s of MB).
+function eventMatchKey(p: Record<string, unknown>): string {
+  const s = (v: unknown) => JSON.stringify(v) ?? "∅";
+  const kind = p.hook_event_name;
+  let detail: string;
+  switch (kind) {
+    case "UserPromptSubmit":
+      detail = s(p.prompt);
+      break;
+    case "Stop":
+      detail = s(p.stop_response ?? p.last_assistant_message);
+      break;
+    case "PreToolUse":
+    case "PostToolUse":
+      detail = `${s(p.tool_name)}\0${s(p.tool_input)}`;
+      break;
+    default:
+      detail = s(p);
+  }
+  return createHash("sha256").update(`${s(kind)}\0${s(p.session_id)}\0${detail}`).digest("base64");
+}
+
+function isPresentUpstream(payload: Record<string, unknown>, upstreamKeys: Set<string>): boolean {
+  if (typeof payload.id === "string" && upstreamKeys.has(`id:${payload.id}`)) return true;
+  return upstreamKeys.has(eventMatchKey(payload));
 }
 
 async function recover(dryRun = false, debug = false) {
@@ -1039,9 +1045,47 @@ async function recover(dryRun = false, debug = false) {
       routeByPair.set(`${route.project}/${route.session}`, route);
     };
 
+    // Session history records successful connects/disconnects with timestamps. For
+    // events logged without project/session context (older daemons), it's the only
+    // reliable route: /connect log entries are written before the connect succeeds,
+    // so a failed or superseded attempt would otherwise misroute a whole session.
+    interface HistoryEntry { t: string; action: string; project?: string; session?: string; user?: string; agent?: string }
+    const history = new Map<string, HistoryEntry[]>();
+    try {
+      for (const line of (await readFile(join(POLARIS_DIR, "session-history.jsonl"), "utf-8")).split("\n")) {
+        try {
+          const h = JSON.parse(line) as HistoryEntry & { ccSessionId?: string };
+          if (!h.ccSessionId || !h.t) continue;
+          const list = history.get(h.ccSessionId) ?? [];
+          if (!history.has(h.ccSessionId)) history.set(h.ccSessionId, list);
+          list.push(h);
+        } catch { /* skip malformed line */ }
+      }
+    } catch { /* no history file */ }
+
+    const routeFromHistory = (sessionId: string, ts?: string): RecoverRoute | undefined => {
+      if (!ts) return undefined;
+      let last: HistoryEntry | undefined;
+      for (const h of history.get(sessionId) ?? []) {
+        if (h.t > ts) break;
+        last = h;
+      }
+      if (!last || last.action !== "connect" || !last.project || !last.session) return undefined;
+      return {
+        project: last.project,
+        session: last.session,
+        user: last.user ?? activeProfile?.participant_id ?? "",
+        agent: last.agent ?? "agent:claude",
+        profileKey: activeKey,
+      };
+    };
+
     // Resolve a route for an event. entryProject/entrySession come from the daemon's
     // explicit context fields (written since v0.0.105) and handle multi-session + auto-generated names.
-    const routeFor = (sessionId: string, entryProject?: string, entrySession?: string): RecoverRoute | undefined => {
+    const routeFor = (sessionId: string, entryProject?: string, entrySession?: string, ts?: string): RecoverRoute | undefined => {
+      // 0. Untagged event from a session with recorded history: route only within a connect window
+      if (!entryProject && history.has(sessionId)) return routeFromHistory(sessionId, ts);
+
       // 1. Exact ccSessionId / hook session_id match
       const exact = routes.get(sessionId);
       if (exact) return exact;
@@ -1156,7 +1200,7 @@ async function recover(dryRun = false, debug = false) {
           seen.add(key);
           scanned++;
 
-          const route = routeFor(sessionId, entry.project, entry.session);
+          const route = routeFor(sessionId, entry.project, entry.session, entry.t ?? entry.ts);
           if (!route) { unroutable++; continue; }
 
           const sender = hookEvent === "UserPromptSubmit" ? route.user : route.agent;
@@ -1171,7 +1215,7 @@ async function recover(dryRun = false, debug = false) {
           if (seen.has(key)) continue;
           seen.add(key);
           scanned++;
-          const route = routeFor(r.ccSessionId);
+          const route = routeFor(r.ccSessionId, undefined, undefined, entry.t ?? entry.ts);
           if (!route) { unroutable++; continue; }
           candidates.push({
             project: route.project,
@@ -1198,6 +1242,58 @@ async function recover(dryRun = false, debug = false) {
     let totalMissing = 0;
     let totalRestored = 0;
     let notFoundSessions = 0;
+    let uncheckedSessions = 0; // upstream check failed (timeout/5xx) — skipped, never blindly re-POSTed
+    const RECOVER_TIMEOUT_MS = 15_000;
+
+    // Fetch each account's project list once and drop groups whose project isn't on
+    // the server (e.g. events written by old test runs). If the list can't be fetched,
+    // that account's groups are skipped rather than guessed at: the API is the only
+    // source of truth, and retrying later is cheap.
+    const projectsByProfile = new Map<string, Set<string> | Error>();
+    for (const group of groups.values()) {
+      const { profileKey } = group[0];
+      if (projectsByProfile.has(profileKey)) continue;
+      const p = allProfiles[profileKey] ?? activeProfile;
+      if (!p) continue;
+      try {
+        const res = await fetch(`${p.api}/projects`, {
+          headers: { Authorization: `Bearer ${p.token}` },
+          signal: AbortSignal.timeout(RECOVER_TIMEOUT_MS),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const list = (await res.json()) as Array<{ name: string }>;
+        projectsByProfile.set(profileKey, new Set(list.map((x) => x.name)));
+      } catch (err) {
+        projectsByProfile.set(profileKey, err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+    const missingProjects = new Map<string, number>(); // project -> event count
+    const unverified = new Map<string, number>(); // account -> event count
+    for (const [key, group] of groups) {
+      const { project, profileKey } = group[0];
+      const known = projectsByProfile.get(profileKey);
+      if (known instanceof Error) {
+        const account = (allProfiles[profileKey] ?? activeProfile)?.email ?? profileKey;
+        unverified.set(`${account} (${known.message})`, (unverified.get(`${account} (${known.message})`) ?? 0) + group.length);
+        groups.delete(key);
+      } else if (known && !known.has(project)) {
+        missingProjects.set(project, (missingProjects.get(project) ?? 0) + group.length);
+        groups.delete(key);
+      }
+    }
+    const skipSummary = (): string[] => {
+      const lines: string[] = [];
+      if (missingProjects.size > 0) {
+        const names = [...missingProjects.keys()];
+        const shown = names.slice(0, 5).join(", ") + (names.length > 5 ? `, … (+${names.length - 5} more)` : "");
+        const n = [...missingProjects.values()].reduce((a, b) => a + b, 0);
+        lines.push(`Skipped ${n} event(s) for ${names.length} project(s) not on the server: ${shown}`);
+      }
+      for (const [account, n] of unverified) {
+        lines.push(`Skipped ${n} event(s): couldn't list projects for ${account} — retry when the API is reachable.`);
+      }
+      return lines;
+    };
 
     const hr = "─".repeat(45);
 
@@ -1252,33 +1348,61 @@ async function recover(dryRun = false, debug = false) {
       const linePrefix = `  [${groupIdx}/${groups.size}] ${project}/${session}`;
       process.stdout.write(`${linePrefix}...`);
 
-      const messagesUrl = `${apiUrl}/projects/${project}/sessions/${session}/messages`;
-      let upstream: Array<{ id?: string; payload?: Record<string, unknown> }> = [];
-      let sessionExistsUpstream = true;
-      try {
-        const res = await fetch(messagesUrl, { headers: apiHeaders });
-        if (res.ok) {
-          upstream = (await res.json()) as typeof upstream;
-        } else if (res.status === 404) {
-          // Session doesn't exist upstream — test artifact or deleted session. Skip quietly.
-          sessionExistsUpstream = false;
-          if (debug) {
-            const body = await res.text().catch(() => "(unreadable)");
-            process.stdout.write(`\n  DEBUG GET ${messagesUrl} → 404 ${body.slice(0, 300)}\n`);
+      // Read upstream newest-first in bounded pages, one request at a time: a full-history
+      // read of a large session can exhaust the API server's memory. Each page is reduced
+      // to match keys and dropped. Paging stops once it's older than every local event
+      // (minus a clock-skew margin) — upstream timestamps are never earlier than capture.
+      // Without a complete read we can't tell what's missing, and re-POSTing everything
+      // would duplicate events — so any failed page skips the session instead.
+      const PAGE_LIMIT = 200;
+      const SKEW_MARGIN_MS = 60 * 60 * 1000;
+      const localTimes = group.map((c) => (c.ts ? Date.parse(c.ts) : NaN));
+      const stopBefore = localTimes.some((t) => Number.isNaN(t))
+        ? null
+        : localTimes.reduce((a, b) => Math.min(a, b), Infinity) - SKEW_MARGIN_MS;
+      const upstreamKeys = new Set<string>();
+      let checkFailure: string | null = null;
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const pageUrl = `${apiUrl}/projects/${project}/sessions/${session}/events?limit=${PAGE_LIMIT}${cursor ? `&before=${encodeURIComponent(cursor)}` : ""}`;
+        try {
+          const res = await fetch(pageUrl, { headers: apiHeaders, signal: AbortSignal.timeout(RECOVER_TIMEOUT_MS) });
+          if (!res.ok) {
+            checkFailure = res.status === 404 && pages === 0 ? "not found" : `HTTP ${res.status}`;
+            if (debug) {
+              const body = await res.text().catch(() => "(unreadable)");
+              process.stdout.write(`\n  DEBUG GET ${pageUrl} → ${res.status} ${body.slice(0, 300)}\n`);
+            }
+            break;
           }
-        } else if (debug) {
-          const body = await res.text().catch(() => "(unreadable)");
-          process.stdout.write(`\n  DEBUG GET ${messagesUrl} → ${res.status} ${body.slice(0, 300)}\n`);
+          const page = (await res.json()) as {
+            events: Array<{ id?: string; timestamp?: string; payload?: Record<string, unknown> }>;
+            nextCursor: string | null;
+          };
+          for (const e of page.events) {
+            if (e.id) upstreamKeys.add(`id:${e.id}`);
+            if (e.payload) upstreamKeys.add(eventMatchKey(e.payload));
+          }
+          pages++;
+          cursor = page.nextCursor;
+          const oldest = page.events[page.events.length - 1]?.timestamp;
+          if (stopBefore !== null && oldest && Date.parse(oldest) < stopBefore) break;
+        } catch (err) {
+          checkFailure = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "network error";
+          if (debug) process.stdout.write(`\n  DEBUG GET ${pageUrl} → ${err}\n`);
+          break;
         }
-        // Other HTTP errors: proceed with empty upstream and try to re-POST
-      } catch (err) {
-        if (debug) process.stdout.write(`\n  DEBUG GET ${messagesUrl} → network error: ${err}\n`);
-        /* network error: proceed with empty upstream */
-      }
+      } while (cursor);
 
-      if (!sessionExistsUpstream) {
+      if (checkFailure === "not found") {
         process.stdout.write(` not found\n`);
         notFoundSessions++;
+        continue;
+      }
+      if (checkFailure) {
+        process.stdout.write(` couldn't check upstream (${checkFailure}) — skipped\n`);
+        uncheckedSessions++;
         continue;
       }
 
@@ -1287,13 +1411,14 @@ async function recover(dryRun = false, debug = false) {
       let sessionRestored = 0;
       const sessionErrors = new Map<string, number>(); // status -> count
       for (const c of group) {
-        if (isPresentUpstream(c.payload, upstream)) continue;
+        if (isPresentUpstream(c.payload, upstreamKeys)) continue;
         sessionMissing++;
         try {
           const res = await fetch(`${apiUrl}/projects/${project}/sessions/${session}/events`, {
             method: "POST",
             headers: apiHeaders,
             body: JSON.stringify({ sender: c.sender, payload: c.payload, ...(c.ts ? { at: c.ts } : {}) }),
+            signal: AbortSignal.timeout(RECOVER_TIMEOUT_MS),
           });
           if (res.ok) {
             sessionRestored++;
@@ -1325,11 +1450,14 @@ async function recover(dryRun = false, debug = false) {
       console.log(hr);
       console.log(`Up to ${totalMissing} event(s) would be restored.`);
       console.log(`Events already in sync are filtered out at run time.`);
+      for (const line of skipSummary()) console.log(line);
       if (unroutable > 0) console.log(`${unroutable} event(s) had no session match and will be skipped.`);
       console.log(`\nRun \`polaris recover\` to restore.`);
     } else {
       console.log(`\nRecover: ${scanned} scanned, ${totalMissing} missing upstream, ${totalRestored} restored.`);
+      for (const line of skipSummary()) console.log(line);
       if (notFoundSessions > 0) console.log(`${notFoundSessions} session(s) not found upstream (test artifacts or deleted sessions — skipped).`);
+      if (uncheckedSessions > 0) console.log(`${uncheckedSessions} session(s) skipped because upstream couldn't be checked — rerun \`polaris recover\` later.`);
       if (unroutable > 0) console.log(`Skipped ${unroutable} event(s) with no recoverable project/session mapping.`);
       if (totalMissing > totalRestored) console.log(`${totalMissing - totalRestored} event(s) could not be restored (API unreachable or rejected).`);
     }

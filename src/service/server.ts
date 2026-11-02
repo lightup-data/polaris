@@ -440,7 +440,10 @@ export async function startServer(opts: {
         if (!project) return error("Project not found", 404);
         const since = url.searchParams.get("since");
         const events = since
-          ? await getEventsSince(sql, orgId, params.proj, since)
+          ? await getEventsSince(sql, orgId, params.proj, since, {
+              session: url.searchParams.get("session") ?? undefined,
+              source: url.searchParams.get("source") ?? undefined,
+            })
           : await getProjectEvents(sql, orgId, params.proj);
         return json(events);
       }
