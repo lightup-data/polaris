@@ -1,5 +1,8 @@
 import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:test";
-import { startDaemon } from "../src/daemon/daemon";
+import { startDaemon, checkLiveness, findOwner, processTable, setProcessTableSource } from "../src/daemon/daemon";
+import { writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startServer } from "../src/service/server";
 import type { Sql } from "../src/service/db";
 import { resetTestData, waitForMessages } from "./helpers";
@@ -214,5 +217,78 @@ describe("daemon /status", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.sessions.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("daemon session liveness", () => {
+  const listed = async (id: string) =>
+    ((await (await get(daemonUrl, "/status")).json()) as { sessions: Array<{ ccSessionId: string; dormant: boolean; wsState: string }> })
+      .sessions.find((s) => s.ccSessionId === id);
+  // Mirrors Claude Code 2.1: hook → bg-spare → bg-pty-host → claude daemon → claude (session) → shell
+  const START = "Mon Nov 2 10:00:00 2026";
+  const tree = (ownerStart: string | null) => {
+    const t = new Map<number, { ppid: number; start: string; args: string }>([
+      [9104, { ppid: 9103, start: START, args: "/bin/sh /home/u/.polaris/hooks/capture.sh" }],
+      [9103, { ppid: 9102, start: START, args: "claude bg-spare --bg-spare /tmp/x.sock" }],
+      [9102, { ppid: 9101, start: START, args: "claude bg-pty-host --bg-pty-host /tmp/y" }],
+      [9101, { ppid: 9000, start: START, args: "/opt/claude-code/claude daemon run --origin transient" }],
+      [10, { ppid: 1, start: START, args: "-zsh" }],
+    ]);
+    if (ownerStart) t.set(9000, { ppid: 10, start: ownerStart, args: "/opt/claude-code/claude --resume abc" });
+    return t;
+  };
+  const hook = (session_id: string, extra: Record<string, unknown> = {}) =>
+    fetch(`${daemonUrl}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-polaris-hook-pid": "9104" },
+      body: JSON.stringify({ session_id, ...extra }),
+    });
+
+  test("findOwner walks past Claude Code's helper processes to the session process", () => {
+    expect(findOwner(9104, tree(START))).toEqual({ pid: 9000, start: START });
+    expect(findOwner(10, tree(START))).toBeNull(); // no Claude process above a plain shell
+  });
+
+  test("owner alive keeps the session live (no timer); owner gone or pid reused → dormant; next event wakes it", async () => {
+    setProcessTableSource(() => tree(START));
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-own", project: "pj", session: "own1", user: "user:manu", create: true });
+    await hook("cc-own", { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "ls" } });
+    checkLiveness(tree(START));
+    expect((await listed("cc-own"))?.dormant).toBe(false);
+    checkLiveness(tree("Tue Nov 3 09:00:00 2026")); // same pid, different process
+    expect((await listed("cc-own"))?.dormant).toBe(true);
+    await hook("cc-own", { hook_event_name: "SessionStart", source: "resume" });
+    expect((await listed("cc-own"))?.dormant).toBe(false);
+    checkLiveness(tree(null)); // owner exited
+    expect((await listed("cc-own"))?.dormant).toBe(true);
+    setProcessTableSource(processTable);
+  });
+
+  test("SessionEnd → dormant; the waking prompt carries messages sent while dormant", async () => {
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-wake", project: "pj", session: "wake1", user: "user:manu", create: true });
+    await post(daemonUrl, "/events", { session_id: "cc-wake", hook_event_name: "UserPromptSubmit", prompt: "first" });
+    await waitForMessages(`${serviceUrl}/projects/pj/sessions/wake1/messages`, 1);
+    await new Promise((r) => setTimeout(r, 100)); // delivery checkpoint written
+
+    expect((await (await post(daemonUrl, "/events", { session_id: "cc-wake", hook_event_name: "SessionEnd", reason: "exit" })).json()).status).toBe("ended");
+    expect((await listed("cc-wake"))?.wsState).toBe("NONE");
+    await post(serviceUrl, "/projects/pj/sessions/wake1/inject", { content: "sent while you were away", sender: "user:krishna" });
+
+    const res = await post(daemonUrl, "/events", { session_id: "cc-wake", hook_event_name: "UserPromptSubmit", prompt: "back" });
+    const body = await res.json() as { pendingInjects?: Array<{ content: string }> };
+    expect(body.pendingInjects?.map((i) => i.content)).toContain("sent while you were away");
+  });
+
+  test("a dormant session is forgotten only once its transcript is gone", async () => {
+    const transcript = join(tmpdir(), `polaris-transcript-${Date.now()}.jsonl`);
+    await writeFile(transcript, "{}\n");
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-gone", project: "pj", session: "gone1", user: "user:manu", create: true });
+    await post(daemonUrl, "/events", { session_id: "cc-gone", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, transcript_path: transcript });
+    await post(daemonUrl, "/events", { session_id: "cc-gone", hook_event_name: "SessionEnd" });
+    checkLiveness(tree(START));
+    expect(await listed("cc-gone")).toBeDefined(); // dormant but resumable
+    await rm(transcript);
+    checkLiveness(tree(START));
+    expect(await listed("cc-gone")).toBeUndefined();
   });
 });

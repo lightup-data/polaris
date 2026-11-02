@@ -24,6 +24,7 @@ fi
 curl -s -X POST --connect-timeout 1 --max-time 2 \
   -H "Content-Type: application/json" \
   ${SECRET_HEADER:+-H "$SECRET_HEADER"} \
+  -H "x-polaris-hook-pid: $$" \
   -d "$INPUT" \
   "$POLARIS_URL" \
   >/dev/null 2>&1 || true

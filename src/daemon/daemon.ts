@@ -1,8 +1,13 @@
 import type { Server, ServerWebSocket } from "bun";
 import { readFile, writeFile, appendFile, mkdir, readdir, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { POLARIS_DIR } from "../paths.js";
+import { processTable, findOwner, type Owner, type Proc } from "../claude-process.js";
+
+// Re-exported for tests
+export { processTable, findOwner };
 
 // --- Session registry ---
 
@@ -202,6 +207,54 @@ function getDaemonSecret(): string | null {
 
 // --- Cloud WebSocket management ---
 
+// Queue inject messages that arrived while this session's socket was down. They're
+// persisted server-side; query from the last delivered inject (or, failing that, the
+// last delivered hook event as a safe lower bound). Deduped against the queue.
+async function catchUpInjects(mapping: SessionMapping): Promise<void> {
+  const serviceUrl = getServiceUrlForProfile(mapping.profile);
+  try {
+    let since = await readInjectCheckpoint(mapping.ccSessionId);
+    if (!since) {
+      // No inject checkpoint yet — fall back to the outbound delivery checkpoint.
+      // Any inject sent after the last successfully delivered hook event could be missed.
+      const cp = await readCheckpoint(mapping.ccSessionId);
+      if (!cp || cp.project !== mapping.project || cp.session !== mapping.session) return;
+      since = cp.lastEventTimestamp;
+    }
+    const headers = await authHeadersForProfile(mapping.profile);
+    // Filter server-side: unfiltered, this returns every event in the project since
+    // the checkpoint (hundreds of MB on big projects), which OOM-looped the API when
+    // all daemons reconnected at once. Older servers ignore the extra params.
+    const q = new URLSearchParams({ since, source: "inject", session: mapping.session });
+    const res = await fetch(
+      `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/messages?${q}`,
+      { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
+    );
+    if (!res.ok) return;
+    const events = await res.json() as Array<{
+      source?: string; session?: string; sender?: string;
+      payload?: { content?: string }; timestamp?: string;
+    }>;
+    const missed = events.filter(e => e.source === "inject" && e.session === mapping.session);
+    if (missed.length === 0) return;
+
+    let queue = injectQueues.get(mapping.ccSessionId);
+    if (!queue) { queue = []; injectQueues.set(mapping.ccSessionId, queue); }
+    let added = 0;
+    for (const e of missed) {
+      const ts = e.timestamp ?? "";
+      const from = e.sender ?? "";
+      // Dedup: skip if already in queue (e.g. WS dropped while message was undelivered)
+      if (queue.some(m => m.timestamp === ts && m.from === from)) continue;
+      queue.push({ from, content: e.payload?.content ?? "", timestamp: ts });
+      added++;
+    }
+    if (added > 0) {
+      console.error(`[daemon] Recovered ${added} missed inject message(s) for ${mapping.project}/${mapping.session}`);
+    }
+  } catch { /* best-effort */ }
+}
+
 function connectCloudWs(mapping: SessionMapping) {
   const serviceUrl = getServiceUrlForProfile(mapping.profile);
   const wsUrl = serviceUrl.replace(/^http/, "ws");
@@ -211,49 +264,9 @@ function connectCloudWs(mapping: SessionMapping) {
   // Inject messages are durably persisted server-side, so we can recover them
   // by querying the project messages API with the timestamp of the last delivered inject.
   // Falls back to the outbound event checkpoint as a safe lower bound.
-  ws.onopen = async () => {
+  ws.onopen = () => {
     mapping.wsRetries = 0;
-    try {
-      let since = await readInjectCheckpoint(mapping.ccSessionId);
-      if (!since) {
-        // No inject checkpoint yet — fall back to the outbound delivery checkpoint.
-        // Any inject sent after the last successfully delivered hook event could be missed.
-        const cp = await readCheckpoint(mapping.ccSessionId);
-        if (!cp || cp.project !== mapping.project || cp.session !== mapping.session) return;
-        since = cp.lastEventTimestamp;
-      }
-      const headers = await authHeadersForProfile(mapping.profile);
-      // Filter server-side: unfiltered, this returns every event in the project since
-      // the checkpoint (hundreds of MB on big projects), which OOM-looped the API when
-      // all daemons reconnected at once. Older servers ignore the extra params.
-      const q = new URLSearchParams({ since, source: "inject", session: mapping.session });
-      const res = await fetch(
-        `${serviceUrl}/projects/${encodeURIComponent(mapping.project)}/messages?${q}`,
-        { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
-      );
-      if (!res.ok) return;
-      const events = await res.json() as Array<{
-        source?: string; session?: string; sender?: string;
-        payload?: { content?: string }; timestamp?: string;
-      }>;
-      const missed = events.filter(e => e.source === "inject" && e.session === mapping.session);
-      if (missed.length === 0) return;
-
-      let queue = injectQueues.get(mapping.ccSessionId);
-      if (!queue) { queue = []; injectQueues.set(mapping.ccSessionId, queue); }
-      let added = 0;
-      for (const e of missed) {
-        const ts = e.timestamp ?? "";
-        const from = e.sender ?? "";
-        // Dedup: skip if already in queue (e.g. WS dropped while message was undelivered)
-        if (queue.some(m => m.timestamp === ts && m.from === from)) continue;
-        queue.push({ from, content: e.payload?.content ?? "", timestamp: ts });
-        added++;
-      }
-      if (added > 0) {
-        console.error(`[daemon] Recovered ${added} missed inject message(s) for ${mapping.project}/${mapping.session}`);
-      }
-    } catch { /* best-effort — don't disrupt the WS connection */ }
+    void catchUpInjects(mapping);
   };
 
   ws.onmessage = (event) => {
@@ -660,6 +673,104 @@ interface PersistedSession {
   slackChannel?: string;
 }
 
+// --- Session liveness ---
+// Every daemon session belongs to one Claude Code process. It goes dormant only when
+// that session is known to be over — Claude Code's SessionEnd hook, or its owning
+// process is gone (pid + start time, so a reused pid can't fool it). No timers: an
+// idle but open session keeps its socket and gets teammate messages live. Dormant =
+// socket closed, nothing reconnects. Any hook event (SessionStart on resume) wakes
+// it, and the first prompt after waking waits briefly for missed injects so none
+// arrive a prompt late. A dormant session is forgotten only once its transcript is
+// gone (it can no longer be resumed). Tracked per project/session pair: a Claude
+// session's MCP id and hook id are two mappings sharing one pair and one socket.
+
+const LIVENESS_INTERVAL_MS = 60_000;
+const WAKE_CATCHUP_WAIT_MS = 1_500;
+interface PairState {
+  lastActiveAt: number;
+  dormant: boolean;
+  owner?: Owner | null; // null = looked up, no Claude process found (liveness unknown)
+  transcript?: string;
+}
+const pairState = new Map<string, PairState>();
+const pendingCatchUp = new Map<string, Promise<void>>();
+const pairKey = (m: { project: string; session: string }) => `${m.project}/${m.session}`;
+
+function mappingsForPair(key: string): SessionMapping[] {
+  return [...sessions.values()].filter((m) => m.project && pairKey(m) === key);
+}
+
+// Swappable so tests can describe a process tree deterministically
+let processTableSource: () => Map<number, Proc> | null = processTable;
+export function setProcessTableSource(fn: () => Map<number, Proc> | null): void {
+  processTableSource = fn;
+}
+
+// Record activity (and the owner/transcript, once); wake the pair if it was dormant.
+// Returns true when this call woke it.
+function touchPair(mapping: SessionMapping, info: { pid?: number; transcript?: string } = {}): boolean {
+  const key = pairKey(mapping);
+  const st = pairState.get(key) ?? { lastActiveAt: 0, dormant: false };
+  const woke = st.dormant;
+  const next: PairState = { ...st, lastActiveAt: Date.now(), dormant: false };
+  if (info.transcript) next.transcript = info.transcript;
+  if (info.pid && (st.owner === undefined || woke)) {
+    const table = processTableSource();
+    next.owner = table ? findOwner(info.pid, table) : null;
+  }
+  pairState.set(key, next);
+  if (woke) {
+    if (!mappingsForPair(key).some((m) => m.ws)) connectCloudWs(mapping);
+    pendingCatchUp.set(key, catchUpInjects(mapping).finally(() => pendingCatchUp.delete(key)));
+    console.error(`[daemon] Session ${key} active again`);
+  }
+  if (woke || next.owner !== st.owner || next.transcript !== st.transcript) void persistSessions();
+  return woke;
+}
+
+// A prompt right after waking waits (bounded) for missed injects, so they ride along
+async function awaitWakeCatchUp(mapping: SessionMapping): Promise<void> {
+  const p = pendingCatchUp.get(pairKey(mapping));
+  if (p) await Promise.race([p, new Promise((r) => setTimeout(r, WAKE_CATCHUP_WAIT_MS))]);
+}
+
+function makeDormant(key: string, why: string): void {
+  const st = pairState.get(key) ?? { lastActiveAt: Date.now(), dormant: false };
+  if (st.dormant) return;
+  pairState.set(key, { ...st, dormant: true });
+  for (const m of mappingsForPair(key)) {
+    if (m.ws) {
+      m.closingIntentionally = true;
+      m.ws.close();
+      m.ws = null;
+    }
+  }
+  console.error(`[daemon] Session ${key} dormant (${why})`);
+  void persistSessions();
+}
+
+function isDormant(m: SessionMapping): boolean {
+  return pairState.get(pairKey(m))?.dormant ?? false;
+}
+
+export function checkLiveness(table: Map<number, Proc> | null = processTableSource()): void {
+  if (!table) return;
+  for (const [key, st] of [...pairState]) {
+    if (!st.dormant && st.owner) {
+      const p = table.get(st.owner.pid);
+      if (!p || p.start !== st.owner.start) makeDormant(key, "Claude Code process exited");
+    } else if (st.dormant && st.transcript && !existsSync(st.transcript)) {
+      for (const m of mappingsForPair(key)) {
+        sessions.delete(m.ccSessionId);
+        injectQueues.delete(m.ccSessionId);
+      }
+      pairState.delete(key);
+      console.error(`[daemon] Forgot session ${key} (transcript gone — can't be resumed)`);
+      void persistSessions();
+    }
+  }
+}
+
 async function persistSessions(): Promise<void> {
   if (!persistenceEnabled) return;
   try {
@@ -677,14 +788,19 @@ async function persistSessions(): Promise<void> {
         ...(m.slackChannel ? { slackChannel: m.slackChannel } : {}),
       });
     }
-    await writeFile(DAEMON_STATE_FILE, JSON.stringify({ sessions: active }));
+    const pairs = Object.fromEntries([...pairState].filter(([k]) => mappingsForPair(k).length > 0));
+    await writeFile(DAEMON_STATE_FILE, JSON.stringify({ sessions: active, pairs }));
   } catch { /* best-effort */ }
 }
 
 async function loadPersistedSessions(): Promise<void> {
   try {
-    const data = JSON.parse(await readFile(DAEMON_STATE_FILE, "utf-8")) as { sessions: PersistedSession[] };
+    const data = JSON.parse(await readFile(DAEMON_STATE_FILE, "utf-8")) as {
+      sessions: PersistedSession[];
+      pairs?: Record<string, { lastActiveAt: number; dormant: boolean }>;
+    };
     if (!Array.isArray(data.sessions)) return;
+    for (const [k, v] of Object.entries(data.pairs ?? {})) pairState.set(k, v);
 
     // Populate the sessions map
     for (const s of data.sessions) {
@@ -702,10 +818,18 @@ async function loadPersistedSessions(): Promise<void> {
       });
     }
 
-    // Open one cloud WebSocket per (project, session) pair; alias entries share it
+    // Sessions saved before owners were tracked have no known Claude process, so there's
+    // no evidence they're still open: start them dormant. A live one wakes on its next
+    // hook event (and records its owner). Sessions with a known owner are checked now.
+    for (const m of sessions.values()) {
+      if (!pairState.has(pairKey(m))) pairState.set(pairKey(m), { lastActiveAt: 0, dormant: true });
+    }
+    checkLiveness();
+
+    // Open one cloud WebSocket per active (project, session) pair; alias entries share it
     const primaryForPair = new Map<string, SessionMapping>();
     for (const mapping of sessions.values()) {
-      if (!mapping.project) continue;
+      if (!mapping.project || isDormant(mapping)) continue;
       const key = `${mapping.project}/${mapping.session}`;
       if (!primaryForPair.has(key)) {
         primaryForPair.set(key, mapping);
@@ -973,6 +1097,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         try {
           const body = (await req.json()) as {
             ccSessionId: string;
+            pid?: number;
             project: string;
             session?: string;
             user: string;
@@ -1154,6 +1279,14 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           }
 
           // Connect to cloud WebSocket
+          {
+            // The MCP server sends its pid: its owning Claude process is this session's owner
+            const table = body.pid ? processTableSource() : null;
+            pairState.set(pairKey(mapping), {
+              lastActiveAt: Date.now(), dormant: false,
+              owner: table && body.pid ? findOwner(body.pid, table) : undefined,
+            });
+          }
           connectCloudWs(mapping);
           await logSessionChange("connect", mapping.ccSessionId, mapping.project, mapping.session, mapping.user, mapping.agent);
 
@@ -1286,6 +1419,18 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             }
           }
 
+          // Claude Code says the session closed: stop holding its socket. Local only —
+          // not part of the event stream (and the server schema doesn't take it).
+          if (body.hook_event_name === "SessionEnd") {
+            makeDormant(pairKey(mapping), `Claude session ended${body.reason ? `: ${body.reason}` : ""}`);
+            return json({ status: "ended" });
+          }
+          // Hooks send their own pid; the daemon walks up to the owning Claude process once
+          const hookPid = Number(req.headers.get("x-polaris-hook-pid")) || undefined;
+          touchPair(mapping, { pid: hookPid, transcript: typeof body.transcript_path === "string" ? body.transcript_path : undefined });
+          // Lifecycle signal only (startup / resume): waking is all it's for
+          if (body.hook_event_name === "SessionStart") return json({ status: "active" });
+
           // Log with session context so backfill can filter by exact origin
           await logEvent("/events", body, undefined, { project: mapping.project, session: mapping.session, ccSessionId });
 
@@ -1305,6 +1450,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           // UserPromptSubmit: drain queued advisor injects and hand them back
           // to the hook, which surfaces them via additionalContext
           if (hookEvent === "UserPromptSubmit") {
+            // Just woken (resume): let missed injects arrive so they ride with this prompt
+            await awaitWakeCatchUp(mapping);
             const queue = injectQueues.get(mapping.ccSessionId);
             const pendingInjects = queue ? queue.splice(0, queue.length) : [];
             // Advance inject checkpoint so WS reconnects don't re-deliver these
@@ -1468,6 +1615,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             user: m.user,
             profile: m.profile,
             wsState: m.ws != null ? (WS_STATES[m.ws.readyState] ?? "UNKNOWN") : "NONE",
+            dormant: isDormant(m),
+            lastActiveAt: pairState.get(pairKey(m))?.lastActiveAt ?? null,
           }));
         return json({ ok: true, version: "0.0.1", sessions: active });
       }
@@ -1765,12 +1914,15 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
   void probeUpstream();
   const probeTimer = setInterval(() => void probeUpstream(), PROBE_INTERVAL_MS);
+  const livenessTimer = setInterval(() => checkLiveness(), LIVENESS_INTERVAL_MS);
+  (livenessTimer as unknown as { unref?: () => void }).unref?.();
 
   return {
     server,
     sessions,
     stop: () => {
       clearInterval(probeTimer);
+      clearInterval(livenessTimer);
       if (outboxTimer) {
         clearTimeout(outboxTimer);
         outboxTimer = null;

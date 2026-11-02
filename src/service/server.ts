@@ -267,6 +267,13 @@ export async function startServer(opts: {
       message() {},
     },
 
+    // A handler that throws (e.g. a database error) answers 500 instead of escaping
+    // as an unhandled error
+    error(err) {
+      console.error("[server] request failed:", err);
+      return json({ error: "Internal server error" }, 500);
+    },
+
     async fetch(req, server) {
       const url = new URL(req.url);
       const { pathname } = url;

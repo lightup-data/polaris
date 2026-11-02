@@ -508,6 +508,10 @@ async function wireHooks(daemonSecret?: string): Promise<void> {
     Stop: [{ hooks: [{ type: "command", command: `${env}npx bun "${captureStopPath}"` }] }],
     PreToolUse: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
     PostToolUse: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
+    // Lets the daemon release a session's cloud connection when Claude Code closes it
+    SessionEnd: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
+    // Wakes a dormant session the moment Claude Code starts or resumes it
+    SessionStart: [{ hooks: [{ type: "command", command: `${env}"${captureShPath}"` }] }],
   };
 
   const settingsPath = join(CLAUDE_DIR, "settings.json");
@@ -990,6 +994,7 @@ async function accounts() {
   }
 
   const sessionsByProfile = new Map<string, Set<string>>();
+  const dormantByProfile = new Map<string, Set<string>>(); // Claude session closed or idle 24h+
   let daemonUp = false;
   try {
     const secret = resolveDaemonSecret(config);
@@ -997,10 +1002,14 @@ async function accounts() {
       headers: secret ? { "x-polaris-daemon-secret": secret } : {},
       signal: AbortSignal.timeout(1500),
     });
-    const data = await res.json() as { sessions?: Array<{ project: string; session: string; profile?: string }> };
+    const data = await res.json() as { sessions?: Array<{ project: string; session: string; profile?: string; dormant?: boolean }> };
     daemonUp = res.ok;
     for (const s of data.sessions ?? []) {
       const k = s.profile || config.active;
+      if (s.dormant) {
+        dormantByProfile.set(k, (dormantByProfile.get(k) ?? new Set()).add(`#${s.project}/${s.session}`));
+        continue;
+      }
       if (!sessionsByProfile.has(k)) sessionsByProfile.set(k, new Set());
       sessionsByProfile.get(k)!.add(`#${s.project}/${s.session}`);
     }
@@ -1021,7 +1030,8 @@ async function accounts() {
     console.log(`    server:  ${p.api}`);
     if (daemonUp) {
       const s = [...(sessionsByProfile.get(key) ?? [])];
-      console.log(`    connected sessions: ${s.length ? s.join(", ") : "none"}`);
+      const idle = dormantByProfile.get(key)?.size ?? 0;
+      console.log(`    connected sessions: ${s.length ? s.join(", ") : "none"}${idle ? ` (+${idle} dormant)` : ""}`);
     }
     console.log("");
   }

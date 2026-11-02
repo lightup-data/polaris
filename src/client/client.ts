@@ -8,6 +8,7 @@ import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { POLARIS_DIR } from "../paths.js";
+import { processTable, findOwner, watchOwner } from "../claude-process.js";
 import { DaemonClient } from "../core/daemon-client.js";
 
 // --- Configuration ---
@@ -351,6 +352,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project,
         user,
         profile: activeProfile,
@@ -763,6 +765,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Register with daemon and connect stdio ---
 
 async function main() {
+  // Exit with the Claude Code session that started us. Otherwise this server outlives
+  // it (reparented to init/launchd) and keeps running. No Claude ancestor → no watchdog.
+  const table = processTable();
+  const owner = table ? findOwner(process.pid, table) : null;
+  if (owner) {
+    watchOwner(owner, () => {
+      console.error(`polaris-mcp: Claude Code process ${owner.pid} exited — shutting down`);
+      process.exit(0);
+    });
+  }
+
   const activeProfile = await loadActiveProfile();
 
   // Register with daemon (best-effort — daemon might not be running yet)
@@ -783,6 +796,7 @@ async function main() {
     try {
       const res = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project: saved.project,
         session: saved.session,
         user: saved.user,
@@ -822,6 +836,7 @@ async function main() {
       // Daemon lost the mapping — attempt to reconnect to the same session
       const reconnectRes = await daemonPost("/connect", {
         ccSessionId: CC_SESSION_ID,
+        pid: process.pid,
         project: currentProject,
         session: currentSession,
         user: currentUser,
