@@ -169,8 +169,20 @@ if [ "$CONNECTED" = "true" ]; then
   printf "${SERVER_WARN}polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${DRIFT_TAG}${VERSION_TAG}${TOKEN_WARN}\n"
 else
   # Account chosen with /polaris account before joining
+  # Always say which account a join would use: chosen for this session (/polaris
+  # account), the default, or none. Daemon unreachable → read the default from config.
   PENDING_ACCOUNT=$(echo "$STATUS" | jq -r '.account // empty' 2>/dev/null)
-  PENDING_TAG=""
-  [ -n "$PENDING_ACCOUNT" ] && PENDING_TAG=" [${PENDING_ACCOUNT}]"
+  ACCOUNT_SOURCE=$(echo "$STATUS" | jq -r '.accountSource // empty' 2>/dev/null)
+  if ! echo "$STATUS" | jq -e 'has("connected")' >/dev/null 2>&1 && [ -f "$HOME/.polaris/config.json" ]; then
+    PENDING_ACCOUNT=$(jq -r '.active as $a | .profiles[$a].email // $a // empty' "$HOME/.polaris/config.json" 2>/dev/null)
+    [ -n "$PENDING_ACCOUNT" ] && ACCOUNT_SOURCE="default"
+  fi
+  if [ -z "$PENDING_ACCOUNT" ]; then
+    PENDING_TAG=" · no account — run: polaris login"
+  elif [ "$ACCOUNT_SOURCE" = "default" ]; then
+    PENDING_TAG=" · account: ${PENDING_ACCOUNT} (default)"
+  else
+    PENDING_TAG=" · account: ${PENDING_ACCOUNT}"
+  fi
   printf "${SERVER_WARN}polaris: not connected${PENDING_TAG}${VERSION_TAG}${TOKEN_WARN}\n"
 fi
