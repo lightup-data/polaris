@@ -23,8 +23,8 @@ import { mkdir, writeFile, readFile, rm, copyFile, chmod, readdir } from "node:f
 import { DaemonClient } from "../core/daemon-client.js";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+import { POLARIS_DIR } from "../paths.js";
 
-const POLARIS_DIR = join(homedir(), ".polaris");
 const CONFIG_FILE = join(POLARIS_DIR, "config.json");
 const LEGACY_CREDENTIALS_FILE = join(POLARIS_DIR, "credentials.json");
 const CLAUDE_DIR = join(homedir(), ".claude");

@@ -24,6 +24,7 @@ try {
     method: "POST",
     headers,
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(3000),
   }).catch(() => null);
 
   if (res && res.ok) {

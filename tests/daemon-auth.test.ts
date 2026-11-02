@@ -26,6 +26,7 @@ function baseEnv(home: string, overrides: Record<string, string>): Record<string
   return {
     ...env,
     HOME: home,
+    POLARIS_HOME: join(home, ".polaris"),
     // /status and /register never call upstream; point it nowhere just in case.
     POLARIS_SERVICE_URL: "http://127.0.0.1:9",
     POLARIS_AUTH_TOKEN: "",

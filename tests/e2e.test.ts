@@ -2,7 +2,7 @@ import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:tes
 import { startServer } from "../src/service/server";
 import { startDaemon } from "../src/daemon/daemon";
 import type { Sql } from "../src/service/db";
-import { resetTestData } from "./helpers";
+import { resetTestData, waitForMessages } from "./helpers";
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://polaris:polaris@localhost:5432/polaris_test";
 
@@ -85,15 +85,13 @@ describe("e2e: two drivers on same project", () => {
     });
 
     // Verify isolation: fxm only has Manu's event
-    const fxmRes = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const fxmBody = await fxmRes.json();
+    const fxmBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(fxmBody).toHaveLength(1);
     expect(fxmBody[0].sender).toBe("user:manu");
     expect(fxmBody[0].payload.prompt).toBe("build the auth middleware");
 
     // Verify isolation: fxk only has Krishna's event
-    const fxkRes = await get(serviceUrl, "/projects/pj/sessions/fxk/messages");
-    const fxkBody = await fxkRes.json();
+    const fxkBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxk/messages`, 1);
     expect(fxkBody).toHaveLength(1);
     expect(fxkBody[0].sender).toBe("user:krishna");
     expect(fxkBody[0].payload.prompt).toBe("set up the database schema");
@@ -263,8 +261,7 @@ describe("e2e: handoff", () => {
     });
 
     // Full log shows continuous history
-    const messages = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const body = await messages.json();
+    const body = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 2);
     expect(body).toHaveLength(2);
     expect(body[0].sender).toBe("user:manu");
     expect(body[0].payload.prompt).toBe("build auth middleware");
@@ -337,10 +334,7 @@ describe("e2e: capture.sh through daemon", () => {
     const exitCode = await proc.exited;
     expect(exitCode).toBe(0);
 
-    await new Promise((r) => setTimeout(r, 200));
-
-    const res = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const body = await res.json();
+    const body = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(body).toHaveLength(1);
     expect(body[0].payload.stop_response).toBe("Auth middleware is ready");
     expect(body[0].sender).toBe("agent:claude"); // Stop events are sent by the agent
@@ -402,13 +396,11 @@ describe("e2e: session switching", () => {
     });
 
     // Verify events went to correct sessions
-    const fxmRes = await get(serviceUrl, "/projects/pj/sessions/fxm/messages");
-    const fxmBody = await fxmRes.json();
+    const fxmBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxm/messages`, 1);
     expect(fxmBody).toHaveLength(1);
     expect(fxmBody[0].payload.prompt).toBe("working on fxm");
 
-    const fxkRes = await get(serviceUrl, "/projects/pj/sessions/fxk/messages");
-    const fxkBody = await fxkRes.json();
+    const fxkBody = await waitForMessages(`${serviceUrl}/projects/pj/sessions/fxk/messages`, 1);
     expect(fxkBody).toHaveLength(1);
     expect(fxkBody[0].payload.prompt).toBe("now working on fxk");
 

@@ -1,8 +1,8 @@
 import type { Server, ServerWebSocket } from "bun";
 import { readFile, writeFile, appendFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { POLARIS_DIR } from "../paths.js";
 
 // --- Session registry ---
 
@@ -50,7 +50,7 @@ let cachedConfig: PolarisConfig | null | undefined = undefined;
 async function loadConfig(): Promise<PolarisConfig | null> {
   if (cachedConfig !== undefined) return cachedConfig;
   try {
-    const configPath = join(homedir(), ".polaris", "config.json");
+    const configPath = join(POLARIS_DIR,"config.json");
     cachedConfig = JSON.parse(await readFile(configPath, "utf-8"));
     return cachedConfig;
   } catch {
@@ -73,6 +73,34 @@ function getServiceUrlForProfile(profile: string): string {
 
 function getServiceUrl(): string {
   return getServiceUrlForProfile(cachedConfig?.active ?? "");
+}
+
+// --- Upstream reachability ---
+// Surfaced in /status so the status line can warn loudly when the cloud service
+// is down; otherwise an outage just looks like "no recent events".
+
+const UPSTREAM_TIMEOUT_MS = 10_000;
+const PROBE_INTERVAL_MS = 30_000;
+let upstreamDownSince: number | null = null;
+
+function markUpstream(ok: boolean): void {
+  if (ok) upstreamDownSince = null;
+  else upstreamDownSince ??= Date.now();
+}
+
+async function probeUpstream(): Promise<void> {
+  try {
+    // Any non-5xx answer (401 included) means the service is up; a 5xx is
+    // usually the reverse proxy reporting a dead API container.
+    const res = await fetch(`${getServiceUrl()}/projects`, { signal: AbortSignal.timeout(5_000) });
+    markUpstream(res.status < 500);
+  } catch {
+    markUpstream(false);
+  }
+}
+
+function upstreamDownForSec(): number | null {
+  return upstreamDownSince === null ? null : Math.floor((Date.now() - upstreamDownSince) / 1000);
 }
 
 // Per-profile token cache. Key "" is used for env-var / test mode.
@@ -101,7 +129,7 @@ async function getTokenForProfile(profile: string): Promise<string | null> {
   }
   // Legacy credentials.json
   try {
-    const credsPath = join(homedir(), ".polaris", "credentials.json");
+    const credsPath = join(POLARIS_DIR,"credentials.json");
     const creds = JSON.parse(await readFile(credsPath, "utf-8"));
     tokenCache.set(profile, creds.token ?? null);
     return creds.token ?? null;
@@ -261,7 +289,7 @@ function disconnectCloudWs(ccSessionId: string) {
 
 // --- Local event log (JSONL) for manual recovery ---
 
-const LOG_DIR = join(homedir(), ".polaris", "logs");
+const LOG_DIR = join(POLARIS_DIR,"logs");
 let logReady: Promise<void> | null = null;
 
 function ensureLogDir(): Promise<void> {
@@ -292,7 +320,7 @@ async function logEvent(endpoint: string, payload: unknown, response?: { status:
 // duplicate POST after a lost response is harmless. The JSONL log above is
 // unchanged and still records everything.
 
-const OUTBOX_DIR = join(homedir(), ".polaris", "outbox");
+const OUTBOX_DIR = join(POLARIS_DIR,"outbox");
 
 interface OutboxEntry {
   t: string;
@@ -302,7 +330,21 @@ interface OutboxEntry {
   body: unknown; // the exact { sender, payload } body for the events endpoint
 }
 
-const pendingOutbox = new Set<string>(); // absolute file paths awaiting retry
+// Absolute file path awaiting retry → which session it belongs to and when it was queued
+const pendingOutbox = new Map<string, { project: string; session: string; at: number }>();
+
+// Drift = how far behind delivery is: age of the oldest event still queued for this
+// session. Zero when everything has been delivered, so an idle session never alarms.
+function outboxDrift(project: string, session: string): { driftSec: number; queued: number } | null {
+  let oldest = Infinity;
+  let queued = 0;
+  for (const m of pendingOutbox.values()) {
+    if (m.project !== project || m.session !== session) continue;
+    queued++;
+    oldest = Math.min(oldest, m.at);
+  }
+  return queued === 0 ? null : { driftSec: Math.floor((Date.now() - oldest) / 1000), queued };
+}
 let outboxTimer: ReturnType<typeof setTimeout> | null = null;
 let outboxDelayMs = 1000;
 const OUTBOX_MAX_DELAY_MS = 30_000;
@@ -319,7 +361,7 @@ async function enqueueOutbox(project: string, session: string, profile: string, 
     const entry: OutboxEntry = { t: new Date().toISOString(), project, session, profile, body };
     const file = join(OUTBOX_DIR, `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.json`);
     await writeFile(file, JSON.stringify(entry) + "\n");
-    pendingOutbox.add(file);
+    pendingOutbox.set(file, { project, session, at: Date.parse(entry.t) });
     scheduleOutboxFlush();
   } catch { /* best-effort — the JSONL log still has the payload */ }
 }
@@ -336,15 +378,16 @@ function scheduleOutboxFlush(): void {
 
 async function flushOutbox(): Promise<void> {
   let hadFailure = false;
-  for (const file of Array.from(pendingOutbox)) {
+  for (const file of Array.from(pendingOutbox.keys())) {
     try {
       const entry = JSON.parse(await readFile(file, "utf-8")) as OutboxEntry;
       const profile = entry.profile ?? ""; // legacy entries without profile use active
       const serviceUrl = getServiceUrlForProfile(profile);
       const res = await fetch(
         `${serviceUrl}/projects/${entry.project}/sessions/${entry.session}/events`,
-        { method: "POST", headers: await authHeadersForProfile(profile), body: JSON.stringify(entry.body) }
+        { method: "POST", headers: await authHeadersForProfile(profile), body: JSON.stringify(entry.body), signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
       );
+      markUpstream(res.status < 500);
       if (res.ok) {
         pendingOutbox.delete(file);
         await unlink(file).catch(() => {});
@@ -378,15 +421,95 @@ async function scanOutbox(): Promise<void> {
   try {
     await ensureOutboxDir();
     for (const name of await readdir(OUTBOX_DIR)) {
-      if (name.endsWith(".json")) pendingOutbox.add(join(OUTBOX_DIR, name));
+      if (!name.endsWith(".json")) continue;
+      const file = join(OUTBOX_DIR, name);
+      try {
+        const e = JSON.parse(await readFile(file, "utf-8")) as OutboxEntry;
+        pendingOutbox.set(file, { project: e.project, session: e.session, at: Date.parse(e.t) });
+      } catch { /* unreadable — flushOutbox will retry or clean it up */ }
     }
     scheduleOutboxFlush();
   } catch { /* best-effort */ }
 }
 
+// --- Background relay ---
+// Hook events are relayed off the request path, serialized per CC session so
+// upstream order matches capture order. Failures land in the outbox.
+
+interface RelayJob {
+  project: string;
+  session: string;
+  profile: string;
+  relayBody: { sender: string; payload: Record<string, unknown>; at: string };
+}
+
+const relayChains = new Map<string, Promise<void>>();
+
+function enqueueRelay(ccSessionId: string, job: RelayJob): void {
+  const next = (relayChains.get(ccSessionId) ?? Promise.resolve()).then(() => relayEvent(ccSessionId, job));
+  relayChains.set(ccSessionId, next);
+  void next.finally(() => {
+    if (relayChains.get(ccSessionId) === next) relayChains.delete(ccSessionId);
+  });
+}
+
+async function postRelay(job: RelayJob): Promise<Response | null> {
+  try {
+    return await fetch(
+      `${getServiceUrlForProfile(job.profile)}/projects/${job.project}/sessions/${job.session}/events`,
+      {
+        method: "POST",
+        headers: await authHeadersForProfile(job.profile),
+        body: JSON.stringify(job.relayBody),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      }
+    );
+  } catch {
+    return null; // network failure or timeout
+  }
+}
+
+async function relayEvent(ccSessionId: string, job: RelayJob): Promise<void> {
+  const ctx = { project: job.project, session: job.session, ccSessionId };
+  const payload = job.relayBody.payload;
+  // Known outage: skip the doomed 10s attempt. The outbox flush and the
+  // reachability probe clear the flag once the service answers again.
+  if (upstreamDownSince !== null) {
+    await enqueueOutbox(job.project, job.session, job.profile, job.relayBody);
+    return;
+  }
+  let res = await postRelay(job);
+
+  // Stop events carry the raw transcript turn, which upstream sometimes rejects
+  // (bad Unicode); retry once without it rather than losing the response.
+  if (res && res.status === 400 && "raw_turn" in payload) {
+    const { raw_turn: _dropped, ...rest } = payload;
+    job = { ...job, relayBody: { ...job.relayBody, payload: rest } };
+    res = await postRelay(job);
+  }
+
+  markUpstream(!!res && res.status < 500);
+  if (!res || res.status >= 500 || res.status === 401) {
+    console.error(`polaris daemon: upstream relay failed (${res ? res.status : "network error/timeout"}) — queued to outbox`);
+    await logEvent("/events", payload, { status: res?.status ?? 0, body: "queued to outbox" }, ctx);
+    await enqueueOutbox(job.project, job.session, job.profile, job.relayBody);
+    return;
+  }
+  if (!res.ok) {
+    await logEvent("/events", payload, { status: res.status, body: await res.text().catch(() => "") }, ctx);
+    return;
+  }
+  try {
+    const delivered = await res.json() as { id?: string; timestamp?: string };
+    if (delivered.id && delivered.timestamp) {
+      await writeCheckpoint(ccSessionId, delivered.id, delivered.timestamp, job.project, job.session);
+    }
+  } catch { /* best-effort */ }
+}
+
 // --- Session history (persistent connect/disconnect log for backfill) ---
 
-const SESSION_HISTORY_FILE = join(homedir(), ".polaris", "session-history.jsonl");
+const SESSION_HISTORY_FILE = join(POLARIS_DIR,"session-history.jsonl");
 
 async function logSessionChange(action: "connect" | "disconnect" | "ws-drop", ccSessionId: string, project: string, session: string, user: string, agent: string): Promise<void> {
   try {
@@ -407,7 +530,7 @@ async function logSessionChange(action: "connect" | "disconnect" | "ws-drop", cc
 // Tests that call startDaemon() in-process never enable it, so developer state
 // is never overwritten by the test suite.
 
-const SESSIONS_DIR = join(homedir(), ".polaris", "sessions");
+const SESSIONS_DIR = join(POLARIS_DIR,"sessions");
 const DAEMON_STATE_FILE = join(SESSIONS_DIR, "daemon-state.json");
 let persistenceEnabled = false;
 
@@ -756,11 +879,19 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const agentId = body.agent || "agent:claude";
 
           // Check whether the project exists. If not, refuse unless create: true.
-          const checkRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers });
+          const signal = () => AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+          let checkRes: Response;
+          try {
+            checkRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers, signal: signal() });
+          } catch (e) {
+            markUpstream(false);
+            return error(`Polaris server unreachable (${serviceUrl}): ${(e as Error).message}`, 502);
+          }
+          markUpstream(checkRes.status < 500);
           if (!checkRes.ok) {
             if (checkRes.status === 404) {
               // Return existing project list so the caller can show a helpful error
-              const listRes = await fetch(`${serviceUrl}/projects`, { headers });
+              const listRes = await fetch(`${serviceUrl}/projects`, { headers, signal: signal() });
               const projects: string[] = listRes.ok
                 ? ((await listRes.json() as { name: string }[]).map((p) => p.name))
                 : [];
@@ -773,6 +904,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
                 method: "POST",
                 headers,
                 body: JSON.stringify({ name: body.project }),
+                signal: signal(),
               });
               if (!createRes.ok && createRes.status !== 409) {
                 return error(`Failed to create project: ${await createRes.text()}`, 500);
@@ -853,6 +985,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               method: "POST",
               headers,
               body: JSON.stringify({ name: mapping.session, driver: body.user }),
+              signal: signal(),
             });
             if (sessionRes.ok) {
               created = true;
@@ -863,6 +996,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
                   method: "POST",
                   headers,
                   body: JSON.stringify({ driver: body.user }),
+                  signal: signal(),
                 });
                 created = true;
                 isReconnect = true; // session pre-existed → this is a true reconnect
@@ -883,7 +1017,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
 
           // Fetch Slack channel name for status display
           try {
-            const projRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers });
+            const projRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers, signal: signal() });
             if (projRes.ok) {
               const projData = await projRes.json() as { slack_channel_name?: string };
               mapping.slackChannel = projData.slack_channel_name ?? undefined;
@@ -923,8 +1057,10 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             agent: mapping.agent,
             gap,
           });
-        } catch {
-          return error("Invalid JSON", 400);
+        } catch (e) {
+          if (e instanceof SyntaxError) return error("Invalid JSON", 400);
+          markUpstream(false);
+          return error(`Polaris server unreachable: ${(e as Error).message}`, 502);
         }
       }
 
@@ -1026,53 +1162,14 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           const hookEvent = body.hook_event_name as string | undefined;
           const sender = hookEvent === "UserPromptSubmit" ? mapping.user : mapping.agent;
 
-          // Relay to cloud service; on network failure or upstream 5xx,
-          // persist to the write-ahead outbox instead of dropping
-          const serviceUrl = getServiceUrlForProfile(mapping.profile);
-          const relayBody = { sender, payload: body };
-          let res: Response | null = null;
-          try {
-            res = await fetch(
-              `${serviceUrl}/projects/${mapping.project}/sessions/${mapping.session}/events`,
-              {
-                method: "POST",
-                headers: await authHeadersForProfile(mapping.profile),
-                body: JSON.stringify(relayBody),
-              }
-            );
-          } catch {
-            res = null; // network failure
-          }
-
-          if (!res || res.status >= 500) {
-            console.error(`polaris daemon: upstream relay failed (${res ? res.status : "network error"}) — queued to outbox`);
-            await logEvent("/events", body, { status: res?.status ?? 0, body: "queued to outbox" }, { project: mapping.project, session: mapping.session, ccSessionId });
-            await enqueueOutbox(mapping.project, mapping.session, mapping.profile, relayBody);
-            // The event is durably accepted (outbox), so still drain injects
-            if (hookEvent === "UserPromptSubmit") {
-              const queue = injectQueues.get(mapping.ccSessionId);
-              const pendingInjects = queue ? queue.splice(0, queue.length) : [];
-              // Advance inject checkpoint so WS reconnects don't re-deliver these
-              const maxInjectTs = pendingInjects.reduce((m, i) => i.timestamp > m ? i.timestamp : m, "");
-              if (maxInjectTs) void writeInjectCheckpoint(mapping.ccSessionId, maxInjectTs);
-              return json({ ok: true, pendingInjects, queued: true });
-            }
-            return json({ status: "queued" });
-          }
-
-          if (!res.ok) {
-            const err = await res.text();
-            await logEvent("/events", body, { status: res.status, body: err }, { project: mapping.project, session: mapping.session, ccSessionId });
-            return new Response(err, { status: res.status });
-          }
-
-          // Write delivery checkpoint so reconnects can auto-backfill the exact gap
-          try {
-            const delivered = await res.json() as { id?: string; timestamp?: string };
-            if (delivered.id && delivered.timestamp) {
-              void writeCheckpoint(ccSessionId, delivered.id, delivered.timestamp, mapping.project, mapping.session);
-            }
-          } catch { /* best-effort — don't block the response */ }
+          // Relay in the background: the hook sits on Claude Code's critical path,
+          // so it must never wait on the network. `at` preserves capture time.
+          enqueueRelay(ccSessionId, {
+            project: mapping.project,
+            session: mapping.session,
+            profile: mapping.profile,
+            relayBody: { sender, payload: body, at: new Date().toISOString() },
+          });
 
           // UserPromptSubmit: drain queued advisor injects and hand them back
           // to the hook, which surfaces them via additionalContext
@@ -1084,7 +1181,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
             if (maxInjectTs) void writeInjectCheckpoint(mapping.ccSessionId, maxInjectTs);
             return json({ ok: true, pendingInjects });
           }
-          return json({ status: "relayed" });
+          return json({ status: "accepted" });
         } catch {
           return error("Invalid JSON", 400);
         }
@@ -1178,7 +1275,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
         const ccSessionId = pathname.slice("/status/".length);
         const mapping = sessions.get(ccSessionId);
         if (!mapping || !mapping.project) {
-          return json({ connected: false });
+          return json({ connected: false, serverDownFor: upstreamDownForSec() });
         }
         // Resolve slackChannel from any session in the same project
         let slackChannel = mapping.slackChannel ?? null;
@@ -1205,6 +1302,8 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           slackChannel,
           account: emailFromToken(await getTokenForProfile(mapping.profile)),
           lastEventAge,
+          drift: outboxDrift(mapping.project, mapping.session),
+          serverDownFor: upstreamDownForSec(),
         });
       }
 
@@ -1503,10 +1602,14 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
     },
   });
 
+  void probeUpstream();
+  const probeTimer = setInterval(() => void probeUpstream(), PROBE_INTERVAL_MS);
+
   return {
     server,
     sessions,
     stop: () => {
+      clearInterval(probeTimer);
       if (outboxTimer) {
         clearTimeout(outboxTimer);
         outboxTimer = null;

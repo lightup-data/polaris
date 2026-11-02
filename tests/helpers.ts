@@ -1,5 +1,17 @@
 import { ensureSchema, type Sql } from "../src/service/db";
 
+// The daemon relays hook events in the background, so poll until upstream catches up.
+export async function waitForMessages(url: string, count: number, timeoutMs = 3000): Promise<any[]> {
+  const deadline = Date.now() + timeoutMs;
+  let body: any[] = [];
+  while (Date.now() < deadline) {
+    body = await (await fetch(url)).json();
+    if (Array.isArray(body) && body.length >= count) return body;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return body;
+}
+
 /**
  * Reset test data to a clean slate: drop every table in the public schema, then
  * recreate the canonical schema via `ensureSchema` (the same DDL production uses).

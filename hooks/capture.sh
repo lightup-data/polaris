@@ -21,7 +21,7 @@ if [ -n "$POLARIS_DAEMON_SECRET" ]; then
 fi
 
 # POST to polaris local client, fail silently
-curl -s -X POST \
+curl -s -X POST --connect-timeout 1 --max-time 2 \
   -H "Content-Type: application/json" \
   ${SECRET_HEADER:+-H "$SECRET_HEADER"} \
   -d "$INPUT" \

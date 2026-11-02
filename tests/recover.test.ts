@@ -42,6 +42,7 @@ async function runRecover(jsonlLines: string[] | null): Promise<{ exitCode: numb
     env: {
       ...env,
       HOME: home,
+      POLARIS_HOME: join(home, ".polaris"),
       // Unreachable API: recover is best-effort and must still exit cleanly.
       POLARIS_SERVICE_URL: "http://127.0.0.1:9",
       POLARIS_AUTH_TOKEN: "",

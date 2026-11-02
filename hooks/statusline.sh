@@ -105,6 +105,28 @@ if [ -f "$CREDS" ]; then
   fi
 fi
 
+fmt_age() {
+  if [ "$1" -lt 60 ] 2>/dev/null; then echo "<1m"
+  elif [ "$1" -lt 3600 ] 2>/dev/null; then echo "$(( $1 / 60 ))m"
+  elif [ "$1" -lt 86400 ] 2>/dev/null; then echo "$(( $1 / 3600 ))h"
+  else echo "$(( $1 / 86400 ))d"
+  fi
+}
+
+# --- Server reachability (daemon probes the cloud service every 30s) ---
+SERVER_WARN=""
+DOWN_FOR=$(echo "$STATUS" | jq -r '.serverDownFor // empty' 2>/dev/null || echo "")
+if [ -n "$DOWN_FOR" ]; then
+  DOWN_TXT="⚠ POLARIS SERVER UNREACHABLE ($(fmt_age "$DOWN_FOR")) — events not syncing"
+  if [ "$DOWN_FOR" -lt 300 ] 2>/dev/null; then
+    SERVER_WARN="\033[1;31m${DOWN_TXT}\033[0m "
+  elif [ "$DOWN_FOR" -lt 3600 ] 2>/dev/null; then
+    SERVER_WARN="\033[1;97;41m ${DOWN_TXT} \033[0m "
+  else
+    SERVER_WARN="\033[1;5;97;41m ${DOWN_TXT} — CHECK SERVER NOW \033[0m "
+  fi
+fi
+
 if [ "$CONNECTED" = "true" ]; then
   PROJECT=$(echo "$STATUS" | jq -r '.project' 2>/dev/null)
   SESSION=$(echo "$STATUS" | jq -r '.session' 2>/dev/null)
@@ -120,14 +142,22 @@ if [ "$CONNECTED" = "true" ]; then
   RECENCY=""
   LAST_AGE=$(echo "$STATUS" | jq -r '.lastEventAge // ""' 2>/dev/null || echo "")
   if [ -n "$LAST_AGE" ] && [ "$LAST_AGE" != "null" ]; then
-    if [ "$LAST_AGE" -lt 60 ] 2>/dev/null; then
-      RECENCY=" · just now"
-    elif [ "$LAST_AGE" -lt 3600 ] 2>/dev/null; then
-      RECENCY=" · $(( LAST_AGE / 60 ))m ago"
-    elif [ "$LAST_AGE" -lt 86400 ] 2>/dev/null; then
-      RECENCY=" · $(( LAST_AGE / 3600 ))h ago"
-    else
-      RECENCY=" · $(( LAST_AGE / 86400 ))d ago"
+    if [ "$LAST_AGE" -lt 60 ] 2>/dev/null; then RECENCY=" · just now"
+    else RECENCY=" · $(fmt_age "$LAST_AGE") ago"
+    fi
+  fi
+
+  # Delivery drift: age of the oldest event still queued. Idle sessions have no
+  # drift, so this only escalates when captured events are actually not syncing.
+  DRIFT_TAG=""
+  DRIFT=$(echo "$STATUS" | jq -r '.drift.driftSec // empty' 2>/dev/null || echo "")
+  QUEUED=$(echo "$STATUS" | jq -r '.drift.queued // empty' 2>/dev/null || echo "")
+  if [ -n "$DRIFT" ] && [ "$DRIFT" -ge 60 ] 2>/dev/null; then
+    D="$(fmt_age "$DRIFT") behind, ${QUEUED} queued"
+    if [ "$DRIFT" -lt 300 ]; then DRIFT_TAG=" · \033[33m⚠ ${D}\033[0m"
+    elif [ "$DRIFT" -lt 1800 ]; then DRIFT_TAG=" · \033[1;33m⚠ ${D}\033[0m"
+    elif [ "$DRIFT" -lt 7200 ]; then DRIFT_TAG=" · \033[1;31m⚠ ${D}\033[0m"
+    else DRIFT_TAG=" · \033[1;97;41m ⚠ EVENTS $(fmt_age "$DRIFT") BEHIND (${QUEUED} QUEUED) \033[0m"
     fi
   fi
 
@@ -136,7 +166,7 @@ if [ "$CONNECTED" = "true" ]; then
   if [ -n "$SLACK" ] && [ "$SLACK" != "$PROJECT" ]; then
     SLACK_TAG=" → #${SLACK}"
   fi
-  printf "polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${VERSION_TAG}${TOKEN_WARN}\n"
+  printf "${SERVER_WARN}polaris: ${ACCOUNT_TAG}#${PROJECT}/${SESSION} (${USER})${SLACK_TAG}${RECENCY}${DRIFT_TAG}${VERSION_TAG}${TOKEN_WARN}\n"
 else
-  printf "polaris: not connected${VERSION_TAG}${TOKEN_WARN}\n"
+  printf "${SERVER_WARN}polaris: not connected${VERSION_TAG}${TOKEN_WARN}\n"
 fi
