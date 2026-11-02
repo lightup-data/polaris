@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 // --- Polaris CLI ---
 // Usage:
-//   polaris                       — install + login (default onboarding)
+//   polaris                       — print usage (read-only; same as `polaris help`)
+//   polaris setup                 — first-time setup: install + login
+//   polaris version               — print the installed version
 //   polaris install               — install local components (no auth)
 //   polaris update                — update to the latest version
 //   polaris login                 — authenticate via Google SSO (production)
@@ -2175,7 +2177,21 @@ switch (command) {
   }
 
   case undefined:
-    // Default: install + login
+  case "help":
+  case "--help":
+  case "-h":
+    // Bare `polaris` is read-only on purpose: it never installs or logs in
+    printHelp();
+    break;
+
+  case "version":
+  case "--version":
+  case "-v":
+    console.log(await cliVersion());
+    break;
+
+  case "setup":
+    // First-time onboarding: install + login
     console.log("Polaris — setting up your machine\n");
     console.log("[1/2] Installing local components...\n");
     await install();
@@ -2190,29 +2206,45 @@ switch (command) {
     break;
 
   default:
-    console.log("Polaris CLI\n");
-    console.log("Usage:");
-    console.log("  polaris                        — install + login (default setup)");
-    console.log("  polaris install                — install local components (no auth)");
-    console.log("  polaris update                 — update to the latest version");
-    console.log("  polaris login                  — authenticate (production)");
-    console.log("  polaris login --local          — authenticate (local dev)");
-    console.log("  polaris login --token <token>  — authenticate without a browser (SSH/headless)");
-    console.log("  polaris token                  — print token for copy-paste to another machine");
-    console.log("  polaris use <email>            — switch active account (triggers login if needed)");
-    console.log("  polaris profiles               — list all accounts");
-    console.log("  polaris daemon                 — start the local daemon");
-    console.log("  polaris status                 — show connection status");
-    console.log("  polaris connect <project> [session] [--create]  — connect to a project");
-    console.log("  polaris disconnect             — disconnect current session");
-    console.log("  polaris send <session> <msg>   — send a message to a session");
-    console.log("  polaris reply <msg>            — reply to the floor in Slack");
-    console.log("  polaris rename <old> <new>     — rename a project");
-    console.log("  polaris rename-session <name>  — rename current session");
-    console.log("  polaris context <session>      — show recent activity for a session");
-    console.log("  polaris team                   — list team members");
-    console.log("  polaris recover                — re-POST locally logged events missing upstream");
-    console.log("  polaris feedback               — report a bug or request a feature");
-    console.log("  polaris logout                 — remove active profile");
-    console.log("  polaris logout --all           — remove all credentials");
+    console.error(`Unknown command: ${command}\n`);
+    printHelp();
+    process.exit(1);
+}
+
+async function cliVersion(): Promise<string> {
+  try {
+    return (JSON.parse(await readFile(join(import.meta.dir, "..", "..", "package.json"), "utf-8")) as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+}
+
+function printHelp(): void {
+  console.log("Polaris CLI\n");
+  console.log("Usage:");
+  console.log("  polaris setup                  — first-time setup: install + login");
+  console.log("  polaris help | version         — this help / installed version (bare `polaris` = help)");
+  console.log("  polaris install                — install local components (no auth)");
+  console.log("  polaris update                 — update to the latest version");
+  console.log("  polaris login                  — authenticate (production)");
+  console.log("  polaris login --local          — authenticate (local dev)");
+  console.log("  polaris login --token <token>  — authenticate without a browser (SSH/headless)");
+  console.log("  polaris token                  — print token for copy-paste to another machine");
+  console.log("  polaris use <email>            — switch active account (triggers login if needed)");
+  console.log("  polaris profiles               — list all accounts");
+  console.log("  polaris daemon                 — run the daemon in the foreground");
+  console.log("  polaris stop | start           — stop the daemon (stays off) / start it again");
+  console.log("  polaris status                 — show connection status");
+  console.log("  polaris connect <project> [session] [--create]  — connect to a project");
+  console.log("  polaris disconnect             — disconnect current session");
+  console.log("  polaris send <session> <msg>   — send a message to a session");
+  console.log("  polaris reply <msg>            — reply to the floor in Slack");
+  console.log("  polaris rename <old> <new>     — rename a project");
+  console.log("  polaris rename-session <name>  — rename current session");
+  console.log("  polaris context <session>      — show recent activity for a session");
+  console.log("  polaris team                   — list team members");
+  console.log("  polaris recover                — re-POST locally logged events missing upstream");
+  console.log("  polaris feedback               — report a bug or request a feature");
+  console.log("  polaris logout                 — remove active profile");
+  console.log("  polaris logout --all           — remove all credentials");
 }
