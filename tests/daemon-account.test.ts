@@ -114,4 +114,29 @@ describe("daemon /status login details", () => {
       accountProfile: "work", accountServer: "https://api.example.com", accountExpiresAt: exp * 1000,
     });
   });
+
+  test("a stale profile with a valid same-account login reports the login actually used; another account's expiry stays expired", async () => {
+    const tok = (email: string, offsetSec: number) =>
+      `x.${Buffer.from(JSON.stringify({ email, exp: Math.floor(Date.now() / 1000) + offsetSec })).toString("base64url")}.y`;
+    const valid = tok("me@work.com", 20 * 86400);
+    await writeFile(configPath, JSON.stringify({
+      active: "work",
+      profiles: {
+        work: { email: "me@work.com", api: "https://api.example.com", token: valid },
+        "work-old": { email: "me@work.com", api: "https://api.example.com", token: tok("me@work.com", -86400) },
+        home: { email: "me@home.com", api: "https://api.example.com", token: tok("me@home.com", -86400) },
+      },
+    }));
+    const pick = async (hook: string, account: string) => {
+      await post("/events", { session_id: hook, hook_event_name: "PreToolUse", tool_name: "mcp__polaris__polaris_account", tool_input: { account } });
+      await post("/account", { ccSessionId: `mcp-${hook}`, account });
+      return (await fetch(`${daemonUrl}/status/${hook}`)).json() as Promise<{ accountProfile: string; accountExpiresAt: number }>;
+    };
+    const stale = await pick("hook-stale", "work-old");
+    expect(stale.accountProfile).toBe("work"); // the login the daemon actually sends
+    expect(stale.accountExpiresAt).toBeGreaterThan(Date.now());
+    const other = await pick("hook-home", "home");
+    expect(other.accountProfile).toBe("home");
+    expect(other.accountExpiresAt).toBeLessThan(Date.now()); // never borrows another account's login
+  });
 });

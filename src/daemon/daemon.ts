@@ -169,14 +169,20 @@ async function accountLogin(profile: string | undefined): Promise<{
   try {
     const cfg = JSON.parse(await readFile(join(POLARIS_DIR, "config.json"), "utf-8")) as PolarisConfig;
     const key = profile || cfg.active;
-    const p = key ? cfg.profiles?.[key] : undefined;
+    // Report the token the daemon would actually send (same rule as relaying: a
+    // same-account fallback when this profile's own token is expired), not the raw
+    // stored one — else a session joined under a stale profile shows "expired" while
+    // its events go out on a valid login.
+    const used = key ? pickToken(cfg, key) : undefined;
+    const holder = used ? (Object.keys(cfg.profiles ?? {}).find((k) => cfg.profiles[k].token === used) ?? key) : key;
+    const p = holder ? cfg.profiles?.[holder] : undefined;
     if (!p) return none;
-    const exp = jwtPayload(p.token ?? null)?.exp;
+    const exp = jwtPayload(used || p.token || null)?.exp;
     return {
-      accountProfile: key,
+      accountProfile: holder,
       accountServer: typeof p.api === "string" ? p.api : null,
       accountExpiresAt: typeof exp === "number" ? exp * 1000 : null,
-      email: String(p.email ?? key),
+      email: String(p.email ?? holder),
     };
   } catch {
     return none;
