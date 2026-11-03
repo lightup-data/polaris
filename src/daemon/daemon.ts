@@ -1,5 +1,5 @@
 import type { Server, ServerWebSocket } from "bun";
-import { readFile, writeFile, appendFile, mkdir, readdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, appendFile, mkdir, readdir, unlink, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -422,10 +422,12 @@ async function flushOutbox(): Promise<void> {
       const entry = JSON.parse(await readFile(file, "utf-8")) as OutboxEntry;
       const profile = entry.profile ?? ""; // legacy entries without profile use active
       const serviceUrl = getServiceUrlForProfile(profile);
+      const outboxHeaders = await authHeadersForProfile(profile);
       const res = await fetch(
         `${serviceUrl}/projects/${entry.project}/sessions/${entry.session}/events`,
-        { method: "POST", headers: await authHeadersForProfile(profile), body: JSON.stringify(entry.body), signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
+        { method: "POST", headers: outboxHeaders, body: JSON.stringify(entry.body), signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
       );
+      await adoptRenewedToken(outboxHeaders, res);
       markUpstream(res.status < 500);
       if (res.ok) {
         pendingOutbox.delete(file);
@@ -582,17 +584,41 @@ function enqueueRelay(ccSessionId: string, job: RelayJob): void {
   });
 }
 
+// Sliding renewal: the server returns `x-polaris-token` when the token we sent is close
+// to expiry. Save it in place of the token we sent (matched by value, since a session
+// may be using a same-account fallback profile), only if it's the same account and
+// expires later. Machines in regular use then never hit the 30-day expiry.
+async function adoptRenewedToken(sentHeaders: Record<string, string>, res: Response | null): Promise<void> {
+  const fresh = res?.headers.get("x-polaris-token");
+  const sent = sentHeaders.Authorization?.startsWith("Bearer ") ? sentHeaders.Authorization.slice(7) : null;
+  if (!fresh || !sent || fresh === sent) return;
+  const oldP = jwtPayload(sent), newP = jwtPayload(fresh);
+  if (!oldP || !newP || oldP.email !== newP.email || oldP.org_id !== newP.org_id) return;
+  if (!(typeof newP.exp === "number" && typeof oldP.exp === "number" && newP.exp > oldP.exp)) return;
+  try {
+    const path = join(POLARIS_DIR, "config.json");
+    const cfg = JSON.parse(await readFile(path, "utf-8")) as PolarisConfig;
+    const keys = Object.keys(cfg.profiles ?? {}).filter((k) => cfg.profiles[k].token === sent);
+    if (keys.length === 0) return; // token came from elsewhere (env var / legacy file)
+    for (const k of keys) cfg.profiles[k].token = fresh;
+    const tmp = `${path}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(cfg, null, 2));
+    await rename(tmp, path);
+    for (const [k, v] of tokenCache) if (v === sent) tokenCache.set(k, fresh);
+    cachedConfig = undefined;
+    console.error(`[daemon] Login renewed for ${String(newP.email ?? keys[0])} (${keys.join(", ")})`);
+  } catch { /* best-effort: the old token keeps working until it expires */ }
+}
+
 async function postRelay(job: RelayJob): Promise<Response | null> {
   try {
-    return await fetch(
+    const headers = await authHeadersForProfile(job.profile);
+    const res = await fetch(
       `${getServiceUrlForProfile(job.profile)}/projects/${job.project}/sessions/${job.session}/events`,
-      {
-        method: "POST",
-        headers: await authHeadersForProfile(job.profile),
-        body: JSON.stringify(job.relayBody),
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      }
+      { method: "POST", headers, body: JSON.stringify(job.relayBody), signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) }
     );
+    await adoptRenewedToken(headers, res);
+    return res;
   } catch {
     return null; // network failure or timeout
   }
@@ -1125,6 +1151,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           let checkRes: Response;
           try {
             checkRes = await fetch(`${serviceUrl}/projects/${body.project}`, { headers, signal: signal() });
+            await adoptRenewedToken(headers, checkRes);
           } catch (e) {
             markUpstream(false);
             return error(`Polaris server unreachable (${serviceUrl}): ${(e as Error).message}`, 502);

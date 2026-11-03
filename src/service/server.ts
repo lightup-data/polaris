@@ -34,7 +34,7 @@ import {
   userCanAccessProject,
   type Sql,
 } from "./db";
-import { verifyToken, assertSecretConfigured, type TokenPayload } from "./auth";
+import { verifyToken, renewTokenIfExpiring, assertSecretConfigured, type TokenPayload } from "./auth";
 import type { PolarisEvent, ParticipantId } from "../types";
 import { AnnotationKind, HookPayload, ParticipantId as ParticipantIdSchema } from "../types";
 
@@ -216,6 +216,19 @@ async function authOrgId(req: Request, defaultOrgId: string): Promise<{ orgId: s
   return error("Unauthorized", 401);
 }
 
+// Sliding renewal: a valid token close to expiry gets a fresh one in `x-polaris-token`,
+// so machines in regular use never reach the 30-day expiry. Clients that ignore the
+// header are unaffected.
+async function withRenewedToken(req: Request, res: Response): Promise<Response> {
+  const auth = req.headers.get("Authorization");
+  if (!auth?.startsWith("Bearer ") || res.status === 101) return res;
+  const renewed = await renewTokenIfExpiring(auth.slice(7));
+  if (!renewed) return res;
+  const headers = new Headers(res.headers);
+  headers.set("x-polaris-token", renewed);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 // --- Server factory ---
 
 export async function startServer(opts: {
@@ -275,579 +288,582 @@ export async function startServer(opts: {
     },
 
     async fetch(req, server) {
-      const url = new URL(req.url);
-      const { pathname } = url;
-      const method = req.method;
-      let params: RouteParams | null;
+      const res = await (async (): Promise<Response | undefined> => {
+        const url = new URL(req.url);
+        const { pathname } = url;
+        const method = req.method;
+        let params: RouteParams | null;
 
-      // --- WebSocket upgrade ---
-      params = matchRoute(method, pathname, "/projects/:proj/ws", "GET");
-      if (params) {
-        const upgraded = server.upgrade(req, { data: { project: params.proj } });
-        return upgraded ? undefined : error("WebSocket upgrade failed", 400);
-      }
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/ws", "GET");
-      if (params) {
-        const upgraded = server.upgrade(req, { data: { project: params.proj, session: params.sess } });
-        return upgraded ? undefined : error("WebSocket upgrade failed", 400);
-      }
-
-      if (method === "GET" && pathname === "/status") {
-        return json({ ok: true, version: "0.0.1" });
-      }
-
-      // Resolve org from auth token; falls back to default org outside production,
-      // returns 401 in production without a valid token
-      const a = await authOrgId(req, defaultOrgId);
-      if (a instanceof Response) return a;
-      const orgId = a.orgId;
-      const participantId = a.participantId;
-
-      // --- Rate limiting (write endpoints; per token, per IP when anonymous) ---
-      if (method !== "GET") {
-        const rateKey = participantId ?? `ip:${server.requestIP(req)?.address ?? "unknown"}`;
-        const isInject = /^\/projects\/[^/]+\/sessions\/[^/]+\/inject$/.test(pathname);
-        if (isInject) {
-          if (rateLimited(`inject:${rateKey}`, INJECT_LIMIT_PER_WINDOW)) {
-            return error("Rate limit exceeded: too many injects", 429);
-          }
-        } else if (rateLimited(`write:${rateKey}`, WRITE_LIMIT_PER_WINDOW)) {
-          return error("Rate limit exceeded", 429);
+        // --- WebSocket upgrade ---
+        params = matchRoute(method, pathname, "/projects/:proj/ws", "GET");
+        if (params) {
+          const upgraded = server.upgrade(req, { data: { project: params.proj } });
+          return upgraded ? undefined : error("WebSocket upgrade failed", 400);
         }
-      }
-
-      // --- Per-project ACL ---
-      // 403 non-members on project-scoped endpoints. Anonymous callers (null participant,
-      // dev/tests) and the ACL-admin endpoints (visibility/members) are exempt — so you
-      // can still add members after flipping a project to 'members'.
-      const aclMatch = pathname.match(/^\/projects\/([^/]+)(\/.*)?$/);
-      if (aclMatch && participantId) {
-        const aclRest = aclMatch[2] ?? "";
-        const isAclAdmin = aclRest === "/visibility" || aclRest === "/members" || aclRest.startsWith("/members/");
-        if (!isAclAdmin && !(await userCanAccessProject(sql, orgId, aclMatch[1], participantId))) {
-          return error("Forbidden: project is restricted to members", 403);
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/ws", "GET");
+        if (params) {
+          const upgraded = server.upgrade(req, { data: { project: params.proj, session: params.sess } });
+          return upgraded ? undefined : error("WebSocket upgrade failed", 400);
         }
-      }
 
-      // --- Project endpoints ---
-
-      if (method === "GET" && pathname === "/projects") {
-        const projects = await listProjects(sql, orgId);
-        return json(projects);
-      }
-
-      // Rename history: lets clients map names from old local logs to current ones
-      if (method === "GET" && pathname === "/renames") {
-        return json(await getRenameHistory(sql, orgId));
-      }
-
-      params = matchRoute(method, pathname, "/projects", "POST");
-      if (params) {
-        const body = await jsonBody(req);
-        const parsed = z.object({ name: z.string().min(1) }).safeParse(body);
-        if (!parsed.success) return error("Invalid body: name is required", 400);
-        try {
-          const project = await createProject(sql, orgId, parsed.data.name);
-          return json(project, 201);
-        } catch {
-          return error("Project already exists", 409);
+        if (method === "GET" && pathname === "/status") {
+          return json({ ok: true, version: "0.0.1" });
         }
-      }
 
-      params = matchRoute(method, pathname, "/projects/:proj", "GET");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        return json(project);
-      }
+        // Resolve org from auth token; falls back to default org outside production,
+        // returns 401 in production without a valid token
+        const a = await authOrgId(req, defaultOrgId);
+        if (a instanceof Response) return a;
+        const orgId = a.orgId;
+        const participantId = a.participantId;
 
-      params = matchRoute(method, pathname, "/projects/:proj/rename", "POST");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const body = await req.json() as { name?: string };
-        if (!body.name) return error("name is required", 400);
-        const existing = await getProject(sql, orgId, body.name);
-        if (existing) return error("A project with that name already exists", 409);
-        await renameProject(sql, orgId, params.proj, body.name);
-
-        // Rename Slack channel if one is linked
-        if (project.slack_channel_id) {
-          try {
-            const org = await getOrg(sql, orgId);
-            if (org?.slack_bot_token) {
-              const { WebClient } = await import("@slack/web-api");
-              const web = new WebClient(org.slack_bot_token);
-              await web.conversations.rename({
-                channel: project.slack_channel_id,
-                name: body.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 80),
-              });
+        // --- Rate limiting (write endpoints; per token, per IP when anonymous) ---
+        if (method !== "GET") {
+          const rateKey = participantId ?? `ip:${server.requestIP(req)?.address ?? "unknown"}`;
+          const isInject = /^\/projects\/[^/]+\/sessions\/[^/]+\/inject$/.test(pathname);
+          if (isInject) {
+            if (rateLimited(`inject:${rateKey}`, INJECT_LIMIT_PER_WINDOW)) {
+              return error("Rate limit exceeded: too many injects", 429);
             }
-          } catch (e) {
-            // Non-fatal — DB rename succeeded, Slack rename is best-effort
-            console.error("[server] Slack channel rename failed:", e);
+          } else if (rateLimited(`write:${rateKey}`, WRITE_LIMIT_PER_WINDOW)) {
+            return error("Rate limit exceeded", 429);
           }
         }
 
-        return json({ status: "renamed", oldName: params.proj, newName: body.name });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/rename", "POST");
-      if (params) {
-        const body = await req.json() as { name?: string };
-        if (!body.name) return error("name is required", 400);
-        try {
-          await renameSession(sql, orgId, params.proj, params.sess, body.name);
-        } catch (e) {
-          return error((e as Error).message, 404);
-        }
-        return json({ status: "renamed", oldName: params.sess, newName: body.name });
-      }
-
-      // --- Project ACL endpoints (visibility & members) ---
-
-      params = matchRoute(method, pathname, "/projects/:proj/visibility", "POST");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z.object({ visibility: z.enum(["org", "members"]) }).safeParse(body);
-        if (!parsed.success) return error("Invalid body: visibility must be 'org' or 'members'", 400);
-        await setProjectVisibility(sql, orgId, params.proj, parsed.data.visibility);
-        return json({ ok: true, visibility: parsed.data.visibility });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/members", "POST");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z
-          .object({ participant_id: z.string().min(1), role: z.string().optional() })
-          .safeParse(body);
-        if (!parsed.success) return error("Invalid body: participant_id is required", 400);
-        await addProjectMember(sql, orgId, params.proj, parsed.data.participant_id, parsed.data.role);
-        return json({ ok: true });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/members", "GET");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const members = await listProjectMembers(sql, orgId, params.proj);
-        return json({ members });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/members/:pid", "DELETE");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        // Participant ids contain ':' which clients often percent-encode in paths
-        await removeProjectMember(sql, orgId, params.proj, decodeURIComponent(params.pid));
-        return json({ ok: true });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/messages", "GET");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const since = url.searchParams.get("since");
-        const events = since
-          ? await getEventsSince(sql, orgId, params.proj, since, {
-              session: url.searchParams.get("session") ?? undefined,
-              source: url.searchParams.get("source") ?? undefined,
-            })
-          : await getProjectEvents(sql, orgId, params.proj);
-        return json(events);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/events", "GET");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const proj = params.proj;
-        let controller: SseController;
-        const stream = new ReadableStream<Uint8Array>({
-          start(ctrl) { controller = ctrl; addSse(controller, proj); },
-          cancel() { removeSse(controller, proj); },
-        });
-        return new Response(stream, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-        });
-      }
-
-      // --- Session endpoints ---
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions", "POST");
-      if (params) {
-        const project = await getProject(sql, orgId, params.proj);
-        if (!project) return error("Project not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z
-          .object({ name: z.string().min(1), driver: ParticipantIdSchema.nullable().default(null) })
-          .safeParse(body);
-        if (!parsed.success) return error("Invalid body: name is required", 400);
-        try {
-          const session = await createSession(sql, orgId, params.proj, parsed.data.name, parsed.data.driver);
-          return json(session, 201);
-        } catch {
-          return error("Session already exists in this project", 409);
-        }
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess", "GET");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        return json(session);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/events", "POST");
-      if (params) {
-        let session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session && params.proj === "_system") {
-          // Auto-create _system project and session
-          try { await createProject(sql, orgId, "_system"); } catch { /* exists */ }
-          try { session = await createSession(sql, orgId, "_system", "_system", null); } catch { session = await getSession(sql, orgId, "_system", "_system"); }
-        }
-        if (!session) return error("Session not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z
-          .object({
-            sender: ParticipantIdSchema,
-            payload: HookPayload,
-            at: z.string().datetime().optional(), // original capture time for recovered events
-          })
-          .safeParse(body);
-        if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
-        const event: PolarisEvent = {
-          id: crypto.randomUUID(),
-          project: params.proj,
-          session: params.sess,
-          timestamp: parsed.data.at ?? new Date().toISOString(),
-          source: "hook",
-          sender: parsed.data.sender,
-          payload: parsed.data.payload,
-        };
-        // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
-        markBroadcast(event.id);
-        await pushEvent(sql, orgId, event);
-        broadcastEvent(event);
-        broadcastSse(event);
-
-        // Notify web dashboard on all events (best-effort, different process)
-        const authHeader = req.headers.get("Authorization");
-        if (authHeader) {
-          fetch(`http://${process.env.WEB_HOST ?? "localhost"}:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: authHeader },
-          }).catch(() => {});
+        // --- Per-project ACL ---
+        // 403 non-members on project-scoped endpoints. Anonymous callers (null participant,
+        // dev/tests) and the ACL-admin endpoints (visibility/members) are exempt — so you
+        // can still add members after flipping a project to 'members'.
+        const aclMatch = pathname.match(/^\/projects\/([^/]+)(\/.*)?$/);
+        if (aclMatch && participantId) {
+          const aclRest = aclMatch[2] ?? "";
+          const isAclAdmin = aclRest === "/visibility" || aclRest === "/members" || aclRest.startsWith("/members/");
+          if (!isAclAdmin && !(await userCanAccessProject(sql, orgId, aclMatch[1], participantId))) {
+            return error("Forbidden: project is restricted to members", 403);
+          }
         }
 
-        // Forward _system events to Slack
-        if (params.proj === "_system") {
-          const text = (parsed.data.payload as { stop_response?: string; prompt?: string }).stop_response
-            ?? (parsed.data.payload as { prompt?: string }).prompt
-            ?? "System event";
-          await postToSlackSystemChannel(sql, orgId, `:computer: *${parsed.data.sender}*: ${text}`);
+        // --- Project endpoints ---
+
+        if (method === "GET" && pathname === "/projects") {
+          const projects = await listProjects(sql, orgId);
+          return json(projects);
         }
 
-        return json(event, 201);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/events", "GET");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        // Paginated event history when limit/before is present; SSE stream otherwise
-        if (url.searchParams.has("limit") || url.searchParams.has("before")) {
-          const limitParam = url.searchParams.get("limit");
-          const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
-          const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
-          const before = url.searchParams.get("before") ?? undefined;
-          const { events, nextCursor } = await getSessionEventsPage(sql, orgId, params.proj, params.sess, { limit, before });
-          return json({ events, nextCursor });
+        // Rename history: lets clients map names from old local logs to current ones
+        if (method === "GET" && pathname === "/renames") {
+          return json(await getRenameHistory(sql, orgId));
         }
-        const proj = params.proj;
-        const sess = params.sess;
-        let controller: SseController;
-        const stream = new ReadableStream<Uint8Array>({
-          start(ctrl) { controller = ctrl; addSse(controller, proj, sess); },
-          cancel() { removeSse(controller, proj, sess); },
-        });
-        return new Response(stream, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-        });
-      }
 
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/inject", "POST");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z
-          .object({ content: z.string().min(1), sender: ParticipantIdSchema.optional() })
-          .safeParse(body);
-        if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
-        // Authenticated callers always inject as themselves; anonymous (non-prod) callers must supply a sender
-        const sender = participantId ?? parsed.data.sender;
-        if (!sender) return error("Invalid body: sender is required", 400);
-        const event: PolarisEvent = {
-          id: crypto.randomUUID(),
-          project: params.proj,
-          session: params.sess,
-          timestamp: new Date().toISOString(),
-          source: "inject",
-          sender,
-          payload: {
-            type: "inject" as const,
-            content: parsed.data.content,
-            sender,
-            target: params.sess,
-          },
-        };
-        // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
-        markBroadcast(event.id);
-        await pushEvent(sql, orgId, event);
-        broadcastEvent(event);
-        broadcastSse(event);
-        return json(event, 201);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/messages", "GET");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        const events = await getSessionEvents(sql, orgId, params.proj, params.sess);
-        return json(events);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/handoff", "POST");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        if (!session.driver) return error("Session has no driver to hand off", 400);
-        await clearDriver(sql, orgId, params.proj, params.sess);
-        return json({ status: "open", session: params.sess });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/driver", "POST");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        if (session.driver) return error(`Session already has driver: ${session.driver}`, 409);
-        const body = await jsonBody(req);
-        const parsed = z.object({ driver: ParticipantIdSchema }).safeParse(body);
-        if (!parsed.success) return error("Invalid body: driver is required", 400);
-        await setDriver(sql, orgId, params.proj, params.sess, parsed.data.driver);
-        return json({ status: "claimed", driver: parsed.data.driver, session: params.sess });
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/label", "POST");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z.object({ label: z.string() }).safeParse(body);
-        if (!parsed.success) return error("Invalid body: label is required", 400);
-        await setSessionLabel(sql, orgId, params.proj, params.sess, parsed.data.label);
-        return json({ ok: true });
-      }
-
-      // --- Annotations (curation: stars, tags, decisions) ---
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/annotations", "POST");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        const body = await jsonBody(req);
-        const parsed = z
-          .object({
-            event_id: z.string().uuid().optional(),
-            kind: AnnotationKind,
-            value: z.string().optional(),
-          })
-          .safeParse(body);
-        if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
-        const { id } = await addAnnotation(sql, orgId, {
-          event_id: parsed.data.event_id ?? null,
-          project: params.proj,
-          session: params.sess,
-          participant_id: participantId,
-          kind: parsed.data.kind,
-          value: parsed.data.value ?? null,
-        });
-        return json({ id }, 201);
-      }
-
-      params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/annotations", "GET");
-      if (params) {
-        const session = await getSession(sql, orgId, params.proj, params.sess);
-        if (!session) return error("Session not found", 404);
-        const annotations = await listSessionAnnotations(sql, orgId, params.proj, params.sess);
-        return json({ annotations });
-      }
-
-      params = matchRoute(method, pathname, "/annotations/:id", "DELETE");
-      if (params) {
-        await deleteAnnotation(sql, orgId, params.id);
-        return json({ ok: true });
-      }
-
-      if (method === "GET" && pathname === "/decisions") {
-        const project = url.searchParams.get("project") ?? undefined;
-        if (project && !(await userCanAccessProject(sql, orgId, project, participantId))) {
-          return error("Forbidden: project is restricted to members", 403);
-        }
-        const limitParam = url.searchParams.get("limit");
-        const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
-        const decisions = await listDecisions(sql, orgId, {
-          project,
-          limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
-          participantId,
-        });
-        return json({ decisions });
-      }
-
-      // --- Search ---
-
-      if (method === "GET" && pathname === "/search") {
-        const q = url.searchParams.get("q");
-        if (!q || !q.trim()) return error("q is required", 400);
-        const project = url.searchParams.get("project") ?? undefined;
-        if (project && !(await userCanAccessProject(sql, orgId, project, participantId))) {
-          return error("Forbidden: project is restricted to members", 403);
-        }
-        const limitParam = url.searchParams.get("limit");
-        const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
-        const { results } = await searchEvents(sql, orgId, {
-          q,
-          project,
-          session: url.searchParams.get("session") ?? undefined,
-          sender: url.searchParams.get("sender") ?? undefined,
-          source: url.searchParams.get("source") ?? undefined,
-          tag: url.searchParams.get("tag") ?? undefined,
-          limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
-          participantId,
-        });
-        return json({ results });
-      }
-
-      // GET /team — list org members with Slack identities
-      if (method === "GET" && pathname === "/team") {
-        const { listUsers, getOrg: getOrgFn } = await import("./db");
-        const users = await listUsers(sql, orgId);
-        const org = await getOrgFn(sql, orgId);
-
-        // Resolve Slack user info if bot token available (paginate through all members)
-        let slackMembers: Array<{ id: string; name: string; display_name: string; email: string; username: string }> = [];
-        if (org?.slack_bot_token) {
+        params = matchRoute(method, pathname, "/projects", "POST");
+        if (params) {
+          const body = await jsonBody(req);
+          const parsed = z.object({ name: z.string().min(1) }).safeParse(body);
+          if (!parsed.success) return error("Invalid body: name is required", 400);
           try {
-            type SlackMember = { id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean };
-            type SlackResponse = { ok?: boolean; members?: SlackMember[]; response_metadata?: { next_cursor?: string } };
-            let cursor = "";
-            do {
-              const url = `https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${cursor}` : ""}`;
-              const slackRes = await fetch(url, {
-                headers: { Authorization: `Bearer ${org.slack_bot_token}` },
-              });
-              if (!slackRes.ok) break;
-              const slackData = (await slackRes.json()) as SlackResponse;
-              for (const m of slackData.members ?? []) {
-                if (m.deleted || m.is_bot) continue;
-                slackMembers.push({
-                  id: m.id,
-                  name: m.real_name ?? "",
-                  display_name: m.profile?.display_name ?? "",
-                  email: m.profile?.email ?? "",
-                  username: m.name ?? "",
+            const project = await createProject(sql, orgId, parsed.data.name);
+            return json(project, 201);
+          } catch {
+            return error("Project already exists", 409);
+          }
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj", "GET");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          return json(project);
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/rename", "POST");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const body = await req.json() as { name?: string };
+          if (!body.name) return error("name is required", 400);
+          const existing = await getProject(sql, orgId, body.name);
+          if (existing) return error("A project with that name already exists", 409);
+          await renameProject(sql, orgId, params.proj, body.name);
+
+          // Rename Slack channel if one is linked
+          if (project.slack_channel_id) {
+            try {
+              const org = await getOrg(sql, orgId);
+              if (org?.slack_bot_token) {
+                const { WebClient } = await import("@slack/web-api");
+                const web = new WebClient(org.slack_bot_token);
+                await web.conversations.rename({
+                  channel: project.slack_channel_id,
+                  name: body.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 80),
                 });
               }
-              cursor = slackData.response_metadata?.next_cursor ?? "";
-            } while (cursor);
-          } catch { /* Slack API unavailable */ }
+            } catch (e) {
+              // Non-fatal — DB rename succeeded, Slack rename is best-effort
+              console.error("[server] Slack channel rename failed:", e);
+            }
+          }
+
+          return json({ status: "renamed", oldName: params.proj, newName: body.name });
         }
 
-        // Build team from ALL Slack workspace members, annotate with Polaris identity
-        const matchedEmails = new Set<string>();
-        const team = slackMembers.map((m) => {
-          const polarisUser = users.find((u) => u.email.toLowerCase() === m.email.toLowerCase())
-            ?? users.find((u) => u.name.toLowerCase() === m.name.toLowerCase());
-          if (polarisUser) matchedEmails.add(polarisUser.email.toLowerCase());
-          return {
-            name: m.name || m.display_name || m.username,
-            slack_id: m.id,
-            slack_handle: m.username,
-            slack_display: m.display_name || m.name,
-            participant_id: polarisUser?.participant_id ?? null,
-            polaris_user: !!polarisUser,
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/rename", "POST");
+        if (params) {
+          const body = await req.json() as { name?: string };
+          if (!body.name) return error("name is required", 400);
+          try {
+            await renameSession(sql, orgId, params.proj, params.sess, body.name);
+          } catch (e) {
+            return error((e as Error).message, 404);
+          }
+          return json({ status: "renamed", oldName: params.sess, newName: body.name });
+        }
+
+        // --- Project ACL endpoints (visibility & members) ---
+
+        params = matchRoute(method, pathname, "/projects/:proj/visibility", "POST");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z.object({ visibility: z.enum(["org", "members"]) }).safeParse(body);
+          if (!parsed.success) return error("Invalid body: visibility must be 'org' or 'members'", 400);
+          await setProjectVisibility(sql, orgId, params.proj, parsed.data.visibility);
+          return json({ ok: true, visibility: parsed.data.visibility });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/members", "POST");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z
+            .object({ participant_id: z.string().min(1), role: z.string().optional() })
+            .safeParse(body);
+          if (!parsed.success) return error("Invalid body: participant_id is required", 400);
+          await addProjectMember(sql, orgId, params.proj, parsed.data.participant_id, parsed.data.role);
+          return json({ ok: true });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/members", "GET");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const members = await listProjectMembers(sql, orgId, params.proj);
+          return json({ members });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/members/:pid", "DELETE");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          // Participant ids contain ':' which clients often percent-encode in paths
+          await removeProjectMember(sql, orgId, params.proj, decodeURIComponent(params.pid));
+          return json({ ok: true });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/messages", "GET");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const since = url.searchParams.get("since");
+          const events = since
+            ? await getEventsSince(sql, orgId, params.proj, since, {
+                session: url.searchParams.get("session") ?? undefined,
+                source: url.searchParams.get("source") ?? undefined,
+              })
+            : await getProjectEvents(sql, orgId, params.proj);
+          return json(events);
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/events", "GET");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const proj = params.proj;
+          let controller: SseController;
+          const stream = new ReadableStream<Uint8Array>({
+            start(ctrl) { controller = ctrl; addSse(controller, proj); },
+            cancel() { removeSse(controller, proj); },
+          });
+          return new Response(stream, {
+            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+          });
+        }
+
+        // --- Session endpoints ---
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions", "POST");
+        if (params) {
+          const project = await getProject(sql, orgId, params.proj);
+          if (!project) return error("Project not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z
+            .object({ name: z.string().min(1), driver: ParticipantIdSchema.nullable().default(null) })
+            .safeParse(body);
+          if (!parsed.success) return error("Invalid body: name is required", 400);
+          try {
+            const session = await createSession(sql, orgId, params.proj, parsed.data.name, parsed.data.driver);
+            return json(session, 201);
+          } catch {
+            return error("Session already exists in this project", 409);
+          }
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess", "GET");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          return json(session);
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/events", "POST");
+        if (params) {
+          let session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session && params.proj === "_system") {
+            // Auto-create _system project and session
+            try { await createProject(sql, orgId, "_system"); } catch { /* exists */ }
+            try { session = await createSession(sql, orgId, "_system", "_system", null); } catch { session = await getSession(sql, orgId, "_system", "_system"); }
+          }
+          if (!session) return error("Session not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z
+            .object({
+              sender: ParticipantIdSchema,
+              payload: HookPayload,
+              at: z.string().datetime().optional(), // original capture time for recovered events
+            })
+            .safeParse(body);
+          if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
+          const event: PolarisEvent = {
+            id: crypto.randomUUID(),
+            project: params.proj,
+            session: params.sess,
+            timestamp: parsed.data.at ?? new Date().toISOString(),
+            source: "hook",
+            sender: parsed.data.sender,
+            payload: parsed.data.payload,
           };
-        });
+          // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
+          markBroadcast(event.id);
+          await pushEvent(sql, orgId, event);
+          broadcastEvent(event);
+          broadcastSse(event);
 
-        // Add Polaris users not in Slack (e.g., synthetic test users)
-        for (const u of users) {
-          if (!matchedEmails.has(u.email.toLowerCase())) {
-            team.push({
-              name: u.name,
-              slack_id: null,
-              slack_handle: null,
-              slack_display: null,
-              participant_id: u.participant_id,
-              polaris_user: true,
-            });
+          // Notify web dashboard on all events (best-effort, different process)
+          const authHeader = req.headers.get("Authorization");
+          if (authHeader) {
+            fetch(`http://${process.env.WEB_HOST ?? "localhost"}:${Number(process.env.WEB_PORT ?? 3000)}/api/notify-dashboard`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: authHeader },
+            }).catch(() => {});
           }
+
+          // Forward _system events to Slack
+          if (params.proj === "_system") {
+            const text = (parsed.data.payload as { stop_response?: string; prompt?: string }).stop_response
+              ?? (parsed.data.payload as { prompt?: string }).prompt
+              ?? "System event";
+            await postToSlackSystemChannel(sql, orgId, `:computer: *${parsed.data.sender}*: ${text}`);
+          }
+
+          return json(event, 201);
         }
 
-        // Generate short aliases: prefer display_name, fall back to name, then handle
-        // Filter out slackbot
-        const filtered = team.filter((m) => m.slack_handle !== "slackbot");
-        team.length = 0;
-        team.push(...filtered);
-
-        function deriveAlias(m: typeof team[0]): string {
-          // Best source: display name (what the person chose)
-          const displayName = m.slack_display?.trim();
-          if (displayName) {
-            const first = displayName.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
-            if (first.length >= 2) return first;
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/events", "GET");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          // Paginated event history when limit/before is present; SSE stream otherwise
+          if (url.searchParams.has("limit") || url.searchParams.has("before")) {
+            const limitParam = url.searchParams.get("limit");
+            const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+            const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+            const before = url.searchParams.get("before") ?? undefined;
+            const { events, nextCursor } = await getSessionEventsPage(sql, orgId, params.proj, params.sess, { limit, before });
+            return json({ events, nextCursor });
           }
-          // Next: real name, but skip short/initial-only first names
-          const parts = m.name.split(/\s+/);
-          for (const part of parts) {
-            const clean = part.toLowerCase().replace(/[^a-z]/g, "");
-            if (clean.length >= 2) return clean;
-          }
-          // Fall back to slack handle
-          return m.slack_handle || "";
+          const proj = params.proj;
+          const sess = params.sess;
+          let controller: SseController;
+          const stream = new ReadableStream<Uint8Array>({
+            start(ctrl) { controller = ctrl; addSse(controller, proj, sess); },
+            cancel() { removeSse(controller, proj, sess); },
+          });
+          return new Response(stream, {
+            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+          });
         }
 
-        const aliasCounts = new Map<string, number>();
-        for (const m of team) {
-          const alias = deriveAlias(m);
-          if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/inject", "POST");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z
+            .object({ content: z.string().min(1), sender: ParticipantIdSchema.optional() })
+            .safeParse(body);
+          if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
+          // Authenticated callers always inject as themselves; anonymous (non-prod) callers must supply a sender
+          const sender = participantId ?? parsed.data.sender;
+          if (!sender) return error("Invalid body: sender is required", 400);
+          const event: PolarisEvent = {
+            id: crypto.randomUUID(),
+            project: params.proj,
+            session: params.sess,
+            timestamp: new Date().toISOString(),
+            source: "inject",
+            sender,
+            payload: {
+              type: "inject" as const,
+              content: parsed.data.content,
+              sender,
+              target: params.sess,
+            },
+          };
+          // Record before pushEvent so our own NOTIFY echo is de-duped (we broadcast inline below).
+          markBroadcast(event.id);
+          await pushEvent(sql, orgId, event);
+          broadcastEvent(event);
+          broadcastSse(event);
+          return json(event, 201);
         }
-        for (const m of team) {
-          const alias = deriveAlias(m);
-          if (!alias) {
-            (m as Record<string, unknown>).alias = null;
-          } else if ((aliasCounts.get(alias) ?? 0) > 1) {
-            // Collision — append first letter of last name or use handle
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/messages", "GET");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          const events = await getSessionEvents(sql, orgId, params.proj, params.sess);
+          return json(events);
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/handoff", "POST");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          if (!session.driver) return error("Session has no driver to hand off", 400);
+          await clearDriver(sql, orgId, params.proj, params.sess);
+          return json({ status: "open", session: params.sess });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/driver", "POST");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          if (session.driver) return error(`Session already has driver: ${session.driver}`, 409);
+          const body = await jsonBody(req);
+          const parsed = z.object({ driver: ParticipantIdSchema }).safeParse(body);
+          if (!parsed.success) return error("Invalid body: driver is required", 400);
+          await setDriver(sql, orgId, params.proj, params.sess, parsed.data.driver);
+          return json({ status: "claimed", driver: parsed.data.driver, session: params.sess });
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/label", "POST");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z.object({ label: z.string() }).safeParse(body);
+          if (!parsed.success) return error("Invalid body: label is required", 400);
+          await setSessionLabel(sql, orgId, params.proj, params.sess, parsed.data.label);
+          return json({ ok: true });
+        }
+
+        // --- Annotations (curation: stars, tags, decisions) ---
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/annotations", "POST");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          const body = await jsonBody(req);
+          const parsed = z
+            .object({
+              event_id: z.string().uuid().optional(),
+              kind: AnnotationKind,
+              value: z.string().optional(),
+            })
+            .safeParse(body);
+          if (!parsed.success) return error(`Invalid body: ${parsed.error.message}`, 400);
+          const { id } = await addAnnotation(sql, orgId, {
+            event_id: parsed.data.event_id ?? null,
+            project: params.proj,
+            session: params.sess,
+            participant_id: participantId,
+            kind: parsed.data.kind,
+            value: parsed.data.value ?? null,
+          });
+          return json({ id }, 201);
+        }
+
+        params = matchRoute(method, pathname, "/projects/:proj/sessions/:sess/annotations", "GET");
+        if (params) {
+          const session = await getSession(sql, orgId, params.proj, params.sess);
+          if (!session) return error("Session not found", 404);
+          const annotations = await listSessionAnnotations(sql, orgId, params.proj, params.sess);
+          return json({ annotations });
+        }
+
+        params = matchRoute(method, pathname, "/annotations/:id", "DELETE");
+        if (params) {
+          await deleteAnnotation(sql, orgId, params.id);
+          return json({ ok: true });
+        }
+
+        if (method === "GET" && pathname === "/decisions") {
+          const project = url.searchParams.get("project") ?? undefined;
+          if (project && !(await userCanAccessProject(sql, orgId, project, participantId))) {
+            return error("Forbidden: project is restricted to members", 403);
+          }
+          const limitParam = url.searchParams.get("limit");
+          const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+          const decisions = await listDecisions(sql, orgId, {
+            project,
+            limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+            participantId,
+          });
+          return json({ decisions });
+        }
+
+        // --- Search ---
+
+        if (method === "GET" && pathname === "/search") {
+          const q = url.searchParams.get("q");
+          if (!q || !q.trim()) return error("q is required", 400);
+          const project = url.searchParams.get("project") ?? undefined;
+          if (project && !(await userCanAccessProject(sql, orgId, project, participantId))) {
+            return error("Forbidden: project is restricted to members", 403);
+          }
+          const limitParam = url.searchParams.get("limit");
+          const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+          const { results } = await searchEvents(sql, orgId, {
+            q,
+            project,
+            session: url.searchParams.get("session") ?? undefined,
+            sender: url.searchParams.get("sender") ?? undefined,
+            source: url.searchParams.get("source") ?? undefined,
+            tag: url.searchParams.get("tag") ?? undefined,
+            limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+            participantId,
+          });
+          return json({ results });
+        }
+
+        // GET /team — list org members with Slack identities
+        if (method === "GET" && pathname === "/team") {
+          const { listUsers, getOrg: getOrgFn } = await import("./db");
+          const users = await listUsers(sql, orgId);
+          const org = await getOrgFn(sql, orgId);
+
+          // Resolve Slack user info if bot token available (paginate through all members)
+          let slackMembers: Array<{ id: string; name: string; display_name: string; email: string; username: string }> = [];
+          if (org?.slack_bot_token) {
+            try {
+              type SlackMember = { id: string; name: string; real_name?: string; profile?: { display_name?: string; email?: string }; deleted?: boolean; is_bot?: boolean };
+              type SlackResponse = { ok?: boolean; members?: SlackMember[]; response_metadata?: { next_cursor?: string } };
+              let cursor = "";
+              do {
+                const url = `https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${cursor}` : ""}`;
+                const slackRes = await fetch(url, {
+                  headers: { Authorization: `Bearer ${org.slack_bot_token}` },
+                });
+                if (!slackRes.ok) break;
+                const slackData = (await slackRes.json()) as SlackResponse;
+                for (const m of slackData.members ?? []) {
+                  if (m.deleted || m.is_bot) continue;
+                  slackMembers.push({
+                    id: m.id,
+                    name: m.real_name ?? "",
+                    display_name: m.profile?.display_name ?? "",
+                    email: m.profile?.email ?? "",
+                    username: m.name ?? "",
+                  });
+                }
+                cursor = slackData.response_metadata?.next_cursor ?? "";
+              } while (cursor);
+            } catch { /* Slack API unavailable */ }
+          }
+
+          // Build team from ALL Slack workspace members, annotate with Polaris identity
+          const matchedEmails = new Set<string>();
+          const team = slackMembers.map((m) => {
+            const polarisUser = users.find((u) => u.email.toLowerCase() === m.email.toLowerCase())
+              ?? users.find((u) => u.name.toLowerCase() === m.name.toLowerCase());
+            if (polarisUser) matchedEmails.add(polarisUser.email.toLowerCase());
+            return {
+              name: m.name || m.display_name || m.username,
+              slack_id: m.id,
+              slack_handle: m.username,
+              slack_display: m.display_name || m.name,
+              participant_id: polarisUser?.participant_id ?? null,
+              polaris_user: !!polarisUser,
+            };
+          });
+
+          // Add Polaris users not in Slack (e.g., synthetic test users)
+          for (const u of users) {
+            if (!matchedEmails.has(u.email.toLowerCase())) {
+              team.push({
+                name: u.name,
+                slack_id: null,
+                slack_handle: null,
+                slack_display: null,
+                participant_id: u.participant_id,
+                polaris_user: true,
+              });
+            }
+          }
+
+          // Generate short aliases: prefer display_name, fall back to name, then handle
+          // Filter out slackbot
+          const filtered = team.filter((m) => m.slack_handle !== "slackbot");
+          team.length = 0;
+          team.push(...filtered);
+
+          function deriveAlias(m: typeof team[0]): string {
+            // Best source: display name (what the person chose)
+            const displayName = m.slack_display?.trim();
+            if (displayName) {
+              const first = displayName.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+              if (first.length >= 2) return first;
+            }
+            // Next: real name, but skip short/initial-only first names
             const parts = m.name.split(/\s+/);
-            const lastInitial = parts.length > 1 ? parts[parts.length - 1]?.[0]?.toLowerCase() ?? "" : "";
-            (m as Record<string, unknown>).alias = lastInitial ? `${alias}${lastInitial}` : m.slack_handle || alias;
-          } else {
-            (m as Record<string, unknown>).alias = alias;
+            for (const part of parts) {
+              const clean = part.toLowerCase().replace(/[^a-z]/g, "");
+              if (clean.length >= 2) return clean;
+            }
+            // Fall back to slack handle
+            return m.slack_handle || "";
           }
+
+          const aliasCounts = new Map<string, number>();
+          for (const m of team) {
+            const alias = deriveAlias(m);
+            if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
+          }
+          for (const m of team) {
+            const alias = deriveAlias(m);
+            if (!alias) {
+              (m as Record<string, unknown>).alias = null;
+            } else if ((aliasCounts.get(alias) ?? 0) > 1) {
+              // Collision — append first letter of last name or use handle
+              const parts = m.name.split(/\s+/);
+              const lastInitial = parts.length > 1 ? parts[parts.length - 1]?.[0]?.toLowerCase() ?? "" : "";
+              (m as Record<string, unknown>).alias = lastInitial ? `${alias}${lastInitial}` : m.slack_handle || alias;
+            } else {
+              (m as Record<string, unknown>).alias = alias;
+            }
+          }
+
+          return json({ members: team });
         }
 
-        return json({ members: team });
-      }
+        if (method === "GET" && pathname === "/status") {
+          return json({ ok: true, version: "0.0.1" });
+        }
 
-      if (method === "GET" && pathname === "/status") {
-        return json({ ok: true, version: "0.0.1" });
-      }
-
-      return error("Not found", 404);
+        return error("Not found", 404);
+      })();
+      return res ? await withRenewedToken(req, res) : res;
     },
   });
 
