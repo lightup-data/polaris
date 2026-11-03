@@ -5,7 +5,9 @@
 
 export interface DaemonClientOptions {
   url: string;
-  secret?: string | null;
+  secret?: string | null | (() => string | null);
+  /** Re-read the secret (e.g. from config) when the daemon rejects the current one */
+  refreshSecret?: () => string | null;
 }
 
 export interface ConnectOptions {
@@ -75,31 +77,48 @@ export interface BackfillResult {
   error?: string;
 }
 
+// A 401 from the local daemon means this process has the wrong daemon secret — not
+// that the user's Polaris login is bad. Say so, so it isn't mistaken for "log in again".
+export const DAEMON_AUTH_ERROR =
+  "The Polaris MCP server couldn't authenticate to the local Polaris daemon (daemon secret mismatch). " +
+  "This is not your account login. Reconnect with /mcp; if it keeps happening, run `polaris install`.";
+
+// Fetch from the daemon; on 401, re-resolve the secret once (it may have been
+// regenerated since this process started) and retry, else return a clear error.
+export async function daemonFetch(
+  url: string, init: RequestInit, secret: () => string | null, refresh?: () => string | null
+): Promise<Response> {
+  const withSecret = (s: string | null): RequestInit => ({
+    ...init,
+    headers: { "Content-Type": "application/json", ...(s ? { "x-polaris-daemon-secret": s } : {}) },
+  });
+  let res = await fetch(url, withSecret(secret()));
+  if (res.status === 401 && refresh) {
+    const fresh = refresh();
+    if (fresh && fresh !== secret()) res = await fetch(url, withSecret(fresh));
+  }
+  if (res.status !== 401) return res;
+  return new Response(JSON.stringify({ error: DAEMON_AUTH_ERROR }), { status: 401, headers: { "Content-Type": "application/json" } });
+}
+
 export class DaemonClient {
   private url: string;
-  private secret: string | null;
+  private secret: () => string | null;
+  private refresh?: () => string | null;
 
   constructor(opts: DaemonClientOptions) {
     this.url = opts.url.replace(/\/$/, "");
-    this.secret = opts.secret ?? null;
-  }
-
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (this.secret) h["x-polaris-daemon-secret"] = this.secret;
-    return h;
+    const s = opts.secret ?? null;
+    this.secret = typeof s === "function" ? s : () => s;
+    this.refresh = opts.refreshSecret;
   }
 
   async post(path: string, body: unknown): Promise<Response> {
-    return fetch(`${this.url}${path}`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
+    return daemonFetch(`${this.url}${path}`, { method: "POST", body: JSON.stringify(body) }, this.secret, this.refresh);
   }
 
   async get(path: string, signal?: AbortSignal): Promise<Response> {
-    return fetch(`${this.url}${path}`, { headers: this.headers(), signal });
+    return daemonFetch(`${this.url}${path}`, { signal }, this.secret, this.refresh);
   }
 
   async channels(): Promise<string[]> {

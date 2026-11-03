@@ -5,16 +5,33 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { POLARIS_DIR } from "../paths.js";
 import { processTable, findOwner, watchOwner } from "../claude-process.js";
-import { DaemonClient } from "../core/daemon-client.js";
+import { DaemonClient, daemonFetch } from "../core/daemon-client.js";
 
 // --- Configuration ---
 
 const DAEMON_URL = process.env.POLARIS_DAEMON_URL ?? "http://127.0.0.1:4322";
-const DAEMON_SECRET = process.env.POLARIS_DAEMON_SECRET || null;
+// Same rule as the daemon: the env var wired by `polaris install`, else config.json.
+// Env alone left any MCP server launched without it unable to reach the daemon
+// ("Unauthorized" on every tool, easily mistaken for a logged-out account).
+function secretFromConfig(): string | null {
+  try {
+    const s = JSON.parse(readFileSync(join(POLARIS_DIR, "config.json"), "utf-8")).daemonSecret;
+    return typeof s === "string" && s ? s : null;
+  } catch {
+    return null;
+  }
+}
+let DAEMON_SECRET: string | null = process.env.POLARIS_DAEMON_SECRET || secretFromConfig();
+const refreshDaemonSecret = (): string | null => {
+  const fresh = secretFromConfig();
+  if (fresh) DAEMON_SECRET = fresh;
+  return fresh;
+};
 
 // Stable session ID for this MCP instance: explicit override, else Claude Code's
 // session id if it exposes one, else a generated UUID (daemon learns the hook id as an alias).
@@ -27,7 +44,7 @@ const CC_SESSION_ID =
 // then bind the join exactly instead of waiting for a hook event to claim it.
 const CC_SESSION_ID_IS_CLAUDES = !!(process.env.POLARIS_CC_SESSION_ID ?? process.env.CLAUDE_SESSION_ID ?? process.env.CLAUDE_CODE_SESSION_ID);
 
-const daemon = new DaemonClient({ url: DAEMON_URL, secret: DAEMON_SECRET });
+const daemon = new DaemonClient({ url: DAEMON_URL, secret: () => DAEMON_SECRET, refreshSecret: refreshDaemonSecret });
 
 // Keep raw get/post available for the standby long-poll (needs AbortSignal)
 // and any path not yet on DaemonClient.
@@ -37,10 +54,10 @@ function daemonHeaders(): Record<string, string> {
   return headers;
 }
 async function daemonPost(path: string, body: unknown): Promise<Response> {
-  return fetch(`${DAEMON_URL}${path}`, { method: "POST", headers: daemonHeaders(), body: JSON.stringify(body) });
+  return daemonFetch(`${DAEMON_URL}${path}`, { method: "POST", body: JSON.stringify(body) }, () => DAEMON_SECRET, refreshDaemonSecret);
 }
 async function daemonGet(path: string): Promise<Response> {
-  return fetch(`${DAEMON_URL}${path}`, { headers: daemonHeaders() });
+  return daemonFetch(`${DAEMON_URL}${path}`, {}, () => DAEMON_SECRET, refreshDaemonSecret);
 }
 
 // --- Session state persistence ---
