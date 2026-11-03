@@ -160,6 +160,29 @@ export function pickToken(config: PolarisConfig, profile: string): string | null
   return undefined;
 }
 
+// Login details for the account a session uses (or would use), read fresh from config
+// so a `polaris login` shows immediately. expiresAt: ms epoch from the JWT exp.
+async function accountLogin(profile: string | undefined): Promise<{
+  accountProfile: string | null; accountServer: string | null; accountExpiresAt: number | null; email: string | null;
+}> {
+  const none = { accountProfile: null, accountServer: null, accountExpiresAt: null, email: null };
+  try {
+    const cfg = JSON.parse(await readFile(join(POLARIS_DIR, "config.json"), "utf-8")) as PolarisConfig;
+    const key = profile || cfg.active;
+    const p = key ? cfg.profiles?.[key] : undefined;
+    if (!p) return none;
+    const exp = jwtPayload(p.token ?? null)?.exp;
+    return {
+      accountProfile: key,
+      accountServer: typeof p.api === "string" ? p.api : null,
+      accountExpiresAt: typeof exp === "number" ? exp * 1000 : null,
+      email: String(p.email ?? key),
+    };
+  } catch {
+    return none;
+  }
+}
+
 function jwtPayload(token: string | null): Record<string, unknown> | null {
   if (!token) return null;
   try { return JSON.parse(atob(token.split(".")[1])); } catch { return null; }
@@ -1627,7 +1650,12 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
               }
             } catch { /* no config: no account */ }
           }
-          return json({ connected: false, account, accountSource, serverDownFor: upstreamDownForSec() });
+          const login = await accountLogin(selected?.profile);
+          return json({
+            connected: false, account, accountSource,
+            accountProfile: login.accountProfile, accountServer: login.accountServer, accountExpiresAt: login.accountExpiresAt,
+            serverDownFor: upstreamDownForSec(),
+          });
         }
         // Resolve slackChannel from any session in the same project
         let slackChannel = mapping.slackChannel ?? null;
@@ -1653,6 +1681,7 @@ export function startDaemon(port = Number(process.env.POLARIS_DAEMON_PORT ?? 432
           user: mapping.user,
           slackChannel,
           account: emailFromToken(await getTokenForProfile(mapping.profile)),
+          ...(({ email: _e, ...l }) => l)(await accountLogin(mapping.profile)),
           lastEventAge,
           drift: outboxDrift(mapping.project, mapping.session),
           serverDownFor: upstreamDownForSec(),

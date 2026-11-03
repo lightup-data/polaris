@@ -44,3 +44,39 @@ describe("status line: account when not connected", () => {
     expect(await render({ port: 9, config })).toStartWith("polaris: not connected · account: me@work.com (default)");
   });
 });
+
+describe("status line: login expiry for the session's account", () => {
+  const H = 3600_000;
+  const jwt = (expMs: number) => `x.${Buffer.from(JSON.stringify({ exp: Math.floor(expMs / 1000) })).toString("base64url")}.y`;
+
+  test("expired → names the account and the exact re-login command (--local for localhost)", async () => {
+    const out = await render({ reply: {
+      connected: false, account: "me@dev.com", accountSource: "default",
+      accountProfile: "dev", accountServer: "http://localhost:4321", accountExpiresAt: Date.now() - H,
+    } });
+    expect(out).toContain("🚨 LOGIN EXPIRED for me@dev.com — run: polaris login --local --profile dev");
+  });
+
+  test("connected session, login expires within 3 days → early warning", async () => {
+    const out = await render({ reply: {
+      connected: true, project: "pj", session: "s1", user: "user:m", account: "me@work.com",
+      accountProfile: "work", accountServer: "https://api.example.com", accountExpiresAt: Date.now() + 2.5 * 24 * H,
+    } });
+    expect(out).toContain("⚠ login for me@work.com expires in 2d");
+    expect(out).not.toContain("--local");
+  });
+
+  test("plenty of time left → no warning", async () => {
+    const out = await render({ reply: {
+      connected: true, project: "pj", session: "s1", user: "user:m", account: "me@work.com",
+      accountProfile: "work", accountServer: "https://api.example.com", accountExpiresAt: Date.now() + 10 * 24 * H,
+    } });
+    expect(out).not.toContain("login for");
+    expect(out).not.toContain("EXPIRED");
+  });
+
+  test("daemon unreachable → checks the default account's token from config", async () => {
+    const config = { active: "w", profiles: { w: { email: "me@work.com", api: "https://api.example.com", token: jwt(Date.now() + 5.5 * H) } } };
+    expect(await render({ port: 9, config })).toContain("⚠ login for me@work.com expires in 5h");
+  });
+});
