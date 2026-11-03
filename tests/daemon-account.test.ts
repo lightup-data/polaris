@@ -99,3 +99,19 @@ describe("daemon /channels", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("daemon /status login details", () => {
+  test("reports the account's profile, server and login expiry (read fresh from config)", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 2 * 86400;
+    const token = `x.${Buffer.from(JSON.stringify({ email: "me@work.com", exp })).toString("base64url")}.y`;
+    await writeFile(configPath, JSON.stringify({
+      active: "work",
+      profiles: { work: { email: "me@work.com", api: "https://api.example.com", token } },
+    }));
+    const res = await (await fetch(`${daemonUrl}/status/hook-login`)).json();
+    expect(res).toMatchObject({
+      connected: false, account: "me@work.com", accountSource: "default",
+      accountProfile: "work", accountServer: "https://api.example.com", accountExpiresAt: exp * 1000,
+    });
+  });
+});

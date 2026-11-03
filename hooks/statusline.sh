@@ -85,23 +85,42 @@ _EOF_
   fi
 fi
 
-# --- Token expiry check (local JWT decode, no network) ---
+# --- Login expiry for the account this session uses (or would use) ---
+# Warn ahead of expiry, not just after. The daemon reports the session's account;
+# if it's unreachable, check the default account in config.json instead.
 TOKEN_WARN=""
-CREDS="$HOME/.polaris/credentials.json"
-if [ -f "$CREDS" ]; then
-  TOKEN=$(jq -r '.token // ""' "$CREDS" 2>/dev/null || echo "")
+L_EXP=0
+if echo "$STATUS" | jq -e 'has("connected")' >/dev/null 2>&1; then
+  L_EMAIL=$(echo "$STATUS" | jq -r '.account // .accountProfile // empty' 2>/dev/null)
+  L_PROFILE=$(echo "$STATUS" | jq -r '.accountProfile // empty' 2>/dev/null)
+  L_SERVER=$(echo "$STATUS" | jq -r '.accountServer // empty' 2>/dev/null)
+  L_EXP_MS=$(echo "$STATUS" | jq -r '.accountExpiresAt // 0 | floor' 2>/dev/null || echo 0)
+  L_EXP=$(( ${L_EXP_MS:-0} / 1000 ))
+elif [ -f "$HOME/.polaris/config.json" ]; then
+  CFG="$HOME/.polaris/config.json"
+  L_PROFILE=$(jq -r '.active // empty' "$CFG" 2>/dev/null)
+  L_EMAIL=$(jq -r '.active as $a | .profiles[$a].email // $a // empty' "$CFG" 2>/dev/null)
+  L_SERVER=$(jq -r '.active as $a | .profiles[$a].api // empty' "$CFG" 2>/dev/null)
+  TOKEN=$(jq -r '.active as $a | .profiles[$a].token // empty' "$CFG" 2>/dev/null)
   if [ -n "$TOKEN" ]; then
-    # Extract JWT payload (middle segment), pad to multiple of 4, base64-decode
-    PAYLOAD=$(echo "$TOKEN" | cut -d. -f2)
-    # Add padding
+    # JWT payload is base64url: map to base64 and pad before decoding
+    PAYLOAD=$(echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+')
     PAD=$(( ${#PAYLOAD} % 4 ))
     [ "$PAD" -eq 2 ] && PAYLOAD="${PAYLOAD}=="
     [ "$PAD" -eq 3 ] && PAYLOAD="${PAYLOAD}="
-    EXP=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.exp // 0' 2>/dev/null || echo "0")
-    NOW=$(date +%s 2>/dev/null || echo "0")
-    if [ -n "$EXP" ] && [ "$EXP" != "0" ] && [ "$NOW" -gt "$EXP" ] 2>/dev/null; then
-      TOKEN_WARN=" \033[1;31m🚨 TOKEN EXPIRED — run: polaris login\033[0m"
-    fi
+    L_EXP=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.exp // 0 | floor' 2>/dev/null || echo 0)
+  fi
+fi
+NOW=$(date +%s 2>/dev/null || echo 0)
+if [ "${L_EXP:-0}" -gt 0 ] 2>/dev/null; then
+  LEFT=$(( L_EXP - NOW ))
+  if [ "$LEFT" -le 0 ]; then
+    LOCAL_FLAG=""
+    case "$L_SERVER" in *localhost*|*127.0.0.1*) LOCAL_FLAG=" --local" ;; esac
+    TOKEN_WARN=" \033[1;31m🚨 LOGIN EXPIRED for ${L_EMAIL} — run: polaris login${LOCAL_FLAG} --profile ${L_PROFILE}\033[0m"
+  elif [ "$LEFT" -lt 259200 ]; then
+    if [ "$LEFT" -ge 86400 ]; then IN="$(( LEFT / 86400 ))d"; else IN="$(( LEFT / 3600 ))h"; fi
+    TOKEN_WARN=" \033[33m⚠ login for ${L_EMAIL} expires in ${IN}\033[0m"
   fi
 fi
 
