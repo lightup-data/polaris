@@ -32,3 +32,34 @@ describe("claude-process", () => {
     expect(findOwner(300, t)).toBeNull();
   });
 });
+
+describe("owner detection across Claude Code surfaces", () => {
+  test("desktop app: executable path with spaces, stream-json flags", () => {
+    const exe = "/Users/u/Library/Application Support/Claude/claude-code/2.1.260/claude.app/Contents/MacOS/claude";
+    const t = new Map<number, Proc>([
+      [30, { ppid: 20, start: "a", args: "bun /Users/u/.polaris/mcp/node_modules/@lightupai/polaris/src/client/client.ts", comm: "bun" }],
+      [20, { ppid: 10, start: "a", args: "bash /Users/u/.polaris/mcp/node_modules/.bin/polaris-mcp", comm: "/bin/bash" }],
+      [10, { ppid: 5, start: "s", args: `${exe} --output-format stream-json --verbose`, comm: exe }],
+      [5, { ppid: 1, start: "a", args: "/Applications/Claude.app/Contents/MacOS/Claude", comm: "/Applications/Claude.app/Contents/MacOS/Claude" }],
+    ]);
+    expect(findOwner(30, t)).toEqual({ pid: 10, start: "s" });
+  });
+
+  test("helpers are skipped by their retitled name; a daemon orphaned from its session yields none", () => {
+    const t = new Map<number, Proc>([
+      [40, { ppid: 41, start: "a", args: "/bin/sh hook.sh", comm: "/bin/sh" }],
+      [41, { ppid: 42, start: "a", args: "claude bg-spare --bg-spare /tmp/x", comm: "claude bg-spare" }],
+      [42, { ppid: 43, start: "a", args: "claude bg-pty-host --bg-pty-host /tmp/y", comm: "claude bg-pty-host" }],
+      [43, { ppid: 1, start: "a", args: "/opt/claude-code/2.1.309/claude daemon run --origin transient", comm: "/opt/claude-code/2.1.309/claude" }],
+    ]);
+    expect(findOwner(40, t)).toBeNull();
+  });
+
+  test("terminal session found by executable path", () => {
+    const t = new Map<number, Proc>([
+      [50, { ppid: 51, start: "a", args: "bun client.ts", comm: "bun" }],
+      [51, { ppid: 1, start: "s", args: "/opt/homebrew/Caskroom/claude-code/2.1.309/claude --resume prelight", comm: "/opt/homebrew/Caskroom/claude-code/2.1.309/claude" }],
+    ]);
+    expect(findOwner(50, t)).toEqual({ pid: 51, start: "s" });
+  });
+});
