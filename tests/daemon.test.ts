@@ -264,6 +264,22 @@ describe("daemon session liveness", () => {
     setProcessTableSource(processTable);
   });
 
+  test("waking via a hook that runs outside the session process keeps the known owner", async () => {
+    // Hooks can run under Claude Code's shared background daemon (no session process
+    // above them); that must not erase the owner the join established.
+    const orphanHook = new Map([[9300, { ppid: 1, start: START, args: "/bin/sh hook.sh" }]]);
+    setProcessTableSource(() => tree(START));
+    await post(daemonUrl, "/connect", { ccSessionId: "cc-keep", project: "pj", session: "keep1", user: "user:manu", create: true, pid: 9104 });
+    await post(daemonUrl, "/events", { session_id: "cc-keep", hook_event_name: "SessionEnd" });
+    setProcessTableSource(() => new Map([...tree(START), ...orphanHook]));
+    await fetch(`${daemonUrl}/events`, { method: "POST", headers: { "Content-Type": "application/json", "x-polaris-hook-pid": "9300" },
+      body: JSON.stringify({ session_id: "cc-keep", hook_event_name: "SessionStart" }) });
+    expect((await listed("cc-keep"))?.dormant).toBe(false);
+    checkLiveness(tree(null)); // the known owner exits → dormant again (impossible if it had been erased)
+    expect((await listed("cc-keep"))?.dormant).toBe(true);
+    setProcessTableSource(processTable);
+  });
+
   test("SessionEnd → dormant; the waking prompt carries messages sent while dormant", async () => {
     await post(daemonUrl, "/connect", { ccSessionId: "cc-wake", project: "pj", session: "wake1", user: "user:manu", create: true });
     await post(daemonUrl, "/events", { session_id: "cc-wake", hook_event_name: "UserPromptSubmit", prompt: "first" });

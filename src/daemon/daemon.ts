@@ -770,8 +770,13 @@ function touchPair(mapping: SessionMapping, info: { pid?: number; transcript?: s
   const next: PairState = { ...st, lastActiveAt: Date.now(), dormant: false };
   if (info.transcript) next.transcript = info.transcript;
   if (info.pid && (st.owner === undefined || woke)) {
+    // Hooks can run under Claude Code's shared background daemon, with no session
+    // process above them; finding nothing must not erase an owner the MCP server's
+    // join already established.
     const table = processTableSource();
-    next.owner = table ? findOwner(info.pid, table) : null;
+    const found = table ? findOwner(info.pid, table) : null;
+    if (found) next.owner = found;
+    else if (st.owner === undefined) next.owner = null;
   }
   pairState.set(key, next);
   if (woke) {
